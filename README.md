@@ -16,25 +16,6 @@ this, it would be simpler to just build it myself — first for my own
 sanity, and since the pain is shared across the team, hopefully it makes
 life a bit easier for my colleagues too.
 
-Modernizacja procesu wprowadzania danych kurier/ZPO (dział rozliczeń,
-Poczta Polska). Pełny kontekst decyzyjny — patrz [`CLAUDE.md`](./CLAUDE.md).
+Modernizacja procesu wprowadzania danych otrzymywanych w formie papierowej + zmiana przechowywania danych z "tabelki w excelu" -> na prostą DB.
 
-## Szybki start
-
-```bash
-uv sync --extra dev
-uv run pytest
-```
-
-Realne dane robocze (`.xlsx`/`.csv`) wrzucaj do `data/` — katalog jest w
-`.gitignore`, nic stąd nie trafi do repo.
-
-## Struktura
-
-```
-schema.sql                  # schemat SQLite
-src/zpo_tracker/importer.py # logika importu + walidacji (TDD)
-src/tests/                  # testy pytest
-demo/                       # prototypy UX (throwaway, nie produkcja)
-data/                       # (gitignored poza README.md) realne eksporty do pracy lokalnej
-```
+**<|WIP|>**
