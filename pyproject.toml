@@ -1,0 +1,18 @@
+[project]
+name = "zpo-tracker"
+version = "0.1.0"
+description = "Modernizacja procesu wprowadzania danych kurier/ZPO (Poczta Polska)"
+requires-python = ">=3.11"
+dependencies = [
+    "openpyxl>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,270 @@
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A1620; --canvas:#0E1F2C; --panel:#0F2130;
+    --line:rgba(111,220,236,0.14); --line-strong:#24445A;
+    --cyan:#6FDCEC; --cyan-dim:#3E8494; --amber:#F2A65A;
+    --text:#DCEEF3; --text-dim:#7B97A6; --danger:#E2685C; --success:#7FD8A0;
+    --gray-status:#3A4C58;
+    --font-display:'Space Grotesk',sans-serif; --font-mono:'IBM Plex Mono',monospace;
+  }
+  *{ box-sizing:border-box; }
+  .wrap{
+    background:var(--bg); color:var(--text); font-family:var(--font-display);
+    padding:20px; border-radius:10px;
+    background-image:linear-gradient(var(--line) 1px, transparent 1px),
+                      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size:24px 24px;
+  }
+  .head{ display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:14px; flex-wrap:wrap; }
+  .head h1{ font-size:19px; font-weight:700; margin:0 0 4px 0; }
+  .head h1 .tag{
+    font-family:var(--font-mono); font-size:11px; color:var(--cyan);
+    border:1px solid var(--cyan-dim); border-radius:4px; padding:2px 6px; margin-right:8px;
+  }
+  .head p{ margin:0; font-size:12.5px; color:var(--text-dim); max-width:520px; line-height:1.5; }
+  .headctl{ display:flex; flex-direction:column; align-items:flex-end; gap:8px; }
+  .summary{ font-family:var(--font-mono); font-size:11px; color:var(--text-dim); text-align:right; }
+  .summary b{ color:var(--text); }
+  .swapall{
+    background:none; border:1px solid var(--amber); color:var(--amber);
+    border-radius:6px; padding:7px 12px; cursor:pointer; font-family:var(--font-mono); font-size:12px;
+    white-space:nowrap;
+  }
+  .swapall:hover{ background:rgba(242,166,90,0.1); }
+
+  .panel{ background:var(--panel); border:1px solid var(--line-strong); border-radius:8px; overflow:hidden; }
+  .tablewrap{ max-height:520px; overflow-y:auto; }
+  table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  thead th{
+    position:sticky; top:0; background:#0C1E2B; z-index:1;
+    font-family:var(--font-mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--cyan-dim); text-align:left; padding:9px 8px; border-bottom:1px solid var(--line-strong);
+  }
+  tbody td{ padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  tbody tr:hover{ background:rgba(111,220,236,0.03); }
+  .statuscell{ width:6px; padding:0 !important; }
+  .statusbar{ width:4px; height:100%; min-height:34px; background:var(--gray-status); transition:background .25s; }
+  .statusbar.green{ background:var(--success); }
+  .statusbar.orange{ background:var(--amber); }
+  .rownum{ font-family:var(--font-mono); color:var(--text-dim); font-size:11px; width:26px; }
+  input.cell{
+    width:100%; background:var(--canvas); border:1px solid var(--line-strong); border-radius:5px;
+    color:var(--text); font-family:var(--font-display); font-size:12.5px; padding:5px 7px; outline:none;
+  }
+  input.cell:focus{ border-color:var(--cyan-dim); }
+  input.cell.inne{ color:var(--text-dim); }
+  .swapbtn{
+    background:none; border:1px solid var(--line-strong); color:var(--text-dim);
+    border-radius:5px; padding:5px 9px; cursor:pointer; font-family:var(--font-mono); font-size:12px;
+  }
+  .swapbtn:hover{ border-color:var(--cyan); color:var(--cyan); }
+  .badges{ display:flex; gap:4px; flex-wrap:wrap; margin-top:3px; }
+  .badge{
+    font-family:var(--font-mono); font-size:9.5px; border-radius:3px; padding:1px 5px; display:inline-block;
+  }
+  .badge.merge{ color:var(--cyan-dim); border:1px solid var(--cyan-dim); }
+  .badge.warn{ color:var(--amber); border:1px solid var(--amber); }
+
+  .footer{ display:flex; justify-content:space-between; align-items:center; margin-top:12px; }
+  .legend{ display:flex; gap:14px; font-family:var(--font-mono); font-size:10.5px; color:var(--text-dim); }
+  .legend span{ display:inline-flex; align-items:center; gap:5px; }
+  .dot{ width:8px; height:8px; border-radius:2px; display:inline-block; }
+  .dot.gray{ background:var(--gray-status); } .dot.green{ background:var(--success); } .dot.orange{ background:var(--amber); }
+  .iconbtn{
+    background:none; border:1px solid var(--line-strong); color:var(--text-dim); border-radius:5px;
+    padding:5px 10px; cursor:pointer; font-family:var(--font-mono); font-size:11px;
+  }
+  .iconbtn:hover{ border-color:var(--cyan-dim); color:var(--cyan); }
+  .iconbtn.copied{ border-color:var(--success); color:var(--success); }
+</style>
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1><span class="tag">#REVIEW</span>Kurierzy — imię / nazwisko</h1>
+      <p>Domyślnie pierwszy człon wpisu trafia do kolumny "Imię", drugi do "Nazwisko" — to tylko zgadywanka po kolejności w oryginalnym stringu, nie faktyczny podział. Popraw pojedynczy wiersz przyciskiem [&lt;=&gt;] albo wszystkie naraz. Pasek obok numeru: szary = niesprawdzone, zielony = przejrzane bez zmian, pomarańczowy = zmienione.</p>
+    </div>
+    <div class="headctl">
+      <div class="summary" id="summary"></div>
+      <button class="swapall" id="swapAllBtn">[&lt;=&gt;] zamień wszystkich</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="statuscell"></th>
+            <th>#</th>
+            <th>Imię</th>
+            <th>Nazwisko</th>
+            <th>Drugie imię / inne</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="legend">
+      <span><span class="dot gray"></span>niesprawdzone</span>
+      <span><span class="dot green"></span>przejrzane</span>
+      <span><span class="dot orange"></span>zmienione</span>
+    </div>
+    <button class="iconbtn" id="copyBtn">kopiuj JSON</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  // prawdziwa lista kurierów z pliku źródłowego (70 surowych wpisów)
+  const raw = ["Barbachowski Piotr","Bashkat Vladyslav","Bańkowski Mateusz","Białek Wojciech",
+    "Borowski Robert","Burchard Artur","Cacko Michał","Celejewski Piotr","Choromański Marcin",
+    "Chumak Ihor","Czwarno Roman","Demianets Oleksandr","Domaszewski Adam","Feliszek Piotr",
+    "Fijałkowski Konrad","Franczyk Mariusz","Gago Marcin","Godlewski Adam","Grabik Adam",
+    "Gulych Ruslan","Góralski Marcin","Hućko Jan","Ishchuk Dmytro","Jedynak Kamil","Kania Dariusz",
+    "Kiszko Sebastian","Kononiuk Katarzyna","Kot Katarzyna","Kowalczyk Artur","Kowalczyk Jacek",
+    "Kołodziejek Piotr","Kudelski Mariusz","Kuzmin Dmytro","Leleka Konstantyn","Lohvinenko Kyrylo",
+    "Machaj Mateusz ","Maciejewski Jacek","Malinowski Paweł","Malinowski Robert","Marciniak Jacek",
+    "Matusiewicz Adrian","Matusiewicz Artur","Michalak Maciej","Michalak Maciej ","Mitrus Dorota",
+    "Niegowski Paweł","Nitecki Bogdan","Nowak Jarosław","Ochnio Andrzej","Ochnio Witold",
+    "Oliinyk Dmytro","Olędzki Marek","Onaszkiewicz Rafał","Osada Kacper","Pietrzyk Łukasz",
+    "Popielarczyk Robert","Rasiński Janusz","Sidło Liliana","Slipetskyi Vitalii",
+    "Stelmashchuk Oleksii","Troitskyi Oleksandr","Wodyczko Michał","Wołczuk Rafal","Wołczuk Rafał",
+    "Wróbel Bartosz","Zdun Piotr","Zdun Piotr ","Znaniecki Rafał","Łupinowicz Rafał","Ścieżyński Albert"];
+
+  function stripDiacritics(s){
+    const map = {'ą':'a','ć':'c','ę':'e','ł':'l','ń':'n','ó':'o','ś':'s','ź':'z','ż':'z'};
+    return s.toLowerCase().split('').map(ch => map[ch] || ch).join('');
+  }
+  const wsKey = s => s.trim().replace(/\s+/g, ' ');
+  const fuzzyKey = s => stripDiacritics(wsKey(s));
+
+  // bezpieczne scalanie: tylko biale znaki (identyczne po trim+collapse)
+  const groups = new Map();
+  raw.forEach(r => {
+    const k = wsKey(r);
+    if (!groups.has(k)) groups.set(k, {canonical:k, variants:[]});
+    groups.get(k).variants.push(r);
+  });
+
+  let rows = Array.from(groups.values()).map((g, i) => {
+    const tokens = g.canonical.split(' ');
+    return {
+      id: i,
+      imie: tokens[0] || '',
+      nazwisko: tokens.slice(1, 2).join(' ') || '',
+      inne: tokens.slice(2).join(' ') || '',
+      status: 'gray',
+      changed: false,
+      mergedCount: g.variants.length,
+      fuzzy: fuzzyKey(g.canonical),
+    };
+  });
+
+  // miekkie ostrzezenie: rozne wiersze, ten sam klucz bez diakrytykow (np. Rafal/Rafał)
+  rows.forEach(r => {
+    const sameFuzzy = rows.filter(o => o.id !== r.id && o.fuzzy === r.fuzzy);
+    r.similarTo = sameFuzzy.length ? sameFuzzy.map(o => o.id) : [];
+  });
+
+  const tbody = document.getElementById('tbody');
+  const summaryEl = document.getElementById('summary');
+
+  function updateSummary(){
+    const total = rows.length;
+    const green = rows.filter(r => r.status === 'green').length;
+    const orange = rows.filter(r => r.status === 'orange').length;
+    const gray = total - green - orange;
+    summaryEl.innerHTML = `<b>${total}</b> kurierów &nbsp;·&nbsp; ${gray} do sprawdzenia &nbsp;·&nbsp; ${green} ok &nbsp;·&nbsp; <b>${orange}</b> zmienionych`;
+  }
+
+  function rowNumberLabel(idx){ return String(idx + 1).padStart(2, '0'); }
+
+  function render(){
+    tbody.innerHTML = rows.map((r, idx) => {
+      const badges = [];
+      if (r.mergedCount > 1) badges.push(`<span class="badge merge">połączono ${r.mergedCount} wariantów spacji</span>`);
+      if (r.similarTo.length) badges.push(`<span class="badge warn">⚠ podobne do wiersz ${r.similarTo.map(i => rowNumberLabel(rows.findIndex(x=>x.id===i))).join(', ')}</span>`);
+      return `
+      <tr data-row="${r.id}">
+        <td class="statuscell"><div class="statusbar ${r.status !== 'gray' ? r.status : ''}"></div></td>
+        <td class="rownum">${rowNumberLabel(idx)}</td>
+        <td><input class="cell" data-field="imie" data-row="${r.id}" value="${r.imie.replace(/"/g,'&quot;')}"></td>
+        <td><input class="cell" data-field="nazwisko" data-row="${r.id}" value="${r.nazwisko.replace(/"/g,'&quot;')}"></td>
+        <td><input class="cell inne" data-field="inne" data-row="${r.id}" value="${r.inne.replace(/"/g,'&quot;')}" placeholder="—"></td>
+        <td>
+          <button class="swapbtn" data-swap="${r.id}">[&lt;=&gt;]</button>
+          <div class="badges">${badges.join('')}</div>
+        </td>
+      </tr>`;
+    }).join('');
+    attach();
+    updateSummary();
+  }
+
+  function markChanged(row){
+    row.changed = true;
+    row.status = 'orange';
+  }
+
+  function attach(){
+    document.querySelectorAll('input.cell').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const row = rows.find(r => r.id == inp.dataset.row);
+        row[inp.dataset.field] = inp.value;
+        markChanged(row);
+        const bar = inp.closest('tr').querySelector('.statusbar');
+        bar.classList.remove('green'); bar.classList.add('orange');
+        updateSummary();
+      });
+    });
+
+    document.querySelectorAll('tr[data-row]').forEach(tr => {
+      tr.addEventListener('focusout', (e) => {
+        if (tr.contains(e.relatedTarget)) return; // fokus wciąż w tym wierszu
+        const row = rows.find(r => r.id == tr.dataset.row);
+        if (row.status === 'gray') {
+          row.status = 'green';
+          tr.querySelector('.statusbar').classList.add('green');
+          updateSummary();
+        }
+      });
+    });
+
+    document.querySelectorAll('[data-swap]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = rows.find(r => r.id == btn.dataset.swap);
+        [row.imie, row.nazwisko] = [row.nazwisko, row.imie];
+        markChanged(row);
+        render();
+      });
+    });
+  }
+
+  document.getElementById('swapAllBtn').addEventListener('click', () => {
+    rows.forEach(row => {
+      [row.imie, row.nazwisko] = [row.nazwisko, row.imie];
+      markChanged(row);
+    });
+    render();
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', () => {
+    const out = rows.map(r => ({imie:r.imie, nazwisko:r.nazwisko, inne:r.inne || undefined}));
+    navigator.clipboard.writeText(JSON.stringify(out, null, 2)).then(() => {
+      const btn = document.getElementById('copyBtn');
+      const old = btn.textContent;
+      btn.textContent = 'skopiowano ✓'; btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = old; btn.classList.remove('copied'); }, 1400);
+    });
+  });
+
+  render();
+})();
+</script>

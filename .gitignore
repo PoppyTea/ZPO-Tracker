@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+*.db
+.pytest_cache/
+build/
+dist/
+*.spec
+
+# dev config files
+.zed/*
+.claude/*
+*.project
+
+# realne dane firmowe - nigdy nie commitować (cały katalog poza tymi plikami,
+# rekurencyjnie - łapie też podkatalogi typu data/real-data-samples/)
+data/*
+!data/README.md
+!data/CLAUDE.md
+!data/AGENTS.md
+
+# Bazy danych (pliki wygenerowane, nie schemat) - nie commitować
+*.db-journal
