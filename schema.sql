@@ -27,14 +27,23 @@ CREATE TABLE wykonawcy (
     nazwa           TEXT NOT NULL UNIQUE          -- Koli, Poczta Polska, Translist, Rekus
 );
 
+-- Firma ZPO = sieć hostująca zewnętrzny punkt odbioru (Żabka, Duży Ben,
+-- Groszek, Delikatesy Centrum, ABC...). Osobna rola od wykonawcy (ten
+-- obsługuje trasę kurierską) - łatwo je pomylić, patrz normalization-v2.md.
+CREATE TABLE firmy_zpo (
+    id              INTEGER PRIMARY KEY,
+    nazwa           TEXT NOT NULL UNIQUE
+);
+
 -- Punkt = adres, pod który kurier jedzie odebrać przesyłki.
 -- Może to być zwykły nadawca (pni_zpo = NULL) albo zewnętrzny punkt
--- odbioru typu Żabka/Groszek/Duży Ben/ABC (pni_zpo wypełnione).
+-- odbioru typu Żabka/Groszek/Duży Ben/ABC (pni_zpo + firma_zpo_id wypełnione).
 CREATE TABLE punkty (
     id              INTEGER PRIMARY KEY,
     nadawca         TEXT NOT NULL,                -- np. "Żabka", "ZUS", "PKO"
     adres           TEXT NOT NULL,                -- adres kanoniczny, zapisany raz
-    pni_zpo         TEXT UNIQUE                   -- NULL dla zwykłych nadawców
+    pni_zpo         TEXT UNIQUE,                  -- NULL dla zwykłych nadawców
+    firma_zpo_id    INTEGER REFERENCES firmy_zpo(id)  -- wypełnione tylko gdy pni_zpo != NULL
 );
 
 CREATE INDEX idx_punkty_nadawca ON punkty(nadawca);
@@ -58,6 +67,11 @@ CREATE TABLE transakcje (
     ilosc_automaty          INTEGER,
     ilosc_kurier48          INTEGER,
     ilosc_niezrealizowane   INTEGER,
+
+    -- komentarz do bloku rejonu na blankiecie (np. gdy rejon nieznany
+    -- w momencie wpisywania) - patrz ux-ui.md, ta sama wartość dla
+    -- wszystkich wierszy jednego bloku REJON w formularzu
+    komentarz               TEXT,
 
     -- twarda ochrona przed literalnym duplikatem tego samego wiersza
     UNIQUE(data, kurier_id, punkt_id)

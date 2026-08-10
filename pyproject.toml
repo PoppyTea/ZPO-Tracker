@@ -5,7 +5,11 @@ description = "Modernizacja procesu wprowadzania danych kurier/ZPO (Poczta Polsk
 requires-python = ">=3.11"
 dependencies = [
     "openpyxl>=3.1",
+    "pydantic>=2.0",
 ]
+
+[project.scripts]
+zpo-tracker = "zpo_tracker.gui.app:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

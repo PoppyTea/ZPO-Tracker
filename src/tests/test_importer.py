@@ -9,6 +9,7 @@ from zpo_tracker.importer import (
     parse_quantity,
     get_or_create_kurier,
     get_or_create_punkt,
+    get_or_create_firma_zpo,
     import_row,
 )
 
@@ -79,6 +80,38 @@ def test_get_or_create_punkt_warns_on_pni_with_different_address(conn):
     assert pid1 == pid2  # to nadal ten sam punkt referencyjny (kanoniczny adres)
     assert len(w2) == 1
     assert "228648" in w2[0]
+
+
+def test_get_or_create_firma_zpo_creates_new(conn):
+    fid = get_or_create_firma_zpo(conn, "Żabka")
+    assert fid is not None
+    row = conn.execute("SELECT nazwa FROM firmy_zpo WHERE id=?", (fid,)).fetchone()
+    assert row[0] == "Żabka"
+
+
+def test_get_or_create_firma_zpo_reuses_existing(conn):
+    fid1 = get_or_create_firma_zpo(conn, "Żabka")
+    fid2 = get_or_create_firma_zpo(conn, "Żabka")
+    assert fid1 == fid2
+
+
+def test_get_or_create_punkt_links_firma_zpo_when_pni_present(conn):
+    # nadawca punktu z PNI to nazwa sieci (Żabka/Duży Ben/Groszek/...) -
+    # ma trafić do słownika firmy_zpo, nie zostać luźnym stringiem
+    pid, _ = get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
+    row = conn.execute("SELECT firma_zpo_id FROM punkty WHERE id=?", (pid,)).fetchone()
+    assert row[0] is not None
+    firma = conn.execute(
+        "SELECT nazwa FROM firmy_zpo WHERE id=?", (row[0],)
+    ).fetchone()
+    assert firma[0] == "Żabka"
+
+
+def test_get_or_create_punkt_no_firma_zpo_for_regular_client(conn):
+    # zwykły nadawca (ZUS, PKO...) bez PNI nie ma firmy ZPO
+    pid, _ = get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    row = conn.execute("SELECT firma_zpo_id FROM punkty WHERE id=?", (pid,)).fetchone()
+    assert row[0] is None
 
 
 def test_get_or_create_punkt_regular_client_deduped_by_nadawca_and_adres(conn):

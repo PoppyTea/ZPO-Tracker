@@ -54,15 +54,28 @@ def get_or_create_wykonawca(conn, nazwa):
     return cur.lastrowid
 
 
+def get_or_create_firma_zpo(conn, nazwa):
+    if not nazwa:
+        return None
+    row = conn.execute("SELECT id FROM firmy_zpo WHERE nazwa = ?", (nazwa,)).fetchone()
+    if row:
+        return row[0]
+    cur = conn.execute("INSERT INTO firmy_zpo (nazwa) VALUES (?)", (nazwa,))
+    return cur.lastrowid
+
+
 def get_or_create_punkt(conn, nadawca, adres, pni_zpo):
     """
     Zwraca (punkt_id, lista_ostrzezen).
     Dla punktow z PNI: PNI jest kluczem, adres kanoniczny to ten zapisany
     przy pierwszym utworzeniu punktu - kolejne rozne adresy tylko ostrzegaja.
+    Nadawca punktu z PNI to nazwa sieci (Żabka/Duży Ben/Groszek/...) i trafia
+    dodatkowo do słownika firmy_zpo.
     Dla zwyklych klientow (PNI=None): deduplikacja po (nadawca, adres).
     """
     warnings = []
     if pni_zpo:
+        firma_zpo_id = get_or_create_firma_zpo(conn, nadawca)
         row = conn.execute(
             "SELECT id, adres FROM punkty WHERE pni_zpo = ?", (pni_zpo,)
         ).fetchone()
@@ -75,8 +88,8 @@ def get_or_create_punkt(conn, nadawca, adres, pni_zpo):
                 )
             return punkt_id, warnings
         cur = conn.execute(
-            "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES (?, ?, ?)",
-            (nadawca, adres, pni_zpo),
+            "INSERT INTO punkty (nadawca, adres, pni_zpo, firma_zpo_id) VALUES (?, ?, ?, ?)",
+            (nadawca, adres, pni_zpo, firma_zpo_id),
         )
         return cur.lastrowid, warnings
     else:
