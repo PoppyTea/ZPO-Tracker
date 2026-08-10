@@ -38,6 +38,14 @@ class WierszImportu(BaseModel):
     ilosc_kurier48: Optional[int] = Field(default=None, ge=0)
     ilosc_niezrealizowane: Optional[int] = Field(default=None, ge=0)
 
+    @field_validator("data", mode="before")
+    @classmethod
+    def _konwertuj_date(cls, v):
+        # xlsx (openpyxl) daje datetime.datetime, nie datetime.date
+        if hasattr(v, "date") and not isinstance(v, str):
+            return v.date()
+        return v
+
     @field_validator(*_POLA_ILOSCI, mode="before")
     @classmethod
     def _parsuj_ilosc(cls, v):
@@ -50,6 +58,17 @@ class WierszImportu(BaseModel):
             return None
         v = str(v).strip()
         return v or None
+
+    @field_validator("kurier", "nadawca", "adres", mode="before")
+    @classmethod
+    def _normalizuj_biale_znaki(cls, v):
+        # bezpieczne, automatyczne scalanie (tier 1 normalizacji, patrz
+        # normalizacja.py) - musi się dziać na wejściu, nie tylko przy
+        # wykrywaniu literówek, inaczej "Michalak Maciej " zostaje osobnym
+        # kurierem w bazie
+        if isinstance(v, str):
+            return klucz_bialych_znakow(v)
+        return v
 
 
 class WierszBlankietu(BaseModel):

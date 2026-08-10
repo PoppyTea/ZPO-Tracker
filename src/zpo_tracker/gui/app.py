@@ -9,6 +9,7 @@ from tkinter import ttk
 from zpo_tracker import repo
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
+from zpo_tracker.gui.zakladka_import_export import ZakladkaImportExport
 
 DOMYSLNA_BAZA = "zpo_tracker.db"
 
@@ -32,6 +33,11 @@ class Aplikacja(tk.Tk):
             self.notebook, self.conn, on_zapisano=self.zakladka_przeglad.odswiez
         )
         self.notebook.add(self.zakladka_wprowadzanie, text="Wprowadzanie")
+
+        self.zakladka_import_export = ZakladkaImportExport(
+            self.notebook, self.conn, on_zaimportowano=self.zakladka_przeglad.odswiez
+        )
+        self.notebook.add(self.zakladka_import_export, text="Import / Export")
 
     def destroy(self):
         self.conn.close()
