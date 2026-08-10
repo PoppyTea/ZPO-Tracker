@@ -15,12 +15,29 @@ from tkinter import filedialog, ttk
 import openpyxl
 
 from zpo_tracker import eksport
+from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
     zaimportuj,
     znajdz_ostrzezenia_podobienstwa_kurierow,
     znajdz_propozycje_scalenia_kurierow,
     zwaliduj_wiersze,
 )
+
+
+def _pole_z_roznicami(parent, segmenty):
+    """Text tylko-do-odczytu z fragmentami różniącymi się pogrubionym,
+    kolorowym tekstem (GH #2) - segmenty z gui.roznice.segmenty_roznicy."""
+    szerokosc = max(sum(len(t) for t, _ in segmenty), 4)
+    tlo = ttk.Style().lookup("TFrame", "background") or "SystemButtonFace"
+    pole = tk.Text(
+        parent, height=1, width=szerokosc, wrap="none", borderwidth=0,
+        highlightthickness=0, background=tlo,
+    )
+    pole.tag_configure("rozni", foreground="#c0392b", font=("TkDefaultFont", 10, "bold"))
+    for tekst, rozni in segmenty:
+        pole.insert("end", tekst, "rozni" if rozni else ())
+    pole.configure(state="disabled")
+    return pole
 
 
 def _wczytaj_surowe_wiersze(sciezka):
@@ -43,6 +60,7 @@ class DialogKorektyImportu(tk.Toplevel):
         self.ostrzezenia = ostrzezenia
         self.on_gotowe = on_gotowe
         self.zmienne_propozycji = []
+        self.mapowanie_z_ostrzezen = {}
 
         ttk.Label(
             self,
@@ -78,25 +96,50 @@ class DialogKorektyImportu(tk.Toplevel):
         if ostrzezenia:
             ramka_o = ttk.Frame(notebook)
             notebook.add(ramka_o, text=f"Różnice w zapisie ({len(ostrzezenia)})")
-            tekst = tk.Text(ramka_o, wrap="word")
-            tekst.pack(fill="both", expand=True)
-            tekst.insert(
-                "end",
-                "Te pary różnią się tylko wielkością liter/polskimi znakami - "
-                "NIE scalono automatycznie, wymaga ręcznej decyzji "
-                "(zakładka Słowniki):\n\n",
-            )
+            ttk.Label(
+                ramka_o,
+                text="Różnią się tylko wielkością liter/polskimi znakami - NIE scalono "
+                     "automatycznie. Kliknij, która forma ma zostać (druga zostanie do "
+                     "niej scalona), albo zostaw obie i zdecyduj później w Słownikach.",
+                wraplength=580, justify="left",
+            ).pack(anchor="w", padx=6, pady=6)
             for o in ostrzezenia:
-                tekst.insert("end", f"• „{o.a}” / „{o.b}”\n")
-            tekst.configure(state="disabled")
+                self._dodaj_wiersz_ostrzezenia(ramka_o, o)
 
         pasek = ttk.Frame(self)
         pasek.pack(fill="x", padx=10, pady=10)
         ttk.Button(pasek, text="Zatwierdź import", command=self._zatwierdz).pack(side="right")
         ttk.Button(pasek, text="Anuluj", command=self.destroy).pack(side="right", padx=6)
 
+    def _dodaj_wiersz_ostrzezenia(self, parent, ostrzezenie):
+        """Jeden wiersz konfliktu (GH #2 podświetlenie różnic + GH #1 wybór
+        zwycięzcy kliknięciem, zamiast zmuszania do wyjścia do Słowników)."""
+        wiersz = ttk.Frame(parent)
+        wiersz.pack(fill="x", padx=6, pady=3)
+
+        seg_a, seg_b = segmenty_roznicy(ostrzezenie.a, ostrzezenie.b)
+        etykieta_wyniku = ttk.Label(wiersz, text="", foreground="#1e7a3a")
+
+        def wybierz(kanoniczny, odrzucony):
+            self.mapowanie_z_ostrzezen[odrzucony] = kanoniczny
+            self.mapowanie_z_ostrzezen.pop(kanoniczny, None)
+            etykieta_wyniku.configure(text=f"→ zostaje „{kanoniczny}”")
+
+        ttk.Button(
+            wiersz, text="◄ zostaw", width=8,
+            command=lambda: wybierz(ostrzezenie.a, ostrzezenie.b),
+        ).pack(side="left")
+        _pole_z_roznicami(wiersz, seg_a).pack(side="left", padx=(4, 10))
+        _pole_z_roznicami(wiersz, seg_b).pack(side="left", padx=(0, 4))
+        ttk.Button(
+            wiersz, text="zostaw ►", width=8,
+            command=lambda: wybierz(ostrzezenie.b, ostrzezenie.a),
+        ).pack(side="left")
+        etykieta_wyniku.pack(side="left", padx=10)
+
     def _zatwierdz(self):
         mapowanie = {p["z"]: p["na"] for p, var in self.zmienne_propozycji if var.get()}
+        mapowanie.update(self.mapowanie_z_ostrzezen)
         wynik = zaimportuj(self.conn, self.zwalidowane, mapowanie_scalen=mapowanie)
         self.destroy()
         self.on_gotowe(wynik)
