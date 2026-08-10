@@ -60,8 +60,11 @@ wartości z pól i wywołanie warstwy logiki:
   `models.py`/pydantic; GUI wyświetla błędy walidacji, nie decyduje o nich.
 - `widget_tabela.py` — wspólna tabela z sortowaniem i Ctrl+scroll zoom.
 - `widget_autocomplete.py` — dropdown + klawiatura (bez ghost textu).
-  **Niewpięty do formularza i niezweryfikowany nawet razem odpalony** —
-  patrz Verification.
+  Zweryfikowany w izolacji (zrzuty ekranu: dropdown renderuje się
+  poprawnie, dopasowanie rozmyte działa, Tab/strzałki/zatwierdzanie
+  działają) — patrz Verification. **Wciąż NIEWPIĘTY do
+  `zakladka_wprowadzanie.py`** — integracja z prawdziwym, wielowierszowym
+  formularzem to osobny krok.
 
 ## Work Guidance
 
@@ -76,27 +79,31 @@ wartości z pól i wywołanie warstwy logiki:
 ## Verification
 
 ```
-uv sync --extra dev
-uv run pytest
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r ../requirements-dev.txt && pip install -e ..
+pytest
 ```
 
 Uruchamiać z katalogu głównego repo (`testpaths` w root `pyproject.toml`
-wskazuje na `src/tests`).
+wskazuje na `src/tests`). `uv sync --extra dev && uv run pytest` też
+działa, ale patrz zastrzeżenie niżej.
 
-**Stan środowiska graficznego (ważne, przeczytać przed dotykaniem `gui/`):**
-w trakcie budowy MVP środowisko X11 tej maszyny zaczęło fatalnie ubijać
-proces (`SIGABRT`) przy tworzeniu JAKIEGOKOLWIEK widgetu Tk — potwierdzone
-nawet dla zwykłego `tk.Entry` na świeżym `Xvfb`, więc to nie błąd w kodzie
-projektu. `test_gui_smoke.py` sonduje display w osobnym podprocesie i
-pomija się czysto, gdy środowisko jest w tym stanie — dwa pominięcia w
-wyniku testów to ten mechanizm, nie usterka. Jeśli display działa,
-`test_gui_smoke.py` powinien realnie odpalić okno — jeśli nadal pomija,
-środowisko wciąż jest niesprawne.
+**Stan środowiska graficznego:** `uv`-owy Python na tej konkretnej maszynie
+ma reprodukowalny fatalny `SIGABRT` przy tworzeniu JAKIEGOKOLWIEK widgetu
+Tk (nawet gołego `tk.Entry`) — zdiagnozowane jako problem konkretnej
+binarki python-build-standalone, NIE monitora/DPMS/sesji X11 ani kodu
+projektu (pełna diagnoza: `../docs/environment.md`). Systemowy Python
+(przez `venv`+`pip`, patrz wyżej) nie ma tego problemu. `test_gui_smoke.py`
+sonduje display w osobnym podprocesie i pomija się czysto, jeśli trafi na
+tę wadliwą binarkę — dwa pominięcia pod `uv run pytest` to ten mechanizm,
+nie usterka; pod `pytest` z `venv`+`pip` te same testy realnie się odpalają.
 
-`widget_autocomplete.py` nie został odpalony ani razu (nawet raz
-zainstancjonowany) — zweryfikować i wpiąć do `zakladka_wprowadzanie.py`
-jako pierwszy krok, gdy display wróci do działania, zamiast dowierzać
-kodowi napisanemu w ciemno.
+`widget_autocomplete.py` zweryfikowany w izolacji przez systemowy Python:
+dropdown renderuje się poprawnie, dopasowanie rozmyte i klawiatura działają
+zgodnie z projektem. Integracja z `zakladka_wprowadzanie.py` (podpięcie
+do pól nadawca/adres/kurier, źródło kandydatów z `repo.pobierz_punkty`/
+`pobierz_slownik`) to następny krok — nie zrobiona jeszcze, bo to
+realna zmiana w już działającym, przetestowanym formularzu.
 
 Build PyInstaller: proxy-build na Linuksie sprawdzony (pakuje się bez
 błędów importu `pydantic_core`, dochodzi do tworzenia okna Tk) — realny

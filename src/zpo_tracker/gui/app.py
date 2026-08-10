@@ -30,17 +30,25 @@ class Aplikacja(tk.Tk):
         self.zakladka_przeglad = ZakladkaPrzeglad(self.notebook, self.conn)
         self.notebook.add(self.zakladka_przeglad, text="Przeglądanie")
 
+        self.zakladka_slowniki = ZakladkaSlowniki(self.notebook, self.conn)
+
+        # dane wchodzą do bazy w kilku miejscach (formularz, import) i
+        # wpływają na wszystkie zakładki, które je pokazują - jeden wspólny
+        # callback zamiast osobno pamiętać, co trzeba odświeżyć gdzie
+        def odswiez_po_zmianie():
+            self.zakladka_przeglad.odswiez()
+            self.zakladka_slowniki.odswiez_wszystko()
+
         self.zakladka_wprowadzanie = ZakladkaWprowadzanie(
-            self.notebook, self.conn, on_zapisano=self.zakladka_przeglad.odswiez
+            self.notebook, self.conn, on_zapisano=odswiez_po_zmianie
         )
         self.notebook.add(self.zakladka_wprowadzanie, text="Wprowadzanie")
 
         self.zakladka_import_export = ZakladkaImportExport(
-            self.notebook, self.conn, on_zaimportowano=self.zakladka_przeglad.odswiez
+            self.notebook, self.conn, on_zaimportowano=odswiez_po_zmianie
         )
         self.notebook.add(self.zakladka_import_export, text="Import / Export")
 
-        self.zakladka_slowniki = ZakladkaSlowniki(self.notebook, self.conn)
         self.notebook.add(self.zakladka_slowniki, text="Słowniki")
 
     def destroy(self):

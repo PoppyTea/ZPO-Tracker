@@ -56,13 +56,21 @@ this file alone.
 ## Verification
 
 ```
-uv sync --extra dev
-uv run pytest
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt && pip install -e .
+pytest
 ```
 
-89/89 tests currently pass (2 GUI smoke tests skip if no display is
-available — see `src/AGENTS.md`), verified against a real 1294-row slice
-of source data (both import and export round-trip).
+`uv sync --extra dev && uv run pytest` still works too (see
+`docs/environment.md` for why pip is now the documented default).
+
+91/91 tests currently pass under the pip/system-Python setup above
+(verified against a real 1294-row slice of source data, both import and
+export round-trip). **On this specific dev machine**, running the same
+suite via `uv run pytest` shows 89/89 with 2 GUI smoke tests skipped —
+uv's managed Python has a reproducible tkinter/X11 fault here (see
+`docs/environment.md`), unrelated to project code. Don't read those 2
+skips as a regression if you see them.
 
 ---
 

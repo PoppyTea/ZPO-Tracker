@@ -24,8 +24,9 @@ chronologicznie w obrębie grupy.
       kursorem; nie zaimplementowane z powodu awarii środowiska
       graficznego w trakcie budowy MVP (patrz `../src/AGENTS.md`)
 - [ ] **Wpięcie `widget_autocomplete.py` do formularza wprowadzania** —
-      widget istnieje, ale nie jest podłączony do żadnego pola i nie
-      został odpalony ani razu; zweryfikować pierwsze, gdy display wróci
+      widget sam w sobie już zweryfikowany wizualnie w izolacji (dropdown,
+      dopasowanie rozmyte, klawiatura - wszystko działa), ale nie jest
+      jeszcze podłączony do żadnego pola w `zakladka_wprowadzanie.py`
 - [ ] Doprecyzowanie dokładnej hierarchii przynależności encji (kurier/
       rejon/wykonawca/punkt) na wypadek pełnej normalizacji v2
 

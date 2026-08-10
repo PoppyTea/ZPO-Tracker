@@ -21,10 +21,22 @@ Modernizacja procesu wprowadzania danych otrzymywanych w formie papierowej + zmi
 ## Szybki start
 
 ```bash
-uv sync --extra dev
-uv run pytest
-uv run zpo-tracker
+python -m venv .venv
+# Linux/Mac:
+source .venv/bin/activate
+# Windows:
+.venv\Scripts\activate
+
+pip install -r requirements-dev.txt
+pip install -e .
+pytest
+zpo-tracker
 ```
+
+(Historycznie środowisko było zarządzane przez `uv` — `uv.lock`/`pyproject.toml`
+wciąż działają, `uv sync --extra dev && uv run pytest` też zadziała, ale
+`requirements*.txt` to teraz podstawowa, udokumentowana ścieżka, dopasowana
+do środowiska na Windows w pracy.)
 
 ## Struktura
 

@@ -154,20 +154,19 @@ class ZakladkaSlowniki(ttk.Frame):
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True)
 
-        notebook.add(
+        self._podzakladki = [
             PodzakladkaProstegoSlownika(notebook, conn, "kurierzy", "Kurier", obsluguje_scalanie=True),
-            text="Kurierzy",
-        )
-        notebook.add(PodzakladkaPunktowZpo(notebook, conn), text="Punkty ZPO")
-        notebook.add(
+            PodzakladkaPunktowZpo(notebook, conn),
             PodzakladkaProstegoSlownika(notebook, conn, "wykonawcy", "Wykonawca"),
-            text="Wykonawcy",
-        )
-        notebook.add(
             PodzakladkaProstegoSlownika(notebook, conn, "rejony", "Rejon"),
-            text="Rejony",
-        )
-        notebook.add(
             PodzakladkaProstegoSlownika(notebook, conn, "firmy_zpo", "Firma ZPO"),
-            text="Firmy ZPO",
-        )
+        ]
+        for widget, etykieta in zip(
+            self._podzakladki,
+            ["Kurierzy", "Punkty ZPO", "Wykonawcy", "Rejony", "Firmy ZPO"],
+        ):
+            notebook.add(widget, text=etykieta)
+
+    def odswiez_wszystko(self):
+        for podzakladka in self._podzakladki:
+            podzakladka.odswiez()
