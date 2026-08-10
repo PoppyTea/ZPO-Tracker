@@ -25,6 +25,8 @@ na nieprzewidziane warianty zapisu niż normalizacja całego stringa naraz.
   rozdzielone od `wykonawcy`: to dwie różne role, łatwo je pomylić.
   Wykonawca = kto obsługuje trasę kurierską (Koli/Translist/Rekus/Poczta
   Polska). Firma ZPO = jaka sieć hostuje punkt odbioru.
+  **Wdrożone już w `schema.sql` (v1)** — nie czekało na resztę v2, bo nie
+  dotyka ryzykownego parsowania adresów/imion (patrz Status niżej).
 - `nadawcy` (ZUS, PKO, Kruk...) — **celowo NIE znormalizowane do osobnej
   tabeli jeszcze**. Użytkownik nie pamięta dokładnie, gdzie/jak te wpisy
   pojawiają się w realnym procesie wprowadzania, i podejrzewa, że mogą
@@ -49,9 +51,17 @@ na nieprzewidziane warianty zapisu niż normalizacja całego stringa naraz.
 
 ## Status
 
-`schema_v2_draft.sql` to draft, NIE zastępuje `schema.sql`. Wdrożenie
-wymaga: (1) potwierdzenia powyższych dwóch ryzyk, (2) przepisania
-`importer.py` pod nowy model (parsowanie adresu na miejscowość/ulicę/nr,
-parsowanie rejonu przez regex `^([A-Z]+)(\d+[A-Z]?)$`), (3) TDD dla całej
-nowej logiki parsowania — to nie jest już czysty DDL, tu błędy parsowania
-realnie namieszają w danych.
+`schema_v2_draft.sql` to wciąż draft dla części dotykającej adresów i
+podziału kuriera — NIE zastępuje `schema.sql`, i użytkownik świadomie
+odrzucił normalizację adresów jako zbyt ryzykowną przy budowie MVP
+(git jest siatką bezpieczeństwa do rerollu, gdyby to się zmieniło).
+
+**`firmy_zpo` jest wyjątkiem — już wdrożone w `schema.sql` (v1)**, razem
+z `punkty.firma_zpo_id` i `transakcje.komentarz` (osobna potrzeba, nie z
+tego dokumentu — patrz `ux-ui.md`, blok rejonu z nieznanym rejonem).
+Pozostała część v2 (adresy, `kurier`→`imie`/`nazwisko`) wymaga wciąż:
+(1) potwierdzenia dwóch ryzyk wyżej, (2) przepisania warstwy importu pod
+nowy model (parsowanie adresu na miejscowość/ulicę/nr, parsowanie rejonu
+przez regex `^([A-Z]+)(\d+[A-Z]?)$`), (3) TDD dla całej nowej logiki
+parsowania — to nie jest już czysty DDL, tu błędy parsowania realnie
+namieszają w danych.

@@ -18,4 +18,29 @@ life a bit easier for my colleagues too.
 
 Modernizacja procesu wprowadzania danych otrzymywanych w formie papierowej + zmiana przechowywania danych z "tabelki w excelu" -> na prostą DB.
 
-**<|WIP|>**
+## Szybki start
+
+```bash
+uv sync --extra dev
+uv run pytest
+uv run zpo-tracker
+```
+
+## Struktura
+
+```
+schema.sql                  # schemat SQLite (v1 + firmy_zpo)
+zpo_tracker.spec             # PyInstaller (budowa .exe TYLKO na Windows)
+src/zpo_tracker/
+    importer.py               # import wiersza .xlsx (TDD)
+    models.py                 # walidacja pydantic v2
+    normalizacja.py           # scalanie/dedup (białe znaki, literówki, diakrytyki)
+    repo.py                   # dostęp do danych, słowniki
+    import_orchestrator.py    # import partii + ekran korekty
+    eksport.py                # export do .xlsx (round-trip ze snapshotem)
+    podpowiedzi.py            # silnik podpowiedzi
+    gui/                      # aplikacja tkinter (przeglądanie/wprowadzanie/import-export/słowniki)
+src/tests/                  # testy pytest
+demo/                       # prototypy UX (throwaway, nie produkcja)
+data/                       # (gitignored poza README.md) realne eksporty do pracy lokalnej
+```

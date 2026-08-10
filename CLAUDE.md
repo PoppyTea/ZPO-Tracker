@@ -60,8 +60,9 @@ uv sync --extra dev
 uv run pytest
 ```
 
-14/14 tests currently pass (`src/tests/test_importer.py`), verified against a
-real 1294-row slice of source data.
+89/89 tests currently pass (2 GUI smoke tests skip if no display is
+available — see `src/AGENTS.md`), verified against a real 1294-row slice
+of source data (both import and export round-trip).
 
 ---
 
@@ -161,4 +162,5 @@ Default section order:
   `tech-decisions.md`, `environment.md`, `ux-ui.md`, `backlog.md`,
   `normalization-v2.md`, `reference-data-sources.md`
 - Root-owned project files: `README.md`, `schema.sql`, `schema_v2_draft.sql`,
-  `pyproject.toml`, `.gitignore`
+  `pyproject.toml`, `.gitignore`, `zpo_tracker.spec` (PyInstaller, must be
+  built on Windows — see `docs/environment.md`)

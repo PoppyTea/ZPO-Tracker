@@ -4,7 +4,7 @@ Referencja dla `CLAUDE.md`.
 
 ## Stack
 
-**Python + SQLite + openpyxl + tkinter + PyInstaller.**
+**Python + SQLite + openpyxl + pydantic v2 + tkinter + PyInstaller.**
 
 `openpyxl` czyta/pisze `.xlsx` bezpośrednio na poziomie formatu pliku, więc
 w ogóle nie obchodzi go czy na maszynie jest Excel, Calc, czy nic — kluczowe
@@ -13,6 +13,12 @@ w środowisku, gdzie lokalnie jest tylko OpenOffice/Calc.
 **Ważne:** źródłem prawdy do parsowania jest zawsze `.xlsx` przez `openpyxl`,
 NIE eksport do `.csv` — CSV wprowadza zanieczyszczenie typów (część liczb w
 kolumnach ilościowych eksportuje się jako string zamiast liczby).
+
+`pydantic v2` waliduje wyłącznie na granicach (wiersz importu, blok z
+formularza) — nie odwzorowuje tabel SQL 1:1, warstwa danych zostaje na
+czystym `sqlite3`, bez ORM. `pydantic-core` jest natywnym rozszerzeniem;
+sprawdzone (proxy-build PyInstallera na Linuksie), że pakuje się bez
+błędów — patrz `environment.md`.
 
 ## Odrzucone alternatywy i powody
 
