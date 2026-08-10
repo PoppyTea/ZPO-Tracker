@@ -5,6 +5,7 @@ w importer.py (reużywana też przy imporcie .xlsx) - repo.py dokłada to,
 czego sam import nie potrzebuje: komentarz per blok i odczyt z nazwami.
 """
 import sqlite3
+import sys
 from pathlib import Path
 
 from zpo_tracker.importer import (
@@ -15,7 +16,22 @@ from zpo_tracker.importer import (
 )
 from zpo_tracker.normalizacja import klucz_bialych_znakow
 
-SCHEMA_PATH = Path(__file__).resolve().parent.parent.parent / "schema.sql"
+
+def _resolve_schema_path(frozen=None, meipass=None):
+    """
+    Ścieżka do schema.sql. W spakowanym .exe (PyInstaller) plik danych
+    leży w sys._MEIPASS, nie w drzewie źródeł - stąd rozróżnienie, inaczej
+    wersja spakowana nie znajdzie schematu przy pierwszym starcie.
+    """
+    if frozen is None:
+        frozen = getattr(sys, "frozen", False)
+    if frozen:
+        meipass = meipass or getattr(sys, "_MEIPASS", None)
+        return Path(meipass) / "schema.sql"
+    return Path(__file__).resolve().parent.parent.parent / "schema.sql"
+
+
+SCHEMA_PATH = _resolve_schema_path()
 
 # Słowniki proste: id + jedno pole tekstowe. Kolumna FK w transakcje jest
 # potrzebna tylko dla scal_* (kurierzy) - patrz scal_kurierow.

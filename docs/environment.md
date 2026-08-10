@@ -28,6 +28,21 @@ Referencja dla `CLAUDE.md`.
 - Notatki: Obsidian
 - Agenci AI: Claude Code, Gemini CLI
 
+## Budowa .exe (PyInstaller)
+
+`zpo_tracker.spec` (root repo) jest gotowym plikiem konfiguracyjnym.
+**Musi być odpalony NA Windowsie** - PyInstaller nie kompiluje skrośnie,
+więc budowa z Debiana produkuje binarkę ELF, nie `.exe`. Na Windowsie:
+
+```
+uv sync --extra build
+uv run pyinstaller zpo_tracker.spec
+```
+
+Wynik: `dist/zpo-tracker.exe`. Budowa z Linuksa ma sens tylko jako
+"proxy build" sprawdzający, że natywnie kompilowany `pydantic-core` w
+ogóle się pakuje (zweryfikowane - pakuje się bez błędów importu).
+
 ## Konsekwencje różnicy dev/prod
 
 - Kod pisany i testowany na Debianie, ale musi działać jako pojedynczy,

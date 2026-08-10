@@ -82,6 +82,21 @@ def test_zapisz_blok_reuzywa_istniejacego_kuriera(conn):
     assert count == 1
 
 
+# --- ścieżka do schema.sql musi działać też spakowana w .exe (PyInstaller
+#     rozpakowuje pliki danych do sys._MEIPASS, nie do drzewa źródeł) ---
+
+def test_resolve_schema_path_dev_wskazuje_na_schema_sql_w_repo(tmp_path):
+    sciezka = repo._resolve_schema_path(frozen=False)
+    assert sciezka.name == "schema.sql"
+    assert sciezka.is_file()
+
+
+def test_resolve_schema_path_w_trybie_spakowanym_uzywa_meipass(tmp_path):
+    (tmp_path / "schema.sql").write_text("-- test")
+    sciezka = repo._resolve_schema_path(frozen=True, meipass=str(tmp_path))
+    assert sciezka == tmp_path / "schema.sql"
+
+
 def test_pobierz_slownik_kurierzy(conn):
     repo.dodaj_do_slownika(conn, "kurierzy", "Nowak Piotr")
     wpisy = repo.pobierz_slownik(conn, "kurierzy")
