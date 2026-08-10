@@ -150,6 +150,23 @@ def test_pobierz_punkty_z_nazwa_firmy_zpo(conn):
     assert punkty[0]["firma_zpo"] == "Żabka"
 
 
+def test_dane_przetrwaja_zamkniecie_i_ponowne_otwarcie_polaczenia(tmp_path):
+    # GH #4 (krytyczny): "zapisane dane znikają po ponownym uruchomieniu"
+    # - sqlite3 domyślnie wymaga jawnego commit(), inaczej zamknięcie
+    # połączenia po prostu wycofuje niezapisane zmiany
+    sciezka = str(tmp_path / "test.db")
+
+    polaczenie_1 = repo.polacz(sciezka)
+    repo.utworz_schemat(polaczenie_1)
+    repo.zapisz_blok(polaczenie_1, _blok())
+    polaczenie_1.close()
+
+    polaczenie_2 = repo.polacz(sciezka)
+    liczba = polaczenie_2.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0]
+    polaczenie_2.close()
+    assert liczba == 1
+
+
 def test_pobierz_unikalne_nadawcow(conn):
     repo.zapisz_blok(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=1),

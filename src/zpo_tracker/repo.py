@@ -44,7 +44,10 @@ _TABELE_PROSTE = {
 
 
 def polacz(sciezka=":memory:"):
-    conn = sqlite3.connect(sciezka)
+    # isolation_level=None = autocommit: sqlite3 domyślnie wymaga jawnego
+    # commit(), inaczej zamknięcie połączenia wycofuje niezapisane zmiany
+    # (GH #4, krytyczny - "dane znikają po ponownym uruchomieniu")
+    conn = sqlite3.connect(sciezka, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
