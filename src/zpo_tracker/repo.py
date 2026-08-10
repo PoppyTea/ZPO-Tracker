@@ -13,8 +13,18 @@ from zpo_tracker.importer import (
     get_or_create_rejon,
     get_or_create_wykonawca,
 )
+from zpo_tracker.normalizacja import klucz_bialych_znakow
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent.parent / "schema.sql"
+
+# Słowniki proste: id + jedno pole tekstowe. Kolumna FK w transakcje jest
+# potrzebna tylko dla scal_* (kurierzy) - patrz scal_kurierow.
+_TABELE_PROSTE = {
+    "kurierzy": "imie_nazwisko",
+    "wykonawcy": "nazwa",
+    "rejony": "kod",
+    "firmy_zpo": "nazwa",
+}
 
 
 def polacz(sciezka=":memory:"):
@@ -67,6 +77,59 @@ def zapisz_blok(conn, blok):
                 "powod": "duplikat (ta sama data+kurier+punkt już istnieje)",
             })
     return wyniki
+
+
+def pobierz_slownik(conn, tabela):
+    """Lista {"id", "nazwa"} dla jednego z _TABELE_PROSTE, alfabetycznie."""
+    kolumna = _TABELE_PROSTE[tabela]
+    wiersze = conn.execute(
+        f"SELECT id, {kolumna} AS nazwa FROM {tabela} ORDER BY {kolumna}"
+    ).fetchall()
+    return [dict(w) for w in wiersze]
+
+
+def dodaj_do_slownika(conn, tabela, nazwa):
+    kolumna = _TABELE_PROSTE[tabela]
+    cur = conn.execute(
+        f"INSERT INTO {tabela} ({kolumna}) VALUES (?)", (klucz_bialych_znakow(nazwa),)
+    )
+    return cur.lastrowid
+
+
+def zmien_nazwe_w_slowniku(conn, tabela, wpis_id, nowa_nazwa):
+    kolumna = _TABELE_PROSTE[tabela]
+    conn.execute(
+        f"UPDATE {tabela} SET {kolumna} = ? WHERE id = ?",
+        (klucz_bialych_znakow(nowa_nazwa), wpis_id),
+    )
+
+
+def usun_z_slownika(conn, tabela, wpis_id):
+    """Usuwa wpis. Jeśli jest gdzieś użyty jako FK, sqlite3.IntegrityError
+    (PRAGMA foreign_keys=ON) - GUI wyświetla błąd, nie decyduje o nim."""
+    if tabela not in _TABELE_PROSTE:
+        raise ValueError(f"nieznany słownik: {tabela}")
+    conn.execute(f"DELETE FROM {tabela} WHERE id = ?", (wpis_id,))
+
+
+def scal_kurierow(conn, id_z, id_do):
+    """Przenosi wszystkie transakcje z kuriera id_z na id_do i usuwa id_z -
+    droga naprawy dla par typu "Wołczuk Rafal"/"Wołczuk Rafał"
+    (docs/domain-model.md), zgłoszonych jako ostrzeżenie, nie scalonych
+    automatycznie."""
+    conn.execute("UPDATE transakcje SET kurier_id = ? WHERE kurier_id = ?", (id_do, id_z))
+    conn.execute("DELETE FROM kurierzy WHERE id = ?", (id_z,))
+
+
+def pobierz_punkty(conn):
+    """Lista punktów z nazwą firmy ZPO (jeśli ma PNI), do zakładki słowników."""
+    wiersze = conn.execute(
+        """SELECT p.id, p.nadawca, p.adres, p.pni_zpo, f.nazwa AS firma_zpo
+           FROM punkty p
+           LEFT JOIN firmy_zpo f ON f.id = p.firma_zpo_id
+           ORDER BY p.nadawca, p.adres"""
+    ).fetchall()
+    return [dict(w) for w in wiersze]
 
 
 def pobierz_transakcje(conn, limit=200):

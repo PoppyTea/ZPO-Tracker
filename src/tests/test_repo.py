@@ -82,6 +82,59 @@ def test_zapisz_blok_reuzywa_istniejacego_kuriera(conn):
     assert count == 1
 
 
+def test_pobierz_slownik_kurierzy(conn):
+    repo.dodaj_do_slownika(conn, "kurierzy", "Nowak Piotr")
+    wpisy = repo.pobierz_slownik(conn, "kurierzy")
+    assert wpisy == [{"id": 1, "nazwa": "Nowak Piotr"}]
+
+
+def test_dodaj_do_slownika_normalizuje_biale_znaki(conn):
+    repo.dodaj_do_slownika(conn, "wykonawcy", "  Koli  ")
+    wpisy = repo.pobierz_slownik(conn, "wykonawcy")
+    assert wpisy[0]["nazwa"] == "Koli"
+
+
+def test_zmien_nazwe_w_slowniku(conn):
+    wpis_id = repo.dodaj_do_slownika(conn, "rejony", "WA87")
+    repo.zmien_nazwe_w_slowniku(conn, "rejony", wpis_id, "WA88")
+    assert repo.pobierz_slownik(conn, "rejony") == [{"id": wpis_id, "nazwa": "WA88"}]
+
+
+def test_usun_z_slownika_nieuzywany_wpis(conn):
+    wpis_id = repo.dodaj_do_slownika(conn, "firmy_zpo", "Testowa Sieć")
+    repo.usun_z_slownika(conn, "firmy_zpo", wpis_id)
+    assert repo.pobierz_slownik(conn, "firmy_zpo") == []
+
+
+def test_scal_kurierow_przenosi_transakcje_i_usuwa_stary(conn):
+    blok = _blok(kurier="Wołczuk Rafal")
+    repo.zapisz_blok(conn, blok)
+    id_stary = conn.execute(
+        "SELECT id FROM kurierzy WHERE imie_nazwisko='Wołczuk Rafal'"
+    ).fetchone()[0]
+    id_nowy = repo.dodaj_do_slownika(conn, "kurierzy", "Wołczuk Rafał")
+
+    repo.scal_kurierow(conn, id_z=id_stary, id_do=id_nowy)
+
+    nazwiska = [r[0] for r in conn.execute("SELECT imie_nazwisko FROM kurierzy").fetchall()]
+    assert nazwiska == ["Wołczuk Rafał"]
+    kurier_transakcji = conn.execute(
+        "SELECT kurier_id FROM transakcje"
+    ).fetchone()[0]
+    assert kurier_transakcji == id_nowy
+
+
+def test_pobierz_punkty_z_nazwa_firmy_zpo(conn):
+    blok = _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", pni_zpo="228648", ilosc_total=3),
+    ])
+    repo.zapisz_blok(conn, blok)
+    punkty = repo.pobierz_punkty(conn)
+    assert len(punkty) == 1
+    assert punkty[0]["nadawca"] == "Żabka"
+    assert punkty[0]["firma_zpo"] == "Żabka"
+
+
 def test_pobierz_transakcje_zwraca_czytelne_nazwy(conn):
     repo.zapisz_blok(conn, _blok())
     wiersze = repo.pobierz_transakcje(conn)
