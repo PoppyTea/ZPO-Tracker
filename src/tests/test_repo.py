@@ -150,6 +150,25 @@ def test_pobierz_punkty_z_nazwa_firmy_zpo(conn):
     assert punkty[0]["firma_zpo"] == "Żabka"
 
 
+def test_pobierz_unikalne_nadawcow(conn):
+    repo.zapisz_blok(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=1),
+        WierszBlankietu(nadawca="ZUS", adres="Senatorska 6/8", ilosc_total=1),
+    ]))
+    repo.zapisz_blok(conn, _blok(data=date(2026, 8, 11), wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=1),
+    ]))
+    assert repo.pobierz_unikalne_nadawcow(conn) == ["ZUS", "Żabka"]
+
+
+def test_pobierz_unikalne_adresy(conn):
+    repo.zapisz_blok(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=1),
+        WierszBlankietu(nadawca="ZUS", adres="Senatorska 6/8", ilosc_total=1),
+    ]))
+    assert repo.pobierz_unikalne_adresy(conn) == ["Odkryta 24", "Senatorska 6/8"]
+
+
 def test_pobierz_transakcje_zwraca_czytelne_nazwy(conn):
     repo.zapisz_blok(conn, _blok())
     wiersze = repo.pobierz_transakcje(conn)

@@ -137,6 +137,24 @@ def scal_kurierow(conn, id_z, id_do):
     conn.execute("DELETE FROM kurierzy WHERE id = ?", (id_z,))
 
 
+def pobierz_unikalne_nadawcow(conn):
+    """Kandydaci do podpowiedzi w polu 'nadawca' (widget_autocomplete)."""
+    return [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT nadawca FROM punkty ORDER BY nadawca"
+        ).fetchall()
+    ]
+
+
+def pobierz_unikalne_adresy(conn):
+    """Kandydaci do podpowiedzi w polu 'adres' (widget_autocomplete)."""
+    return [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT adres FROM punkty ORDER BY adres"
+        ).fetchall()
+    ]
+
+
 def pobierz_punkty(conn):
     """Lista punktów z nazwą firmy ZPO (jeśli ma PNI), do zakładki słowników."""
     wiersze = conn.execute(

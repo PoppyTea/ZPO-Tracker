@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from zpo_tracker import repo
 from zpo_tracker.gui.formularz_logika import zbuduj_bloki
+from zpo_tracker.gui.widget_autocomplete import EntryZPodpowiedzia
 from zpo_tracker.gui.widget_tabela import Tabela
 
 KOLUMNY_PODGLADU = [
@@ -32,7 +33,7 @@ KOLUMNY_PODGLADU = [
 class WierszWidget(ttk.Frame):
     """Jeden wiersz bloku: punkt (nadawca + adres, opcjonalnie PNI) + ilość."""
 
-    def __init__(self, parent, on_usun):
+    def __init__(self, parent, on_usun, pobierz_nadawcow, pobierz_adresy):
         super().__init__(parent)
         self.var_nadawca = tk.StringVar()
         self.var_adres = tk.StringVar()
@@ -40,8 +41,12 @@ class WierszWidget(ttk.Frame):
         self.var_ilosc_total = tk.StringVar()
         self.var_ilosc_zpo = tk.StringVar()
 
-        ttk.Entry(self, textvariable=self.var_nadawca, width=16).grid(row=0, column=0, padx=2)
-        ttk.Entry(self, textvariable=self.var_adres, width=26).grid(row=0, column=1, padx=2)
+        EntryZPodpowiedzia(
+            self, pobierz_nadawcow, textvariable=self.var_nadawca, width=16
+        ).grid(row=0, column=0, padx=2)
+        EntryZPodpowiedzia(
+            self, pobierz_adresy, textvariable=self.var_adres, width=26
+        ).grid(row=0, column=1, padx=2)
         ttk.Entry(self, textvariable=self.var_pni, width=10).grid(row=0, column=2, padx=2)
         ttk.Entry(self, textvariable=self.var_ilosc_total, width=6).grid(row=0, column=3, padx=2)
         ttk.Entry(self, textvariable=self.var_ilosc_zpo, width=6).grid(row=0, column=4, padx=2)
@@ -68,9 +73,11 @@ class WierszWidget(ttk.Frame):
 class BlokRejonuWidget(ttk.LabelFrame):
     """Blok REJON + DATA + KOMENTARZ, z listą wierszy punkt+ilość."""
 
-    def __init__(self, parent, data_domyslna, on_usun_blok):
+    def __init__(self, parent, data_domyslna, on_usun_blok, pobierz_nadawcow, pobierz_adresy):
         super().__init__(parent, text="Rejon", padding=6)
         self.on_usun_blok = on_usun_blok
+        self.pobierz_nadawcow = pobierz_nadawcow
+        self.pobierz_adresy = pobierz_adresy
         self.wiersze = []
 
         naglowek = ttk.Frame(self)
@@ -105,7 +112,9 @@ class BlokRejonuWidget(ttk.LabelFrame):
         self.dodaj_wiersz()
 
     def dodaj_wiersz(self):
-        wiersz = WierszWidget(self.ramka_wierszy, self._usun_wiersz)
+        wiersz = WierszWidget(
+            self.ramka_wierszy, self._usun_wiersz, self.pobierz_nadawcow, self.pobierz_adresy
+        )
         wiersz.pack(fill="x", pady=1)
         self.wiersze.append(wiersz)
 
@@ -149,8 +158,10 @@ class ZakladkaWprowadzanie(ttk.Frame):
         pasek_kuriera.pack(fill="x", padx=6, pady=6)
         ttk.Label(pasek_kuriera, text="KURIER:", font=("TkDefaultFont", 12, "bold")).pack(side="left")
         self.var_kurier = tk.StringVar()
-        ttk.Entry(pasek_kuriera, textvariable=self.var_kurier, width=30,
-                  font=("TkDefaultFont", 12)).pack(side="left", padx=8)
+        EntryZPodpowiedzia(
+            pasek_kuriera, self._pobierz_kurierow, textvariable=self.var_kurier,
+            width=30, font=("TkDefaultFont", 12),
+        ).pack(side="left", padx=8)
         ttk.Label(pasek_kuriera, text="Wykonawca:").pack(side="left", padx=(16, 0))
         self.var_wykonawca = tk.StringVar()
         ttk.Entry(pasek_kuriera, textvariable=self.var_wykonawca, width=16).pack(side="left", padx=4)
@@ -169,9 +180,21 @@ class ZakladkaWprowadzanie(ttk.Frame):
         self.dodaj_blok()
         self.odswiez_podglad()
 
+    def _pobierz_kurierow(self):
+        return [w["nazwa"] for w in repo.pobierz_slownik(self.conn, "kurierzy")]
+
+    def _pobierz_nadawcow(self):
+        return repo.pobierz_unikalne_nadawcow(self.conn)
+
+    def _pobierz_adresy(self):
+        return repo.pobierz_unikalne_adresy(self.conn)
+
     def dodaj_blok(self):
         data_domyslna = self.bloki[-1].var_data.get() if self.bloki else self._data_domyslna
-        blok = BlokRejonuWidget(self.ramka_blokow, data_domyslna, self._usun_blok)
+        blok = BlokRejonuWidget(
+            self.ramka_blokow, data_domyslna, self._usun_blok,
+            self._pobierz_nadawcow, self._pobierz_adresy,
+        )
         blok.pack(fill="x", pady=4)
         self.bloki.append(blok)
 
