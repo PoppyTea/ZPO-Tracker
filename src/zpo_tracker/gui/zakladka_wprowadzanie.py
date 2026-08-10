@@ -30,6 +30,21 @@ KOLUMNY_PODGLADU = [
 ]
 
 
+def _podepnij_scroll_kolkiem(canvas):
+    """Kółko myszy przewija obszar bloków tylko, gdy kursor jest nad nim -
+    Windows/Mac (<MouseWheel>) i Linux (<Button-4>/<Button-5>) osobno,
+    bo wysyłają zupełnie inne zdarzenia."""
+    canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+    canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+    canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
+
+
+def _odepnij_scroll_kolkiem(canvas):
+    canvas.unbind_all("<MouseWheel>")
+    canvas.unbind_all("<Button-4>")
+    canvas.unbind_all("<Button-5>")
+
+
 class WierszWidget(ttk.Frame):
     """Jeden wiersz bloku: punkt (nadawca + adres, opcjonalnie PNI) + ilość."""
 
@@ -166,8 +181,27 @@ class ZakladkaWprowadzanie(ttk.Frame):
         self.var_wykonawca = tk.StringVar()
         ttk.Entry(pasek_kuriera, textvariable=self.var_wykonawca, width=16).pack(side="left", padx=4)
 
-        self.ramka_blokow = ttk.Frame(dol)
-        self.ramka_blokow.pack(fill="both", expand=True, padx=6)
+        # bloki rejonów mogą urosnąć poza widoczny obszar okna (GH #3) -
+        # bez tego użytkownik nie miał jak dodać kolejnego rejonu/wiersza,
+        # gdy poprzednie już wypełniły ekran
+        obszar_blokow = ttk.Frame(dol)
+        obszar_blokow.pack(fill="both", expand=True, padx=6)
+        canvas_blokow = tk.Canvas(obszar_blokow, highlightthickness=0)
+        pasek_scroll = ttk.Scrollbar(obszar_blokow, orient="vertical", command=canvas_blokow.yview)
+        canvas_blokow.configure(yscrollcommand=pasek_scroll.set)
+        canvas_blokow.pack(side="left", fill="both", expand=True)
+        pasek_scroll.pack(side="right", fill="y")
+
+        self.ramka_blokow = ttk.Frame(canvas_blokow)
+        okno_id = canvas_blokow.create_window((0, 0), window=self.ramka_blokow, anchor="nw")
+        self.ramka_blokow.bind(
+            "<Configure>", lambda e: canvas_blokow.configure(scrollregion=canvas_blokow.bbox("all"))
+        )
+        canvas_blokow.bind(
+            "<Configure>", lambda e: canvas_blokow.itemconfig(okno_id, width=e.width)
+        )
+        canvas_blokow.bind("<Enter>", lambda e: _podepnij_scroll_kolkiem(canvas_blokow))
+        canvas_blokow.bind("<Leave>", lambda e: _odepnij_scroll_kolkiem(canvas_blokow))
 
         pasek_akcji = ttk.Frame(dol)
         pasek_akcji.pack(fill="x", padx=6, pady=6)
