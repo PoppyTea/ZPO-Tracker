@@ -6,15 +6,17 @@ Cała logika w repo.py - tu tylko zbieranie wartości z pól i wyświetlanie.
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from zpo_tracker import repo
+from zpo_tracker import operacje, repo
 
 
 class PodzakladkaProstegoSlownika(ttk.Frame):
     """Kurierzy / Wykonawcy / Rejony / Firmy ZPO - jedno pole tekstowe."""
 
-    def __init__(self, parent, conn, tabela, etykieta_pola, obsluguje_scalanie=False):
+    def __init__(self, parent, conn, katalog_danych, tabela, etykieta_pola,
+                 obsluguje_scalanie=False):
         super().__init__(parent)
         self.conn = conn
+        self.katalog_danych = katalog_danych
         self.tabela = tabela
         self.obsluguje_scalanie = obsluguje_scalanie
 
@@ -48,7 +50,11 @@ class PodzakladkaProstegoSlownika(ttk.Frame):
         if not nazwa:
             return
         try:
-            repo.dodaj_do_slownika(self.conn, self.tabela, nazwa)
+            operacje.wykonaj(
+                self.conn, self.katalog_danych, rodzaj="dodaj_slownik",
+                etykieta=f"{self.tabela}: dodano „{nazwa}”",
+                funkcja=repo.dodaj_do_slownika, args=(self.tabela, nazwa),
+            )
         except Exception as e:
             messagebox.showerror("Błąd", str(e))
             return
@@ -62,7 +68,12 @@ class PodzakladkaProstegoSlownika(ttk.Frame):
         wpis = self._wpisy[zaznaczone[0]]
         nowa = _zapytaj_o_tekst("Zmień nazwę", wpis["nazwa"], self)
         if nowa and nowa.strip() and nowa.strip() != wpis["nazwa"]:
-            repo.zmien_nazwe_w_slowniku(self.conn, self.tabela, wpis["id"], nowa.strip())
+            operacje.wykonaj(
+                self.conn, self.katalog_danych, rodzaj="zmien_slownik",
+                etykieta=f"{self.tabela}: „{wpis['nazwa']}” → „{nowa.strip()}”",
+                funkcja=repo.zmien_nazwe_w_slowniku,
+                args=(self.tabela, wpis["id"], nowa.strip()),
+            )
             self.odswiez()
 
     def scal_wybrane(self):
@@ -76,16 +87,21 @@ class PodzakladkaProstegoSlownika(ttk.Frame):
                         f"Wszystkie transakcje „{a['nazwa']}” zostaną przepisane na „{b['nazwa']}”."
         ):
             return
-        repo.scal_kurierow(self.conn, id_z=a["id"], id_do=b["id"])
+        operacje.wykonaj(
+            self.conn, self.katalog_danych, rodzaj="scal_slownik",
+            etykieta=f"{self.tabela}: „{a['nazwa']}” → „{b['nazwa']}”",
+            funkcja=repo.scal_kurierow, kwargs={"id_z": a["id"], "id_do": b["id"]},
+        )
         self.odswiez()
 
 
 class PodzakladkaPunktowZpo(ttk.Frame):
     """Punkty ZPO - nadawca (firma ZPO) + adres + PNI, tylko odczyt + dodawanie."""
 
-    def __init__(self, parent, conn):
+    def __init__(self, parent, conn, katalog_danych):
         super().__init__(parent)
         self.conn = conn
+        self.katalog_danych = katalog_danych
 
         ramka_nowy = ttk.LabelFrame(self, text="Nowy punkt", padding=6)
         ramka_nowy.pack(fill="x", padx=6, pady=6)
@@ -121,7 +137,12 @@ class PodzakladkaPunktowZpo(ttk.Frame):
             messagebox.showinfo("Nowy punkt", "Nadawca i adres są wymagane.")
             return
         from zpo_tracker.importer import get_or_create_punkt
-        _, ostrzezenia = get_or_create_punkt(self.conn, nadawca, adres, self.var_pni.get().strip() or None)
+        _, ostrzezenia = operacje.wykonaj(
+            self.conn, self.katalog_danych, rodzaj="nowy_punkt",
+            etykieta=f"{nadawca} / {adres}",
+            funkcja=get_or_create_punkt,
+            args=(nadawca, adres, self.var_pni.get().strip() or None),
+        )
         if ostrzezenia:
             messagebox.showwarning("Uwaga", "\n".join(ostrzezenia))
         self.var_nadawca.set("")
@@ -149,17 +170,17 @@ def _zapytaj_o_tekst(tytul, wartosc_domyslna, parent):
 
 
 class ZakladkaSlowniki(ttk.Frame):
-    def __init__(self, parent, conn):
+    def __init__(self, parent, conn, katalog_danych):
         super().__init__(parent)
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True)
 
         self._podzakladki = [
-            PodzakladkaProstegoSlownika(notebook, conn, "kurierzy", "Kurier", obsluguje_scalanie=True),
-            PodzakladkaPunktowZpo(notebook, conn),
-            PodzakladkaProstegoSlownika(notebook, conn, "wykonawcy", "Wykonawca"),
-            PodzakladkaProstegoSlownika(notebook, conn, "rejony", "Rejon"),
-            PodzakladkaProstegoSlownika(notebook, conn, "firmy_zpo", "Firma ZPO"),
+            PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "kurierzy", "Kurier", obsluguje_scalanie=True),
+            PodzakladkaPunktowZpo(notebook, conn, katalog_danych),
+            PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "wykonawcy", "Wykonawca"),
+            PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "rejony", "Rejon"),
+            PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "firmy_zpo", "Firma ZPO"),
         ]
         for widget, etykieta in zip(
             self._podzakladki,

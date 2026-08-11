@@ -9,12 +9,13 @@ Cała logika jest w import_orchestrator.py/eksport.py - tu tylko zbieranie
 wartości z pól, wywołanie i wyświetlenie wyniku.
 """
 from datetime import date
+from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, ttk
 
 import openpyxl
 
-from zpo_tracker import eksport
+from zpo_tracker import eksport, operacje
 from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
     zaimportuj,
@@ -50,11 +51,14 @@ def _wczytaj_surowe_wiersze(sciezka):
 class DialogKorektyImportu(tk.Toplevel):
     """Ekran korekty: tylko to, co wymaga uwagi. Reszta importuje się cicho."""
 
-    def __init__(self, parent, conn, zwalidowane, odrzucone, propozycje, ostrzezenia, on_gotowe):
+    def __init__(self, parent, conn, katalog_danych, nazwa_pliku, zwalidowane,
+                 odrzucone, propozycje, ostrzezenia, on_gotowe):
         super().__init__(parent)
         self.title("Korekta importu")
         self.geometry("640x520")
         self.conn = conn
+        self.katalog_danych = katalog_danych
+        self.nazwa_pliku = nazwa_pliku
         self.zwalidowane = zwalidowane
         self.odrzucone = odrzucone
         self.ostrzezenia = ostrzezenia
@@ -140,15 +144,22 @@ class DialogKorektyImportu(tk.Toplevel):
     def _zatwierdz(self):
         mapowanie = {p["z"]: p["na"] for p, var in self.zmienne_propozycji if var.get()}
         mapowanie.update(self.mapowanie_z_ostrzezen)
-        wynik = zaimportuj(self.conn, self.zwalidowane, mapowanie_scalen=mapowanie)
+        wynik = operacje.wykonaj(
+            self.conn, self.katalog_danych, rodzaj="import",
+            etykieta=self.nazwa_pliku,
+            funkcja=zaimportuj, args=(self.zwalidowane,),
+            kwargs={"mapowanie_scalen": mapowanie},
+            licz_wiersze=lambda w: w["zaimportowano"],
+        )
         self.destroy()
         self.on_gotowe(wynik)
 
 
 class ZakladkaImportExport(ttk.Frame):
-    def __init__(self, parent, conn, on_zaimportowano=None):
+    def __init__(self, parent, conn, katalog_danych, on_zaimportowano=None):
         super().__init__(parent)
         self.conn = conn
+        self.katalog_danych = katalog_danych
         self.on_zaimportowano = on_zaimportowano
 
         ramka_import = ttk.LabelFrame(self, text="Import z .xlsx", padding=10)
@@ -190,7 +201,8 @@ class ZakladkaImportExport(ttk.Frame):
         propozycje = znajdz_propozycje_scalenia_kurierow(zwalidowane)
         ostrzezenia = znajdz_ostrzezenia_podobienstwa_kurierow(zwalidowane)
         DialogKorektyImportu(
-            self, self.conn, zwalidowane, odrzucone, propozycje, ostrzezenia,
+            self, self.conn, self.katalog_danych, Path(sciezka).name,
+            zwalidowane, odrzucone, propozycje, ostrzezenia,
             on_gotowe=self._po_imporcie,
         )
 

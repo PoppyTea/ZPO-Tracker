@@ -14,7 +14,7 @@ from tkinter import ttk
 
 from pydantic import ValidationError
 
-from zpo_tracker import repo
+from zpo_tracker import operacje, repo
 from zpo_tracker.gui.formularz_logika import zbuduj_bloki
 from zpo_tracker.gui.widget_autocomplete import EntryZPodpowiedzia
 from zpo_tracker.gui.widget_tabela import Tabela
@@ -149,9 +149,10 @@ class BlokRejonuWidget(ttk.LabelFrame):
 
 
 class ZakladkaWprowadzanie(ttk.Frame):
-    def __init__(self, parent, conn, on_zapisano=None):
+    def __init__(self, parent, conn, katalog_danych, on_zapisano=None):
         super().__init__(parent)
         self.conn = conn
+        self.katalog_danych = katalog_danych
         self.on_zapisano = on_zapisano
         self.bloki = []
 
@@ -253,13 +254,18 @@ class ZakladkaWprowadzanie(ttk.Frame):
             self.etykieta_status.configure(text="Brak wypełnionych wierszy do zapisania.", foreground="red")
             return
 
+        wyniki = operacje.wykonaj(
+            self.conn, self.katalog_danych, rodzaj="zapis_blankietu",
+            etykieta=f"{self.var_kurier.get().strip()}, {len(bloki)} blok(ów)",
+            funkcja=repo.zapisz_bloki,
+            args=(bloki,), kwargs={"autor_id": getattr(self, "autor_id", None)},
+            licz_wiersze=operacje.licz_zapisane_wiersze,
+        )
         ostrzezenia, pominiete = [], 0
-        for blok in bloki:
-            for wynik in repo.zapisz_blok(
-                    self.conn, blok, autor_id=getattr(self, "autor_id", None)):
-                if wynik["pominieto"]:
-                    pominiete += 1
-                ostrzezenia.extend(wynik["ostrzezenia"])
+        for wynik in wyniki:
+            if wynik["pominieto"]:
+                pominiete += 1
+            ostrzezenia.extend(wynik["ostrzezenia"])
 
         data_zachowana = self.bloki[0].var_data.get()
         for blok_widget in list(self.bloki):

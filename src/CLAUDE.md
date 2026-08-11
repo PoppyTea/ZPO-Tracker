@@ -50,8 +50,11 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   naprawy dla ostrzeżeń o podobieństwie, **atomowy**; przy kolizji
   `UNIQUE(data,kurier,punkt)` scalenie się nie uda — ale nie zostawi
   stanu połowicznego), `pobierz_transakcje`,
-  `pobierz_punkty`. `_resolve_schema_path` rozróżnia dev vs spakowany
-  `.exe` (PyInstaller rozpakowuje dane do `sys._MEIPASS`).
+  `pobierz_punkty`. `zapisz_bloki` — kilka `BlankietBlok` (jeden formularz
+  = kilka bloków rejonu) jako JEDNA operacja dla `operacje.wykonaj`, żeby
+  cofnięcie cofało cały formularz, nie pojedynczy blok. `_resolve_schema_path`
+  rozróżnia dev vs spakowany `.exe` (PyInstaller rozpakowuje dane do
+  `sys._MEIPASS`).
 - `import_orchestrator.py` — cały import w partii: `zwaliduj_wiersze`,
   `znajdz_propozycje_scalenia_kurierow` (literówki, auto-merge PRZED
   zapisem, nie cofanie po fakcie), `znajdz_ostrzezenia_podobienstwa_kurierow`
@@ -75,17 +78,49 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
 - `dziennik.py` — diagnostyka. Dwa strumienie o różnym przeznaczeniu:
   log tekstowy (`zpo.log`, kanał wsparcia, może zawierać dane z
   komunikatów wyjątków, zostaje lokalnie) i **dziennik JSONL**
-  (`operacje.jsonl`, indeks operacji dla migawek/cofania). Kształt wpisu
-  JSONL jest **zamknięty** (`POLA_WPISU`, parametry nazwane zamiast
-  `**kwargs`), bo ten plik jest kandydatem do wyniesienia na zewnątrz —
-  żadnych nazwisk ani adresów. Oba żyją POZA bazą, żeby przetrwać jej
-  uszkodzenie i podmianę przy cofaniu. Numeracja operacji po jawnym
-  `seq`, nigdy po zegarze.
+  (`operacje.jsonl`, indeks operacji dla migawek/cofania, patrz
+  `operacje.py` niżej). Kształt wpisu JSONL jest **zamknięty**
+  (`POLA_WPISU`, parametry nazwane zamiast `**kwargs`), bo ten plik jest
+  kandydatem do wyniesienia na zewnątrz — żadnych nazwisk ani adresów.
+  Oba żyją POZA bazą, żeby przetrwać jej uszkodzenie i podmianę przy
+  cofaniu. Numeracja operacji po jawnym `seq`, nigdy po zegarze.
+- `kopie.py` — migawki bazy: pełna kopia pliku `.db`. Dwie ścieżki
+  kopiowania: `zrob_migawke` (z otwartego `conn`, przez SQLite Backup API —
+  bezpieczne niezależnie od otwartych transakcji, działa nawet z
+  `:memory:`) i `zrob_migawke_pliku` (zwykłe kopiowanie pliku, WYŁĄCZNIE
+  gdy `conn` jest zamknięte, bo podmiana pliku pod żywym połączeniem jest
+  niebezpieczna — na Windows w ogóle niedozwolona). Schemat-agnostyczne,
+  żadnej wiedzy o `transakcje`/`users`. `przytnij_migawki` — rotacja
+  retencji (`GRANICE_RETENCJI_DNI`: pełna rozdzielczość do 1 dnia, dalej
+  dzień/3dni/tydzień/2tyg/miesiąc/3mc/pół roku/rok, **po roku 1/rok BEZ
+  KOŃCA** — świadoma decyzja, nie twardy limit, patrz historia commitów).
+  Bezstanowa i idempotentna: liczy kubełki od `teraz` przy każdym
+  wywołaniu, więc migawka sama "awansuje" do rzadszej rozdzielczości
+  z wiekiem. Usuwa WYŁĄCZNIE pliki — wpisy dziennika JSONL zostają
+  (append-only), próba cofnięcia do przyciętej operacji kończy się
+  czytelnym błędem w `operacje.cofnij` (sprawdzone PRZED zrobieniem
+  migawki bezpieczeństwa, żeby jej nie marnować).
+- `operacje.py` — fasada łącząca `kopie.py` z `dziennik.py`: `wykonaj`
+  robi migawkę **PRZED** wywołaniem funkcji mutującej (nie po — inaczej
+  cofnięcie przywracałoby stan już zepsuty przez tę samą operację), potem
+  wpis w dzienniku z `czas` (wymagane przez `kopie.przytnij_migawki` do
+  liczenia wieku — to jedyne miejsce w projekcie, gdzie zegar ścienny jest
+  celowo używany, w odróżnieniu od numeracji operacji po `seq`) i wynikiem
+  `ok`/`blad` (wyjątek zawsze idzie dalej). `cofnij` przywraca stan SPRZED
+  wskazanej operacji — cofa też wszystko PO niej (punkt w czasie, nie
+  selektywne cofnięcie jednej zmiany); samo cofnięcie jest też logowane
+  z własną migawką, więc "cofnięcie cofnięcia" działa tym samym
+  mechanizmem. **GUI woła WYŁĄCZNIE `operacje.wykonaj`/`cofnij`, nigdy
+  `repo.*` bezpośrednio dla operacji mutujących** — inaczej mutacja
+  ominęłaby migawkę i dziennik, i cofnięcie by jej nie objęło.
+  `znajdz_najblizsze_migawki` — gdy migawka celu zniknęła (przycięta),
+  szuka najbliższej starszej/nowszej operacji, która WCIĄŻ ma migawkę, do
+  zaproponowania jako alternatywa (patrz `zakladka_historia.py` niżej).
 
 Warstwa GUI (tkinter, `gui/`) — **zero logiki biznesowej**, tylko zbieranie
 wartości z pól i wywołanie warstwy logiki:
 
-- `app.py` — okno główne, `Notebook` z czterema zakładkami.
+- `app.py` — okno główne, `Notebook` z pięcioma zakładkami.
   `_katalog_danych` — na Windows **`%LOCALAPPDATA%`, nie `%APPDATA%`**
   (Roaming przy profilach mobilnych wciąga bazę i historię kopii na
   ścieżkę logowania); `_przenies_ze_starej_lokalizacji` robi jednorazową
@@ -95,13 +130,31 @@ wartości z pól i wywołanie warstwy logiki:
   nadrzędnego). Haki diagnostyczne podpinane **dwukrotnie i celowo**:
   w `main()` przed zbudowaniem okna (awaria w konstruktorze) oraz na
   instancji Tk (`report_callback_exception` — `sys.excepthook` NIE łapie
-  wyjątków z callbacków widgetów).
+  wyjątków z callbacków widgetów). `kopie.przytnij_migawki` wołane RAZ,
+  zaraz po skonfigurowaniu `katalog_danych` — świadomie przy starcie, nie
+  po każdej operacji (tanio, realnie ~raz dziennie, nie dokłada skanu
+  katalogu do każdego zapisu). `cofnij_do` (wołane przez zakładkę
+  Historia): zamyka `conn`, woła `operacje.cofnij`, **zamyka całą
+  aplikację** — podmiana pliku bazy pod żywymi połączeniami/widgetami
+  w kilku zakładkach naraz jest ryzykowna, restart jest prostszy
+  i bezpieczniejszy niż "gorący" refresh całego okna.
 - `zakladka_przeglad.py`, `zakladka_wprowadzanie.py` (formularz
   blankietowy: bloki REJON+DATA, rejon opcjonalny/nieznany + komentarz
   per blok), `zakladka_import_export.py` (+ `DialogKorektyImportu` —
   ekran korekty pokazuje WYŁĄCZNIE wiersze wymagające uwagi),
   `zakladka_slowniki.py` (podzakładki kurierzy/punkty ZPO/wykonawcy/
-  rejony/firmy ZPO).
+  rejony/firmy ZPO), `zakladka_historia.py` (log operacji + "Cofnij do
+  tego punktu"; seq czytany z WARTOŚCI wiersza, nie z pozycji w drzewie —
+  sortowanie po kliknięciu nagłówka w `widget_tabela.Tabela` zmienia
+  kolejność wierszy). Gdy migawka celu jest przycięta,
+  `DialogAlternatywnychMigawek` proponuje najbliższą starszą/nowszą
+  operację z żywą migawką — obie klikalne, prowadzą do tego samego
+  potwierdzenia co zwykłe cofnięcie (`_potwierdz_i_cofnij`), sprawdzenie
+  istnienia pliku dzieje się PRZED tym dialogiem, nie w środku (patrz
+  `operacje.znajdz_najblizsze_migawki` wyżej). **Wszystkie cztery pozostałe zakładki wołają
+  `operacje.wykonaj` zamiast `repo.*` bezpośrednio przy każdej mutacji**
+  (zapis blankietu, import, dodanie/zmiana/scalenie w słownikach, nowy
+  punkt ZPO) — patrz `operacje.py` wyżej.
 - `formularz_logika.py` — jedyny most między formularzem a
   `models.py`/pydantic; GUI wyświetla błędy walidacji, nie decyduje o nich.
 - `widget_tabela.py` — wspólna tabela z sortowaniem i Ctrl+scroll zoom.
@@ -155,6 +208,11 @@ dropdown renderuje się poprawnie, dopasowanie rozmyte i klawiatura działają
 zgodnie z projektem. Wpięty do `zakladka_wprowadzanie.py` (pola
 kurier/nadawca/adres, źródło kandydatów z `repo.pobierz_punkty`/
 `pobierz_slownik`).
+
+`zakladka_historia.py` + `operacje.wykonaj`/`cofnij` zweryfikowane end-to-end
+(zrzut ekranu i testy w `test_gui_smoke.py`): zapis z formularza,
+dodanie do słownika i import tworzą wpis w dzienniku z migawką;
+`cofnij_do` przywraca stan pliku bazy i zamyka aplikację.
 
 Build PyInstaller: proxy-build na Linuksie sprawdzony (pakuje się bez
 błędów importu `pydantic_core`, dochodzi do tworzenia okna Tk) — realny

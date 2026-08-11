@@ -43,6 +43,19 @@ def test_zapisz_blok_tworzy_jedna_transakcje_na_wiersz(conn):
     assert count == 2
 
 
+def test_zapisz_bloki_laczy_wyniki_z_kilku_blokow(conn):
+    blok_a = _blok(rejon="WA87", wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=3),
+    ])
+    blok_b = _blok(rejon="WA88", wiersze=[
+        WierszBlankietu(nadawca="ZUS", adres="Senatorska 6/8", ilosc_total=1),
+        WierszBlankietu(nadawca="PKO", adres="Marszałkowska 1", ilosc_total=2),
+    ])
+    wyniki = repo.zapisz_bloki(conn, [blok_a, blok_b])
+    assert len(wyniki) == 3
+    assert conn.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0] == 3
+
+
 def test_zapisz_blok_z_nieznanym_rejonem_zapisuje_null(conn):
     blok = _blok(rejon=None, komentarz="rejon nieznany, okolice Legionowa")
     repo.zapisz_blok(conn, blok)

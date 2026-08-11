@@ -67,13 +67,14 @@ pytest
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
-91/91 tests currently pass under the pip/system-Python setup above
-(verified against a real 1294-row slice of source data, both import and
-export round-trip). **On this specific dev machine**, running the same
-suite via `uv run pytest` shows 89/89 with 2 GUI smoke tests skipped —
-uv's managed Python has a reproducible tkinter/X11 fault here (see
-`docs/environment.md`), unrelated to project code. Don't read those 2
-skips as a regression if you see them.
+223/223 tests currently pass under the pip/system-Python setup above, no
+skips (verified against a real 1294-row slice of source data, both import
+and export round-trip). `.venv/` must be built by the system Python, not
+`uv`'s managed one — `uv`'s python-build-standalone binary has a
+reproducible tkinter/X11 SIGABRT on this dev machine, which silently skips
+the GUI tests instead of running them (see `docs/environment.md`). If GUI
+tests start skipping again, check `python3 -m venv` actually resolved to
+the system interpreter, not `uv`/`pyenv`/another manager on `PATH`.
 
 ---
 

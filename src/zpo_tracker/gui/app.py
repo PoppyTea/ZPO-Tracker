@@ -9,12 +9,13 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from zpo_tracker import dziennik, repo, uzytkownicy
+from zpo_tracker import dziennik, kopie, operacje, repo, uzytkownicy
 from zpo_tracker.gui.dialog_uzytkownika import DialogUzytkownika
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
 from zpo_tracker.gui.zakladka_import_export import ZakladkaImportExport
 from zpo_tracker.gui.zakladka_slowniki import ZakladkaSlowniki
+from zpo_tracker.gui.zakladka_historia import ZakladkaHistoria
 
 
 NAZWA_BAZY = "zpo_tracker.db"
@@ -111,7 +112,8 @@ class Aplikacja(tk.Tk):
         self.title("ZPO Tracker")
         self.geometry("1000x700")
 
-        self.conn = repo.polacz(sciezka_bazy or _domyslna_sciezka_bazy())
+        self.sciezka_bazy = sciezka_bazy or _domyslna_sciezka_bazy()
+        self.conn = repo.polacz(self.sciezka_bazy)
         _upewnij_schemat(self.conn)
 
         # haki muszą wisieć na instancji Tk: sys.excepthook NIE łapie
@@ -120,13 +122,20 @@ class Aplikacja(tk.Tk):
         dziennik.skonfiguruj(self.katalog_danych)
         dziennik.zainstaluj_haki(self, katalog=self.katalog_danych)
 
+        # przycinanie migawek raz na uruchomienie (realnie ~raz dziennie) -
+        # tanio, bez dokładania skanu katalogu do każdego zapisu w trakcie
+        # pracy; katalog migawki/ inaczej rósłby bez ograniczeń
+        kopie.przytnij_migawki(
+            self.katalog_danych, dziennik.wczytaj_operacje(self.katalog_danych))
+
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
         self.zakladka_przeglad = ZakladkaPrzeglad(self.notebook, self.conn)
         self.notebook.add(self.zakladka_przeglad, text="Przeglądanie")
 
-        self.zakladka_slowniki = ZakladkaSlowniki(self.notebook, self.conn)
+        self.zakladka_slowniki = ZakladkaSlowniki(
+            self.notebook, self.conn, self.katalog_danych)
 
         # dane wchodzą do bazy w kilku miejscach (formularz, import) i
         # wpływają na wszystkie zakładki, które je pokazują - jeden wspólny
@@ -134,20 +143,38 @@ class Aplikacja(tk.Tk):
         def odswiez_po_zmianie():
             self.zakladka_przeglad.odswiez()
             self.zakladka_slowniki.odswiez_wszystko()
+            self.zakladka_historia.odswiez()
 
         self.zakladka_wprowadzanie = ZakladkaWprowadzanie(
-            self.notebook, self.conn, on_zapisano=odswiez_po_zmianie
+            self.notebook, self.conn, self.katalog_danych, on_zapisano=odswiez_po_zmianie
         )
         self.notebook.add(self.zakladka_wprowadzanie, text="Wprowadzanie")
 
         self.zakladka_import_export = ZakladkaImportExport(
-            self.notebook, self.conn, on_zaimportowano=odswiez_po_zmianie
+            self.notebook, self.conn, self.katalog_danych, on_zaimportowano=odswiez_po_zmianie
         )
         self.notebook.add(self.zakladka_import_export, text="Import / Export")
 
         self.notebook.add(self.zakladka_slowniki, text="Słowniki")
 
+        self.zakladka_historia = ZakladkaHistoria(
+            self.notebook, self.katalog_danych, on_cofnij=self.cofnij_do)
+        self.notebook.add(self.zakladka_historia, text="Historia")
+
         self._ustal_uzytkownika()
+
+    def cofnij_do(self, seq_docelowy):
+        """
+        Przywraca bazę do stanu SPRZED operacji `seq_docelowy` (patrz
+        `operacje.cofnij`) i zamyka aplikację. Podmiana pliku bazy pod
+        żywymi połączeniami/widgetami w kilku zakładkach naraz jest
+        ryzykowna - prostszy i bezpieczniejszy jest restart: użytkownik
+        widzi przywrócony stan po ponownym uruchomieniu, nie po "gorącym"
+        odświeżeniu całego okna.
+        """
+        self.conn.close()
+        operacje.cofnij(self.katalog_danych, self.sciezka_bazy, seq_docelowy)
+        self.destroy()
 
     def _ustal_uzytkownika(self):
         """

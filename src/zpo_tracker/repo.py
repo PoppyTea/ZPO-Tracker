@@ -256,6 +256,19 @@ def _zapisz_blok_bez_transakcji(conn, blok, autor_id=None, teraz=None):
     return wyniki
 
 
+def zapisz_bloki(conn, bloki, autor_id=None):
+    """
+    Zapisuje kilka BlankietBlok (jeden formularz może mieć kilka bloków
+    rejonu) jako jedną operację dla dziennika/migawek (operacje.wykonaj) -
+    "ZAPISZ" w formularzu to dla użytkownika jedna czynność, niezależnie od
+    liczby bloków, więc cofnięcie też powinno cofać ją w całości.
+    """
+    wyniki = []
+    for blok in bloki:
+        wyniki.extend(zapisz_blok(conn, blok, autor_id=autor_id))
+    return wyniki
+
+
 def pobierz_slownik(conn, tabela):
     """Lista {"id", "nazwa"} dla jednego z _TABELE_PROSTE, alfabetycznie."""
     kolumna = _TABELE_PROSTE[tabela]
