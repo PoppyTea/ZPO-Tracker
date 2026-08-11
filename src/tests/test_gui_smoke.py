@@ -397,6 +397,57 @@ def test_cofnij_wybrany_pokazuje_dialog_alternatyw_gdy_migawka_zniknela(tmp_path
         dziennik.odepnij()
 
 
+def test_main_druga_instancja_pokazuje_ostrzezenie_i_nie_otwiera_okna(tmp_path, monkeypatch):
+    # jedna instancja na katalog danych (X+1) - main() musi wrócić PRZED
+    # app.mainloop(), inaczej ten test zawiesiłby cały zestaw
+    from zpo_tracker.gui import app as app_modul
+    from zpo_tracker import blokada, dziennik
+
+    monkeypatch.setattr(app_modul, "_katalog_danych", lambda *a, **k: tmp_path)
+    trzymajaca = blokada.Blokada(tmp_path)
+    trzymajaca.zdobadz()
+    try:
+        ostrzezenia = []
+        monkeypatch.setattr(
+            app_modul.messagebox, "showwarning",
+            lambda tytul, tresc: ostrzezenia.append((tytul, tresc)))
+        app_modul.main()
+        assert len(ostrzezenia) == 1
+    finally:
+        trzymajaca.zwolnij()
+        dziennik.odepnij()
+
+
+def test_start_aplikacji_tworzy_dzisiejszy_zrzut(tmp_path):
+    from datetime import date
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, zrzuty
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        assert zrzuty.istnieje_zrzut_na_dzien(tmp_path, date.today())
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_start_aplikacji_drugi_raz_tego_samego_dnia_nie_dubluje_zrzutu(tmp_path):
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, zrzuty
+
+    sciezka = str(tmp_path / "test.db")
+    app1 = Aplikacja(sciezka_bazy=sciezka)
+    app1.destroy()
+    dziennik.odepnij()
+
+    app2 = Aplikacja(sciezka_bazy=sciezka)
+    try:
+        assert len(list(zrzuty.katalog_zrzutow(tmp_path).glob("*.sql.gz"))) == 1
+    finally:
+        app2.destroy()
+        dziennik.odepnij()
+
+
 def test_cofnij_do_przywraca_stan_i_zamyka_aplikacje(tmp_path):
     from zpo_tracker.gui.app import Aplikacja
     from zpo_tracker import dziennik, operacje, repo as repo_modul

@@ -75,6 +75,14 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   miękkie ostrzeżenia). W SQLite pilnuje formatu `GLOB`, nie `LIKE`
   (`LIKE` jest niewrażliwy na wielkość liter). Numery kadrowe KURIERÓW to
   inny byt: inny format i relacja 1:N — patrz `../docs/roadmap.md`.
+- `blokada.py` — jedna instancja `app.main` na katalog danych: blokada
+  PLIKU na poziomie systemu operacyjnego (`fcntl.flock`/`msvcrt.locking`),
+  NIE zapis PID-u i sprawdzanie go później — PID martwego procesu bywa
+  ponownie przydzielony innemu, żywemu procesowi (typowe po restarcie
+  systemu), więc sam plik z PID-em niczego by nie gwarantował. System
+  zwalnia blokadę pliku automatycznie nawet przy awarii procesu. Ścieżka
+  Windows (`msvcrt`) nie jest odpalana w testach (maszyna dev to Linux) —
+  zweryfikowana przeglądem kodu, nie testem.
 - `dziennik.py` — diagnostyka. Dwa strumienie o różnym przeznaczeniu:
   log tekstowy (`zpo.log`, kanał wsparcia, może zawierać dane z
   komunikatów wyjątków, zostaje lokalnie) i **dziennik JSONL**
@@ -116,6 +124,15 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   `znajdz_najblizsze_migawki` — gdy migawka celu zniknęła (przycięta),
   szuka najbliższej starszej/nowszej operacji, która WCIĄŻ ma migawkę, do
   zaproponowania jako alternatywa (patrz `zakladka_historia.py` niżej).
+- `zrzuty.py` — warstwa ZIMNA, osobna od `kopie.py`: gzipowany tekstowy SQL
+  (`conn.iterdump()`, NIE binarny `.db`) — czytelny po rozpakowaniu,
+  przenośny między maszynami/wersjami SQLite, planowany format wymiany dla
+  synchronizacji stacji (X+3). Jeden zrzut na dzień (`zrob_zrzut` nadpisuje
+  przy powtórnym wywołaniu tego samego dnia), **NIE przycinany** jak
+  migawki — to archiwum długoterminowe, nie punkty przywracania pojedynczej
+  operacji, a przy tej skali danych (dept-owa baza) rozmiar jest
+  pomijalny. `PRAGMA user_version` dopisywana jawnie po `iterdump()`, bo
+  ten nie obejmuje PRAGMA.
 
 Warstwa GUI (tkinter, `gui/`) — **zero logiki biznesowej**, tylko zbieranie
 wartości z pól i wywołanie warstwy logiki:
@@ -137,7 +154,11 @@ wartości z pól i wywołanie warstwy logiki:
   Historia): zamyka `conn`, woła `operacje.cofnij`, **zamyka całą
   aplikację** — podmiana pliku bazy pod żywymi połączeniami/widgetami
   w kilku zakładkach naraz jest ryzykowna, restart jest prostszy
-  i bezpieczniejszy niż "gorący" refresh całego okna.
+  i bezpieczniejszy niż "gorący" refresh całego okna. `main()` zdobywa
+  `blokada.Blokada` PRZED zbudowaniem okna — druga instancja dostaje
+  ostrzeżenie i kończy się przed `mainloop()`, nie po cichu otwiera drugie
+  okno na tej samej bazie. `zrzuty.zrob_zrzut` wołane obok przycinania
+  migawek, tylko jeśli dzisiejszy zrzut jeszcze nie istnieje.
 - `zakladka_przeglad.py`, `zakladka_wprowadzanie.py` (formularz
   blankietowy: bloki REJON+DATA, rejon opcjonalny/nieznany + komentarz
   per blok), `zakladka_import_export.py` (+ `DialogKorektyImportu` —

@@ -67,7 +67,7 @@ pytest
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
-223/223 tests currently pass under the pip/system-Python setup above, no
+242/242 tests currently pass under the pip/system-Python setup above, no
 skips (verified against a real 1294-row slice of source data, both import
 and export round-trip). `.venv/` must be built by the system Python, not
 `uv`'s managed one — `uv`'s python-build-standalone binary has a

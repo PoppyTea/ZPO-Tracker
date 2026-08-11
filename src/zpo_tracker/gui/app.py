@@ -6,10 +6,11 @@ wprowadzanie, import/export, słowniki - dochodzą w kolejnych krokach).
 import logging
 import os
 import tkinter as tk
+from datetime import date
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from zpo_tracker import dziennik, kopie, operacje, repo, uzytkownicy
+from zpo_tracker import blokada, dziennik, kopie, operacje, repo, uzytkownicy, zrzuty
 from zpo_tracker.gui.dialog_uzytkownika import DialogUzytkownika
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
@@ -128,6 +129,12 @@ class Aplikacja(tk.Tk):
         kopie.przytnij_migawki(
             self.katalog_danych, dziennik.wczytaj_operacje(self.katalog_danych))
 
+        # zrzut .sql.gz "na dziś" - warstwa zimna, osobna od migawek
+        # i NIE przycinana (patrz zrzuty.py); jeden na dzień, więc kolejne
+        # uruchomienie tego samego dnia nic dodatkowego nie robi
+        if not zrzuty.istnieje_zrzut_na_dzien(self.katalog_danych, date.today()):
+            zrzuty.zrob_zrzut(self.conn, self.katalog_danych)
+
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
@@ -228,6 +235,21 @@ def main():
     katalog = _katalog_danych()
     dziennik.skonfiguruj(katalog)
     dziennik.zainstaluj_haki(katalog=katalog)
+
+    # jedna instancja na katalog danych - dwie otwarte naraz to dwa okna
+    # cicho nadpisujące sobie zmiany, mylące dla nietechnicznego użytkownika
+    blokada_instancji = blokada.Blokada(katalog)
+    if not blokada_instancji.zdobadz():
+        okno = tk.Tk()
+        okno.withdraw()
+        messagebox.showwarning(
+            "ZPO Tracker już działa",
+            "Program jest już uruchomiony. Przełącz się na istniejące okno "
+            "zamiast otwierać kolejne.",
+        )
+        okno.destroy()
+        return
+
     try:
         app = Aplikacja()
     except repo.NiezgodnaWersjaSchematu as e:
@@ -238,8 +260,12 @@ def main():
         okno.withdraw()
         messagebox.showerror("Nie można otworzyć bazy", str(e))
         okno.destroy()
+        blokada_instancji.zwolnij()
         return
-    app.mainloop()
+    try:
+        app.mainloop()
+    finally:
+        blokada_instancji.zwolnij()
 
 
 if __name__ == "__main__":
