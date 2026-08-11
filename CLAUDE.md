@@ -32,6 +32,9 @@ knowledge lives in `docs/`, one topic per file:
 - `docs/ux-ui.md` — UX direction (courier-first entry modeled on the paper
   form), the "idiot-proof, not just non-technical" framing, validation
   approach, and what's still undecided about the suggestion engine
+- `docs/roadmap.md` — version sequence (X+1 … X+3) and the open
+  direction-setting questions that would reshape it; read before planning
+  any multi-version work
 - `docs/backlog.md` — full backlog, grouped by topic
 - `docs/normalization-v2.md` — proposed relational schema v2 and the two
   open risks it depends on (see also `schema_v2_draft.sql`)
@@ -167,8 +170,8 @@ Default section order:
 - `demo/AGENTS.md` — throwaway HTML UX prototypes, not production code
 - `data/AGENTS.md` — local real-data scratch space, gitignored contract
 - Root-owned reference docs, see `docs/`: `domain-model.md`,
-  `tech-decisions.md`, `environment.md`, `ux-ui.md`, `backlog.md`,
-  `normalization-v2.md`, `reference-data-sources.md`
+  `tech-decisions.md`, `environment.md`, `ux-ui.md`, `roadmap.md`,
+  `backlog.md`, `normalization-v2.md`, `reference-data-sources.md`
 - Root-owned project files: `README.md`, `schema.sql`, `schema_v2_draft.sql`,
   `pyproject.toml`, `.gitignore`, `zpo_tracker.spec` (PyInstaller, must be
   built on Windows — see `docs/environment.md`)

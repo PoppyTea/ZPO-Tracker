@@ -23,10 +23,22 @@ CREATE TABLE kurierzy (
     imie                    TEXT NOT NULL,
     nazwisko                TEXT NOT NULL,
     pelne_nazwisko_raw      TEXT,               -- fallback: oryginalny string z importu
-    identyfikator_zewnetrzny TEXT UNIQUE,        -- backlog: potrzebny przy łączeniu z innymi systemami (np. nr pracownika)
     wykonawca_id            INTEGER REFERENCES wykonawcy(id),
     UNIQUE(imie, nazwisko, wykonawca_id)
 );
+
+-- Numery kadrowe kurierów - potrzebne przy łączeniu z innymi systemami.
+-- UWAGA: relacja 1 kurier : N numerów, więc NIE może to być kolumna
+-- w `kurierzy` (wcześniejszy draft miał tu `identyfikator_zewnetrzny
+-- TEXT UNIQUE`, co nie jest w stanie wyrazić 1:N). Format inny niż
+-- `users.nr_kadrowy` (pracownicy działu) - nie mylić tych dwóch.
+CREATE TABLE numery_kadrowe_kurierow (
+    id          INTEGER PRIMARY KEY,
+    kurier_id   INTEGER NOT NULL REFERENCES kurierzy(id),
+    numer       TEXT NOT NULL UNIQUE
+);
+
+CREATE INDEX idx_numery_kadrowe_kurier ON numery_kadrowe_kurierow(kurier_id);
 
 CREATE TABLE miejscowosci (
     id      INTEGER PRIMARY KEY,

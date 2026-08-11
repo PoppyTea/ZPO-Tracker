@@ -3,14 +3,20 @@
 Referencja dla `CLAUDE.md`. Pogrupowane tematycznie, nie priorytetyzowane
 chronologicznie w obrębie grupy.
 
+Kolejność wersji i decyzje kierunkowe: `roadmap.md`. Tutaj konkretne
+jednostki pracy do wzięcia; tam co i kiedy.
+
 ## Schemat / dane
 
 - [ ] Pełne wdrożenie normalizacji v2 (adresy, kurier→imię/nazwisko) —
       `firmy_zpo` już wdrożone w v1 (patrz Zrobione), reszta wciąż wymaga
       rozstrzygnięcia ryzyka podziału adresów, patrz `normalization-v2.md`
-- [ ] `kurierzy.identyfikator_zewnetrzny` — zewnętrzny identyfikator (nie
-      wewnętrzny `id`), potrzebny przy łączeniu z innymi systemami; już
-      dodane do `schema_v2_draft.sql`, nie do `schema.sql`
+- [ ] Numery kadrowe kurierów — zewnętrzny identyfikator (nie wewnętrzny
+      `id`), potrzebny przy łączeniu z innymi systemami. **Relacja
+      1 kurier : N numerów**, więc osobna tabela `numery_kadrowe_kurierow`,
+      nie kolumna w `kurierzy` (wcześniejszy draft był tu błędny —
+      poprawione w `schema_v2_draft.sql`). Format inny niż `users.nr_kadrowy`
+      pracowników działu (`[a-zA-Z0-9]{5}`) — nie mylić tych dwóch.
 - [ ] Normalizacja `nadawcy` (ZUS, PKO, Kruk...) do osobnej tabeli — celowo
       odłożone, patrz `normalization-v2.md`
 - [ ] Dołączenie zewnętrznych danych referencyjnych do silnika podpowiedzi
@@ -23,10 +29,6 @@ chronologicznie w obrębie grupy.
       tylko dropdown+klawiaturę, bez nakładki z podpowiedzią przed
       kursorem; nie zaimplementowane z powodu awarii środowiska
       graficznego w trakcie budowy MVP (patrz `../src/AGENTS.md`)
-- [ ] **Wpięcie `widget_autocomplete.py` do formularza wprowadzania** —
-      widget sam w sobie już zweryfikowany wizualnie w izolacji (dropdown,
-      dopasowanie rozmyte, klawiatura - wszystko działa), ale nie jest
-      jeszcze podłączony do żadnego pola w `zakladka_wprowadzanie.py`
 - [ ] Doprecyzowanie dokładnej hierarchii przynależności encji (kurier/
       rejon/wykonawca/punkt) na wypadek pełnej normalizacji v2
 
@@ -54,4 +56,6 @@ chronologicznie w obrębie grupy.
       kodu i testami logiki z powodu awarii środowiska graficznego
 - [x] Prototyp narzędzia do przeglądu kurierów (imię/nazwisko), patrz
       `ux-ui.md`
+- [x] Wpięcie `widget_autocomplete.py` do formularza wprowadzania (pola
+      kurier/nadawca/adres w `zakladka_wprowadzanie.py`)
 - [x] Publiczne repozytorium GitHub (`github.com/PoppyTea/ZPO-Tracker`)

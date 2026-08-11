@@ -18,6 +18,16 @@ life a bit easier for my colleagues too.
 
 Modernizacja procesu wprowadzania danych otrzymywanych w formie papierowej + zmiana przechowywania danych z "tabelki w excelu" -> na prostą DB.
 
+## Status i plan
+
+Wydane: `v0.1.0-alpha.2` — działające MVP (import/export `.xlsx`, formularz
+blankietowy, słowniki, podpowiedzi).
+
+W toku (**X+1**): trwałość danych (transakcje, migawki, cofanie operacji),
+logi diagnostyczne, atrybucja zmian do autora, ręczne scalanie dwóch baz.
+Dalej: **X+2** przebudowa UI/UX, **X+3** automatyczna synchronizacja między
+stacjami. Pełna kolejność i otwarte pytania kierunkowe: `docs/roadmap.md`.
+
 ## Szybki start
 
 ```bash

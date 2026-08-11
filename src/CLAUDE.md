@@ -62,9 +62,9 @@ wartości z pól i wywołanie warstwy logiki:
 - `widget_autocomplete.py` — dropdown + klawiatura (bez ghost textu).
   Zweryfikowany w izolacji (zrzuty ekranu: dropdown renderuje się
   poprawnie, dopasowanie rozmyte działa, Tab/strzałki/zatwierdzanie
-  działają) — patrz Verification. **Wciąż NIEWPIĘTY do
-  `zakladka_wprowadzanie.py`** — integracja z prawdziwym, wielowierszowym
-  formularzem to osobny krok.
+  działają) — patrz Verification. **Wpięty do `zakladka_wprowadzanie.py`**
+  (pola kurier, nadawca, adres), źródło kandydatów z
+  `repo.pobierz_punkty`/`pobierz_slownik`.
 
 ## Work Guidance
 
@@ -100,10 +100,9 @@ nie usterka; pod `pytest` z `venv`+`pip` te same testy realnie się odpalają.
 
 `widget_autocomplete.py` zweryfikowany w izolacji przez systemowy Python:
 dropdown renderuje się poprawnie, dopasowanie rozmyte i klawiatura działają
-zgodnie z projektem. Integracja z `zakladka_wprowadzanie.py` (podpięcie
-do pól nadawca/adres/kurier, źródło kandydatów z `repo.pobierz_punkty`/
-`pobierz_slownik`) to następny krok — nie zrobiona jeszcze, bo to
-realna zmiana w już działającym, przetestowanym formularzu.
+zgodnie z projektem. Wpięty do `zakladka_wprowadzanie.py` (pola
+kurier/nadawca/adres, źródło kandydatów z `repo.pobierz_punkty`/
+`pobierz_slownik`).
 
 Build PyInstaller: proxy-build na Linuksie sprawdzony (pakuje się bez
 błędów importu `pydantic_core`, dochodzi do tworzenia okna Tk) — realny
