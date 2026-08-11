@@ -93,10 +93,16 @@ ma reprodukowalny fatalny `SIGABRT` przy tworzeniu JAKIEGOKOLWIEK widgetu
 Tk (nawet gołego `tk.Entry`) — zdiagnozowane jako problem konkretnej
 binarki python-build-standalone, NIE monitora/DPMS/sesji X11 ani kodu
 projektu (pełna diagnoza: `../docs/environment.md`). Systemowy Python
-(przez `venv`+`pip`, patrz wyżej) nie ma tego problemu. `test_gui_smoke.py`
-sonduje display w osobnym podprocesie i pomija się czysto, jeśli trafi na
-tę wadliwą binarkę — dwa pominięcia pod `uv run pytest` to ten mechanizm,
-nie usterka; pod `pytest` z `venv`+`pip` te same testy realnie się odpalają.
+nie ma tego problemu. `test_gui_smoke.py` sonduje display w osobnym
+podprocesie i pomija się czysto, jeśli trafi na tę wadliwą binarkę —
+pominięcia to ten mechanizm, nie usterka.
+
+`.venv/` w repo jest zbudowany systemowym Pythonem (naprawione
+2026-08-11, wcześniej przez pomyłkę wskazywał na `uv`) — pełny zestaw,
+łącznie z GUI, przechodzi pod nim bez pominięć. Osobny `.venv-sys/` nie
+jest już potrzebny. Jeśli po `python -m venv .venv` testy GUI zaczną się
+pomijać, sprawdź `.venv/pyvenv.cfg` — prawdopodobnie `python3` w `PATH`
+wskazuje na `uv`/inny menedżer zamiast na systemowego Pythona.
 
 `widget_autocomplete.py` zweryfikowany w izolacji przez systemowy Python:
 dropdown renderuje się poprawnie, dopasowanie rozmyte i klawiatura działają
