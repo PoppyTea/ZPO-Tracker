@@ -134,9 +134,6 @@ Uruchamiać z katalogu głównego repo (`testpaths` w root `pyproject.toml`
 wskazuje na `src/tests`). `uv sync --extra dev && uv run pytest` też
 działa, ale patrz zastrzeżenie niżej.
 
-Zmiany w `gui/` weryfikować przez `.venv-sys/bin/python -m pytest`
-(systemowy Python) — patrz „Stan środowiska graficznego”.
-
 **Stan środowiska graficznego:** `uv`-owy Python na tej konkretnej maszynie
 ma reprodukowalny fatalny `SIGABRT` przy tworzeniu JAKIEGOKOLWIEK widgetu
 Tk (nawet gołego `tk.Entry`) — zdiagnozowane jako problem konkretnej
@@ -146,13 +143,12 @@ nie ma tego problemu. `test_gui_smoke.py` sonduje display w osobnym
 podprocesie i pomija się czysto, jeśli trafi na tę wadliwą binarkę —
 pominięcia to ten mechanizm, nie usterka.
 
-**Uwaga praktyczna:** `.venv/` w repo jest obecnie zbudowany przez `uv`
-(`pyvenv.cfg` → `~/.local/share/uv/python/...`), więc testy GUI pod nim
-się POMIJAJĄ. Do realnego odpalenia testów GUI służy osobne
-`.venv-sys/` na systemowym Pythonie (gitignorowane) — pod nim przechodzi
-pełny zestaw bez pominięć. Zmiany dotykające `gui/` weryfikować tam,
-inaczej „wszystko zielone” nie obejmuje warstwy, którą się właśnie
-zmieniło.
+`.venv/` w repo jest zbudowany systemowym Pythonem (naprawione
+2026-08-11, wcześniej przez pomyłkę wskazywał na `uv`) — pełny zestaw,
+łącznie z GUI, przechodzi pod nim bez pominięć. Osobny `.venv-sys/` nie
+jest już potrzebny. Jeśli po `python -m venv .venv` testy GUI zaczną się
+pomijać, sprawdź `.venv/pyvenv.cfg` — prawdopodobnie `python3` w `PATH`
+wskazuje na `uv`/inny menedżer zamiast na systemowego Pythona.
 
 `widget_autocomplete.py` zweryfikowany w izolacji przez systemowy Python:
 dropdown renderuje się poprawnie, dopasowanie rozmyte i klawiatura działają

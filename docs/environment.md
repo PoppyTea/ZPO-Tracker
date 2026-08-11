@@ -65,26 +65,26 @@ do Windowsa w pracy). `src/tests/test_gui_smoke.py` wykrywa to automatycznie
 (sondowanie w osobnym podprocesie) i pomija się czysto zamiast ubijać cały
 `pytest`, gdy trafi na tę konkretną binarkę Pythona.
 
-**Stan faktyczny w repo (ustalone 2026-08-11):** `.venv/` jest zbudowany
-przez `uv` (`pyvenv.cfg` wskazuje na
+**Naprawione 2026-08-11:** `.venv/` był wcześniej przez pomyłkę zbudowany
+przez `uv` (`pyvenv.cfg` wskazywał na
 `~/.local/share/uv/python/cpython-3.11.13-...`), a NIE przez systemowego
 Pythona, mimo że ten drugi jest udokumentowaną ścieżką domyślną. Skutek:
-pod `.venv/` testy GUI pomijają się (4 pominięcia), pod systemowym
-Pythonem przechodzi pełny zestaw bez pominięć. Dlatego obok istnieje
-`.venv-sys/` (gitignorowane), zbudowane przez `/usr/bin/python3` — i to
-tam należy weryfikować wszystko, co dotyka `gui/`:
+pod tamtym `.venv/` testy GUI pomijały się. Przebudowany systemowym
+Pythonem (`/usr/bin/python3 -m venv .venv`) — pełny zestaw (175 testów)
+przechodzi teraz bez pominięć pod zwykłym `.venv/`. Osobny `.venv-sys/`
+nie jest już potrzebny i został usunięty; polecenia z `CLAUDE.md`
+(`python -m venv .venv && pip install ...`) wystarczają same w sobie,
+pod warunkiem że `python3` w `PATH` wskazuje na systemowego Pythona, nie
+na `uv`/`pyenv`/inny menedżer — warto to sprawdzić (`which python3`)
+przy zakładaniu środowiska od zera na tej maszynie.
 
-```
-/usr/bin/python3 -m venv .venv-sys
-.venv-sys/bin/pip install -r requirements-dev.txt && .venv-sys/bin/pip install -e .
-.venv-sys/bin/python -m pytest
-```
-
-Nie zbadane do końca: dlaczego akurat ta binarka `uv`. Do sprawdzenia
-kiedyś, gdyby się powtórzyło na innej maszynie: czy to znana usterka
-konkretnej wersji python-build-standalone, czy coś specyficznego dla tego
-systemu (np. rozjazd wersji `libxcb`/`libtk8.6` między momentem zbudowania
-tej dystrybucji Pythona a obecnym stanem pakietów systemowych).
+Nie zbadane do końca: dlaczego akurat binarka `uv`-owego Pythona
+(python-build-standalone, `cpython-3.11.13-linux-x86_64-gnu`) tak się
+zachowuje. Do sprawdzenia kiedyś, gdyby się powtórzyło na innej maszynie:
+czy to znana usterka konkretnej wersji python-build-standalone, czy coś
+specyficznego dla tego systemu (np. rozjazd wersji `libxcb`/`libtk8.6`
+między momentem zbudowania tej dystrybucji Pythona a obecnym stanem
+pakietów systemowych).
 
 ## Portable Git (Windows w biurze, bez admina)
 
