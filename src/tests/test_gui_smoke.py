@@ -38,21 +38,45 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_aplikacja_startuje_i_pokazuje_notebook():
+def test_aplikacja_startuje_i_pokazuje_notebook(tmp_path):
     from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik
 
-    app = Aplikacja(sciezka_bazy=":memory:")
+    # ścieżka w tmp_path, nie ":memory:" - inaczej log i dziennik lądują
+    # w PRAWDZIWYM katalogu danych użytkownika (~/.local/share/zpo-tracker)
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
     try:
         app.update()
         assert app.zakladka_przeglad is not None
     finally:
         app.destroy()
+        dziennik.odepnij()
 
 
-def test_zakladka_przeglad_pokazuje_wpisana_transakcje():
+def test_aplikacja_podpina_hak_na_wyjatki_z_callbackow(tmp_path):
+    # sedno kroku 1: bez tego wyjątek z callbacku Tk leci do sys.stderr,
+    # który w buildzie console=False jest None - awaria niewidzialna
     from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik
 
-    app = Aplikacja(sciezka_bazy=":memory:")
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        try:
+            raise ValueError("awaria z widgetu")
+        except ValueError:
+            app.report_callback_exception(*sys.exc_info())
+        tresc = (tmp_path / dziennik.NAZWA_LOGU).read_text(encoding="utf-8")
+        assert "awaria z widgetu" in tresc
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_zakladka_przeglad_pokazuje_wpisana_transakcje(tmp_path):
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
     try:
         blok = BlankietBlok(
             kurier="Testowy Kurier",
@@ -66,3 +90,4 @@ def test_zakladka_przeglad_pokazuje_wpisana_transakcje():
         assert "1 transakcji" in app.zakladka_przeglad.etykieta_liczby.cget("text")
     finally:
         app.destroy()
+        dziennik.odepnij()

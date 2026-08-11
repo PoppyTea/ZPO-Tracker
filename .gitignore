@@ -22,3 +22,8 @@ data/*
 
 # Bazy danych (pliki wygenerowane, nie schemat) - nie commitować
 *.db-journal
+
+# Środowisko na systemowym Pythonie - patrz docs/environment.md
+# (uv-owy Python ma na tej maszynie zepsuty tkinter, więc testy GUI
+# realnie odpalają się tylko tutaj)
+.venv-sys/

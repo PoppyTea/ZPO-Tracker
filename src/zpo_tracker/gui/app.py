@@ -8,11 +8,28 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
-from zpo_tracker import repo
+from zpo_tracker import dziennik, repo
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
 from zpo_tracker.gui.zakladka_import_export import ZakladkaImportExport
 from zpo_tracker.gui.zakladka_slowniki import ZakladkaSlowniki
+
+
+def _katalog_danych(os_name=None, appdata=None, home=None):
+    """
+    Katalog na wszystkie dane aplikacji: bazę, log i dziennik operacji.
+    Trzymane razem, żeby "przyślij mi plik z logami" pozostało instrukcją
+    wykonalną dla użytkownika.
+    """
+    os_name = os_name if os_name is not None else os.name
+    home = Path(home) if home is not None else Path.home()
+    if os_name == "nt":
+        appdata = appdata if appdata is not None else os.environ.get("APPDATA", str(home))
+        katalog = Path(appdata) / "ZPO-Tracker"
+    else:
+        katalog = home / ".local" / "share" / "zpo-tracker"
+    katalog.mkdir(parents=True, exist_ok=True)
+    return katalog
 
 
 def _domyslna_sciezka_bazy(os_name=None, appdata=None, home=None):
@@ -24,15 +41,20 @@ def _domyslna_sciezka_bazy(os_name=None, appdata=None, home=None):
     uruchomieniu. Windows: %APPDATA%\\ZPO-Tracker\\. Reszta:
     ~/.local/share/zpo-tracker/.
     """
-    os_name = os_name if os_name is not None else os.name
-    home = Path(home) if home is not None else Path.home()
-    if os_name == "nt":
-        appdata = appdata if appdata is not None else os.environ.get("APPDATA", str(home))
-        katalog = Path(appdata) / "ZPO-Tracker"
-    else:
-        katalog = home / ".local" / "share" / "zpo-tracker"
-    katalog.mkdir(parents=True, exist_ok=True)
+    katalog = _katalog_danych(os_name=os_name, appdata=appdata, home=home)
     return str(katalog / "zpo_tracker.db")
+
+
+def _katalog_logow(sciezka_bazy):
+    """
+    Katalog na log i dziennik, wyprowadzony ze ścieżki bazy. Bazy
+    specjalne (":memory:", "file::memory:?cache=shared") nie mają katalogu
+    nadrzędnego - `Path(":memory:").parent` to ".", co wysypywałoby logi do
+    katalogu roboczego, czyli tam, skąd akurat odpalono .exe.
+    """
+    if not sciezka_bazy or sciezka_bazy.startswith(("file:", ":memory:")):
+        return _katalog_danych()
+    return Path(sciezka_bazy).parent
 
 
 class Aplikacja(tk.Tk):
@@ -43,6 +65,12 @@ class Aplikacja(tk.Tk):
 
         self.conn = repo.polacz(sciezka_bazy or _domyslna_sciezka_bazy())
         _upewnij_schemat(self.conn)
+
+        # haki muszą wisieć na instancji Tk: sys.excepthook NIE łapie
+        # wyjątków z callbacków widgetów (patrz dziennik.py)
+        self.katalog_danych = _katalog_logow(sciezka_bazy)
+        dziennik.skonfiguruj(self.katalog_danych)
+        dziennik.zainstaluj_haki(self, katalog=self.katalog_danych)
 
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
@@ -86,6 +114,12 @@ def _upewnij_schemat(conn):
 
 
 def main():
+    # log konfigurowany PRZED zbudowaniem okna - awaria w trakcie
+    # konstrukcji Aplikacji (np. uszkodzona baza) inaczej nie zostawiłaby
+    # żadnego śladu, bo haki na instancji Tk jeszcze nie istnieją
+    katalog = _katalog_danych()
+    dziennik.skonfiguruj(katalog)
+    dziennik.zainstaluj_haki(katalog=katalog)
     app = Aplikacja()
     app.mainloop()
 

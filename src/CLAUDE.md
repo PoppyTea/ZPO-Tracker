@@ -45,11 +45,26 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   (int/date), świadome odstępstwo od niespójności źródła — patrz plan MVP.
 - `podpowiedzi.py` — silnik podpowiedzi (`podpowiedz`,
   `najlepsza_podpowiedz`), źródło kandydatów wstrzykiwane, nie zaszyte.
+- `dziennik.py` — diagnostyka. Dwa strumienie o różnym przeznaczeniu:
+  log tekstowy (`zpo.log`, kanał wsparcia, może zawierać dane z
+  komunikatów wyjątków, zostaje lokalnie) i **dziennik JSONL**
+  (`operacje.jsonl`, indeks operacji dla migawek/cofania). Kształt wpisu
+  JSONL jest **zamknięty** (`POLA_WPISU`, parametry nazwane zamiast
+  `**kwargs`), bo ten plik jest kandydatem do wyniesienia na zewnątrz —
+  żadnych nazwisk ani adresów. Oba żyją POZA bazą, żeby przetrwać jej
+  uszkodzenie i podmianę przy cofaniu. Numeracja operacji po jawnym
+  `seq`, nigdy po zegarze.
 
 Warstwa GUI (tkinter, `gui/`) — **zero logiki biznesowej**, tylko zbieranie
 wartości z pól i wywołanie warstwy logiki:
 
 - `app.py` — okno główne, `Notebook` z czterema zakładkami.
+  `_katalog_danych` (baza + log + dziennik razem), `_katalog_logow`
+  (obsługuje bazy specjalne typu `:memory:`, które nie mają katalogu
+  nadrzędnego). Haki diagnostyczne podpinane **dwukrotnie i celowo**:
+  w `main()` przed zbudowaniem okna (awaria w konstruktorze) oraz na
+  instancji Tk (`report_callback_exception` — `sys.excepthook` NIE łapie
+  wyjątków z callbacków widgetów).
 - `zakladka_przeglad.py`, `zakladka_wprowadzanie.py` (formularz
   blankietowy: bloki REJON+DATA, rejon opcjonalny/nieznany + komentarz
   per blok), `zakladka_import_export.py` (+ `DialogKorektyImportu` —
@@ -88,15 +103,25 @@ Uruchamiać z katalogu głównego repo (`testpaths` w root `pyproject.toml`
 wskazuje na `src/tests`). `uv sync --extra dev && uv run pytest` też
 działa, ale patrz zastrzeżenie niżej.
 
+Zmiany w `gui/` weryfikować przez `.venv-sys/bin/python -m pytest`
+(systemowy Python) — patrz „Stan środowiska graficznego”.
+
 **Stan środowiska graficznego:** `uv`-owy Python na tej konkretnej maszynie
 ma reprodukowalny fatalny `SIGABRT` przy tworzeniu JAKIEGOKOLWIEK widgetu
 Tk (nawet gołego `tk.Entry`) — zdiagnozowane jako problem konkretnej
 binarki python-build-standalone, NIE monitora/DPMS/sesji X11 ani kodu
 projektu (pełna diagnoza: `../docs/environment.md`). Systemowy Python
-(przez `venv`+`pip`, patrz wyżej) nie ma tego problemu. `test_gui_smoke.py`
-sonduje display w osobnym podprocesie i pomija się czysto, jeśli trafi na
-tę wadliwą binarkę — dwa pominięcia pod `uv run pytest` to ten mechanizm,
-nie usterka; pod `pytest` z `venv`+`pip` te same testy realnie się odpalają.
+nie ma tego problemu. `test_gui_smoke.py` sonduje display w osobnym
+podprocesie i pomija się czysto, jeśli trafi na tę wadliwą binarkę —
+pominięcia to ten mechanizm, nie usterka.
+
+**Uwaga praktyczna:** `.venv/` w repo jest obecnie zbudowany przez `uv`
+(`pyvenv.cfg` → `~/.local/share/uv/python/...`), więc testy GUI pod nim
+się POMIJAJĄ. Do realnego odpalenia testów GUI służy osobne
+`.venv-sys/` na systemowym Pythonie (gitignorowane) — pod nim przechodzi
+pełny zestaw bez pominięć. Zmiany dotykające `gui/` weryfikować tam,
+inaczej „wszystko zielone” nie obejmuje warstwy, którą się właśnie
+zmieniło.
 
 `widget_autocomplete.py` zweryfikowany w izolacji przez systemowy Python:
 dropdown renderuje się poprawnie, dopasowanie rozmyte i klawiatura działają
