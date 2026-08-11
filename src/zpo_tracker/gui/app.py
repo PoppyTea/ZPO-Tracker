@@ -16,6 +16,7 @@ from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
 from zpo_tracker.gui.zakladka_import_export import ZakladkaImportExport
 from zpo_tracker.gui.zakladka_slowniki import ZakladkaSlowniki
+from zpo_tracker.gui.zakladka_scalanie import ZakladkaScalanie
 from zpo_tracker.gui.zakladka_historia import ZakladkaHistoria
 
 
@@ -163,6 +164,11 @@ class Aplikacja(tk.Tk):
         self.notebook.add(self.zakladka_import_export, text="Import / Export")
 
         self.notebook.add(self.zakladka_slowniki, text="Słowniki")
+
+        self.zakladka_scalanie = ZakladkaScalanie(
+            self.notebook, self.conn, self.katalog_danych, on_scalono=odswiez_po_zmianie
+        )
+        self.notebook.add(self.zakladka_scalanie, text="Scalanie")
 
         self.zakladka_historia = ZakladkaHistoria(
             self.notebook, self.katalog_danych, on_cofnij=self.cofnij_do)

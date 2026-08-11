@@ -448,6 +448,106 @@ def test_start_aplikacji_drugi_raz_tego_samego_dnia_nie_dubluje_zrzutu(tmp_path)
         dziennik.odepnij()
 
 
+def test_zakladka_scalanie_istnieje(tmp_path):
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        assert app.zakladka_scalanie is not None
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_scalanie_end_to_end_dodaje_nowa_transakcje_i_loguje_operacje(tmp_path):
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, repo as repo_modul, scalanie
+    from zpo_tracker.gui.zakladka_scalanie import DialogKorektyScalania
+
+    sciezka_zrodlowa = tmp_path / "zrodlo.db"
+    zrodlowa = repo_modul.polacz(str(sciezka_zrodlowa))
+    repo_modul.utworz_schemat(zrodlowa)
+    kurier_id = zrodlowa.execute(
+        "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
+    punkt_id = zrodlowa.execute(
+        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    zrodlowa.execute(
+        "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, uuid)"
+        " VALUES ('2026-08-01', ?, ?, 3, 'uuid-1')", (kurier_id, punkt_id))
+    zrodlowa.close()
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "docelowa.db"))
+    try:
+        plan = scalanie.zaplanuj_scalenie(app.conn, sciezka_zrodlowa)
+        wyniki = {}
+        dialog = DialogKorektyScalania(
+            app, app.conn, app.katalog_danych, sciezka_zrodlowa, plan,
+            on_gotowe=lambda w: wyniki.setdefault("wynik", w),
+        )
+        dialog._zatwierdz()
+
+        assert wyniki["wynik"]["dodano_transakcji"] == 1
+        assert app.conn.execute(
+            "SELECT COUNT(*) FROM transakcje").fetchone()[0] == 1
+
+        wpisy = dziennik.wczytaj_operacje(app.katalog_danych)
+        assert wpisy[-1]["rodzaj"] == "scalenie"
+        assert wpisy[-1]["etykieta"] == "zrodlo.db"
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_scalanie_konflikt_domyslnie_zostawia_docelowa_przez_dialog(tmp_path):
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, operacje, repo as repo_modul, scalanie
+    from zpo_tracker.gui.zakladka_scalanie import DialogKorektyScalania
+
+    sciezka_zrodlowa = tmp_path / "zrodlo.db"
+    zrodlowa = repo_modul.polacz(str(sciezka_zrodlowa))
+    repo_modul.utworz_schemat(zrodlowa)
+    kurier_id = zrodlowa.execute(
+        "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
+    punkt_id = zrodlowa.execute(
+        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    zrodlowa.execute(
+        "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, uuid)"
+        " VALUES ('2026-08-01', ?, ?, 5, 'uuid-1')", (kurier_id, punkt_id))
+    zrodlowa.close()
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "docelowa.db"))
+    try:
+        def wstaw(conn, nazwa):
+            conn.execute("INSERT INTO kurierzy (imie_nazwisko) VALUES (?)", (nazwa,))
+
+        operacje.wykonaj(
+            app.conn, app.katalog_danych, rodzaj="test", etykieta="e",
+            funkcja=lambda conn: conn.execute(
+                "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')"))
+        app.conn.execute("INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')")
+        app.conn.execute(
+            "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, uuid)"
+            " VALUES ('2026-08-01', 1, 1, 3, 'uuid-docelowa')")
+
+        plan = scalanie.zaplanuj_scalenie(app.conn, sciezka_zrodlowa)
+        assert len(plan["transakcje"]["konflikty"]) == 1
+
+        wyniki = {}
+        dialog = DialogKorektyScalania(
+            app, app.conn, app.katalog_danych, sciezka_zrodlowa, plan,
+            on_gotowe=lambda w: wyniki.setdefault("wynik", w),
+        )
+        dialog._zatwierdz()  # bez klikania "weź źródłową" - domyślnie zostaje docelowa
+
+        assert wyniki["wynik"]["rozstrzygnieto_konfliktow"] == 0
+        assert app.conn.execute(
+            "SELECT ilosc_total FROM transakcje").fetchone()[0] == 3
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
 def test_cofnij_do_przywraca_stan_i_zamyka_aplikacje(tmp_path):
     from zpo_tracker.gui.app import Aplikacja
     from zpo_tracker import dziennik, operacje, repo as repo_modul

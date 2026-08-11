@@ -67,6 +67,10 @@ class DialogAlternatywnychMigawek(tk.Toplevel):
 
         ttk.Button(self, text="Anuluj", command=self.destroy).pack(pady=(8, 14))
         self.transient(parent)
+        # grab_set() wymaga zmapowanego okna - bez wait_visibility() bywa
+        # migotliwe pod obciążeniem (TclError "window not viewable"),
+        # jeśli X11 nie zdążył jeszcze zmapować okna
+        self.wait_visibility()
         self.grab_set()
 
     def _wiersz_alternatywy(self, parent, etykieta, wpis):

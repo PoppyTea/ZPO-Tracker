@@ -75,6 +75,25 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   miękkie ostrzeżenia). W SQLite pilnuje formatu `GLOB`, nie `LIKE`
   (`LIKE` jest niewrażliwy na wielkość liter). Numery kadrowe KURIERÓW to
   inny byt: inny format i relacja 1:N — patrz `../docs/roadmap.md`.
+- `scalanie.py` — ręczne, JEDNOKIERUNKOWE scalanie dwóch baz: docelowa
+  (żywa) WCHŁANIA źródłową (plik `.db`, otwierany WYŁĄCZNIE do odczytu
+  przez URI SQLite `mode=ro` — twarda gwarancja silnika, nie tylko
+  konwencja; źródło zostaje nietknięte, bezpieczne do ponownego scalenia
+  gdzie indziej). Dwuetapowe jak `import_orchestrator.py`:
+  `zaplanuj_scalenie` (WYŁĄCZNIE odczyt, buduje pełny plan) →
+  `wykonaj_scalenie` (stosuje, atomowo przez `repo.transakcja`).
+  Dopasowanie słowników po kluczu NATURALNYM, nie po `id` (różne
+  surogatowe ID na różnych stacjach): `_dopasuj_prosty_slownik` reużywa
+  trójpoziomowe podejście z importu (białe znaki → automat, literówka →
+  propozycja — WYŁĄCZNIE kurierzy, jak przy imporcie, diakrytyki →
+  ostrzeżenie, nigdy automat). Punkty reużywają `importer.get_or_create_punkt`
+  wprost przy wykonaniu (ten sam klucz PNI/adres, żadnej osobnej logiki).
+  `users.id` to już UUIDv5 — dopisanie brakujących, rozjazd nr_kadrowego
+  tylko informacyjny (niska stawka vs. konflikt ilości).
+  **Konflikt wartości (ta sama trójka data+kurier+punkt, różne ilości)
+  NIGDY nie jest rozstrzygany automatycznie** (roadmap.md) — domyślnie
+  zostaje wartość DOCELOWA (nigdy nie nadpisuje po cichu), zmiana
+  wyłącznie przez jawne `rozstrzygniecia_konfliktow`.
 - `blokada.py` — jedna instancja `app.main` na katalog danych: blokada
   PLIKU na poziomie systemu operacyjnego (`fcntl.flock`/`msvcrt.locking`),
   NIE zapis PID-u i sprawdzanie go później — PID martwego procesu bywa
@@ -137,7 +156,7 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
 Warstwa GUI (tkinter, `gui/`) — **zero logiki biznesowej**, tylko zbieranie
 wartości z pól i wywołanie warstwy logiki:
 
-- `app.py` — okno główne, `Notebook` z pięcioma zakładkami.
+- `app.py` — okno główne, `Notebook` z sześcioma zakładkami.
   `_katalog_danych` — na Windows **`%LOCALAPPDATA%`, nie `%APPDATA%`**
   (Roaming przy profilach mobilnych wciąga bazę i historię kopii na
   ścieżkę logowania); `_przenies_ze_starej_lokalizacji` robi jednorazową
@@ -164,7 +183,12 @@ wartości z pól i wywołanie warstwy logiki:
   per blok), `zakladka_import_export.py` (+ `DialogKorektyImportu` —
   ekran korekty pokazuje WYŁĄCZNIE wiersze wymagające uwagi),
   `zakladka_slowniki.py` (podzakładki kurierzy/punkty ZPO/wykonawcy/
-  rejony/firmy ZPO), `zakladka_historia.py` (log operacji + "Cofnij do
+  rejony/firmy ZPO), `zakladka_scalanie.py` (`DialogKorektyScalania` -
+  ten sam wzorzec ekranu korekty co import: pokazuje WYŁĄCZNIE propozycje
+  literówek/różnice w zapisie/konflikty ilości, reszta wchodzi/pomija się
+  cicho; reużywa `gui.roznice.segmenty_roznicy` i
+  `zakladka_import_export._pole_z_roznicami` do podświetlania różnic),
+  `zakladka_historia.py` (log operacji + "Cofnij do
   tego punktu"; seq czytany z WARTOŚCI wiersza, nie z pozycji w drzewie —
   sortowanie po kliknięciu nagłówka w `widget_tabela.Tabela` zmienia
   kolejność wierszy). Gdy migawka celu jest przycięta,
@@ -172,10 +196,11 @@ wartości z pól i wywołanie warstwy logiki:
   operację z żywą migawką — obie klikalne, prowadzą do tego samego
   potwierdzenia co zwykłe cofnięcie (`_potwierdz_i_cofnij`), sprawdzenie
   istnienia pliku dzieje się PRZED tym dialogiem, nie w środku (patrz
-  `operacje.znajdz_najblizsze_migawki` wyżej). **Wszystkie cztery pozostałe zakładki wołają
-  `operacje.wykonaj` zamiast `repo.*` bezpośrednio przy każdej mutacji**
-  (zapis blankietu, import, dodanie/zmiana/scalenie w słownikach, nowy
-  punkt ZPO) — patrz `operacje.py` wyżej.
+  `operacje.znajdz_najblizsze_migawki` wyżej). **Wszystkie pozostałe
+  zakładki wołają `operacje.wykonaj` zamiast `repo.*` bezpośrednio przy
+  każdej mutacji** (zapis blankietu, import, dodanie/zmiana/scalenie
+  w słownikach, nowy punkt ZPO, scalanie dwóch baz) — patrz `operacje.py`
+  wyżej.
 - `formularz_logika.py` — jedyny most między formularzem a
   `models.py`/pydantic; GUI wyświetla błędy walidacji, nie decyduje o nich.
 - `widget_tabela.py` — wspólna tabela z sortowaniem i Ctrl+scroll zoom.
