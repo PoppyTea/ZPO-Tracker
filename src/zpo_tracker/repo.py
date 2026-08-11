@@ -4,8 +4,10 @@ wprowadzania, odczyt do przeglądania. Logika get_or_create_* zostaje
 w importer.py (reużywana też przy imporcie .xlsx) - repo.py dokłada to,
 czego sam import nie potrzebuje: komentarz per blok i odczyt z nazwami.
 """
+import itertools
 import sqlite3
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 from zpo_tracker.importer import (
@@ -33,6 +35,11 @@ def _resolve_schema_path(frozen=None, meipass=None):
 
 SCHEMA_PATH = _resolve_schema_path()
 
+# Musi być zgodna z `PRAGMA user_version` na końcu schema.sql - patrz tam.
+WERSJA_SCHEMATU = 1
+
+_licznik_savepointow = itertools.count()
+
 # Słowniki proste: id + jedno pole tekstowe. Kolumna FK w transakcje jest
 # potrzebna tylko dla scal_* (kurierzy) - patrz scal_kurierow.
 _TABELE_PROSTE = {
@@ -58,13 +65,93 @@ def utworz_schemat(conn):
         conn.executescript(f.read())
 
 
+class NiezgodnaWersjaSchematu(Exception):
+    """
+    Baza pochodzi z NOWSZEJ wersji aplikacji. Komunikat trafia wprost do
+    użytkownika, więc jest po polsku i bez żargonu.
+    """
+
+
+def wersja_schematu(conn):
+    """
+    Wersja struktury bazy (`PRAGMA user_version`). Pusta/nieznana baza
+    zwraca 0. Potrzebne przy przywracaniu migawek i - docelowo (X+3) -
+    przy synchronizacji: stacje aktualizowane w różnym czasie będą miały
+    różne wersje schematu.
+    """
+    return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def wymaga_migracji(conn):
+    """Baza starsza niż aplikacja - do podniesienia, nie do odrzucenia."""
+    return 0 < wersja_schematu(conn) < WERSJA_SCHEMATU or wersja_schematu(conn) == 0
+
+
+def sprawdz_zgodnosc_wersji(conn):
+    """
+    Odrzuca bazę pochodzącą z NOWSZEJ wersji aplikacji. Czytanie takiej
+    bazy "jakoś" kończy się cichym gubieniem kolumn, których ta wersja nie
+    zna - a przy synchronizacji między stacjami aktualizowanymi w różnym
+    czasie (X+3) to sytuacja spodziewana, nie egzotyczna.
+    """
+    wersja = wersja_schematu(conn)
+    if wersja > WERSJA_SCHEMATU:
+        raise NiezgodnaWersjaSchematu(
+            f"Ta baza pochodzi z nowszej wersji programu (wersja danych "
+            f"{wersja}, ten program obsługuje {WERSJA_SCHEMATU}). "
+            f"Zaktualizuj program, zanim ją otworzysz - inaczej część "
+            f"danych mogłaby zostać po cichu pominięta."
+        )
+
+
+@contextmanager
+def transakcja(conn):
+    """
+    Jawna transakcja na SAVEPOINT - **re-entrant**, więc można zagnieżdżać
+    (fasada operacji opakowuje `zapisz_blok`, które samo woła
+    `get_or_create_*`; zwykłe BEGIN rzuciłoby "cannot start a transaction
+    within a transaction").
+
+    NIE używać wbudowanego `with conn:` - przy `isolation_level=None`
+    (autocommit, ustawione w `polacz` dla GH #4) on **nic nie wycofuje**.
+    Kod z `with conn:` wygląda poprawnie i nie robi nic; przypięte testem
+    `test_wbudowane_with_conn_nic_nie_wycofuje`.
+
+    Uwaga: złapany `IntegrityError` NIE unieważnia transakcji (domyślne
+    ON CONFLICT ABORT wycofuje samą instrukcję), więc per-wierszowe
+    `except` w `zapisz_blok`/`zaimportuj` działają wewnątrz bez zmian.
+    """
+    nazwa = f"zpo_sp_{next(_licznik_savepointow)}"
+    conn.execute(f"SAVEPOINT {nazwa}")
+    try:
+        yield conn
+    except BaseException:
+        # ROLLBACK TO cofa zmiany, ale ZOSTAWIA savepoint na stosie -
+        # bez RELEASE zostałby otwarty i zablokował zewnętrzną transakcję
+        conn.execute(f"ROLLBACK TO {nazwa}")
+        conn.execute(f"RELEASE {nazwa}")
+        raise
+    conn.execute(f"RELEASE {nazwa}")
+
+
 def zapisz_blok(conn, blok):
     """
     Zapisuje BlankietBlok jako jedną transakcję na WierszBlankietu, z tym
     samym komentarzem dla całego bloku. Zwraca listę dictów:
     {"id", "pominieto", "ostrzezenia", "powod"} - jeden na wiersz, w
     kolejności wejściowej.
+
+    Całość jest ATOMOWA: jeden blankiet = jeden zapis. Bez tego awaria
+    w połowie zostawiała część wierszy w bazie, użytkownik widział "nie
+    zapisało się" i wpisywał wszystko od nowa - powstawały duplikaty.
+    Pomijanie pojedynczych duplikatów (IntegrityError niżej) działa
+    wewnątrz transakcji bez zmian - patrz `transakcja`.
     """
+    with transakcja(conn):
+        return _zapisz_blok_bez_transakcji(conn, blok)
+
+
+def _zapisz_blok_bez_transakcji(conn, blok):
     kurier_id = get_or_create_kurier(conn, blok.kurier)
     rejon_id = get_or_create_rejon(conn, blok.rejon)
     wykonawca_id = get_or_create_wykonawca(conn, blok.wykonawca)
@@ -136,8 +223,11 @@ def scal_kurierow(conn, id_z, id_do):
     droga naprawy dla par typu "Wołczuk Rafal"/"Wołczuk Rafał"
     (docs/domain-model.md), zgłoszonych jako ostrzeżenie, nie scalonych
     automatycznie."""
-    conn.execute("UPDATE transakcje SET kurier_id = ? WHERE kurier_id = ?", (id_do, id_z))
-    conn.execute("DELETE FROM kurierzy WHERE id = ?", (id_z,))
+    # atomowo: bez tego awaria między UPDATE a DELETE zostawiała transakcje
+    # przepięte na kuriera, który zaraz miał zniknąć - albo odwrotnie
+    with transakcja(conn):
+        conn.execute("UPDATE transakcje SET kurier_id = ? WHERE kurier_id = ?", (id_do, id_z))
+        conn.execute("DELETE FROM kurierzy WHERE id = ?", (id_z,))
 
 
 def pobierz_unikalne_nadawcow(conn):

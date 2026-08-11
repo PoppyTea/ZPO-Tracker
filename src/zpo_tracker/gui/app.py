@@ -3,10 +3,11 @@ Okno główne aplikacji - Notebook z zakładkami. Zero logiki biznesowej -
 tylko układ i spięcie zakładek z warstwą repo/db (docelowo: przeglądanie,
 wprowadzanie, import/export, słowniki - dochodzą w kolejnych krokach).
 """
+import logging
 import os
 import tkinter as tk
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 from zpo_tracker import dziennik, repo
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
@@ -15,34 +16,80 @@ from zpo_tracker.gui.zakladka_import_export import ZakladkaImportExport
 from zpo_tracker.gui.zakladka_slowniki import ZakladkaSlowniki
 
 
-def _katalog_danych(os_name=None, appdata=None, home=None):
+NAZWA_BAZY = "zpo_tracker.db"
+
+
+def _katalog_danych(os_name=None, localappdata=None, home=None):
     """
-    Katalog na wszystkie dane aplikacji: bazę, log i dziennik operacji.
-    Trzymane razem, żeby "przyślij mi plik z logami" pozostało instrukcją
-    wykonalną dla użytkownika.
+    Katalog na wszystkie dane aplikacji: bazę, log, dziennik operacji
+    i kopie. Trzymane razem, żeby "przyślij mi plik z logami" pozostało
+    instrukcją wykonalną dla użytkownika.
+
+    Windows: %LOCALAPPDATA%, NIE %APPDATA%. To drugie to Roaming - przy
+    profilach mobilnych albo przekierowaniu folderów (typowe w dużej
+    organizacji) baza i cała historia kopii lądują na ścieżce logowania
+    i wylogowania, co kończy się wielominutowym logowaniem i zakazem
+    używania narzędzia.
     """
     os_name = os_name if os_name is not None else os.name
     home = Path(home) if home is not None else Path.home()
     if os_name == "nt":
-        appdata = appdata if appdata is not None else os.environ.get("APPDATA", str(home))
-        katalog = Path(appdata) / "ZPO-Tracker"
+        if localappdata is None:
+            localappdata = os.environ.get("LOCALAPPDATA", str(home))
+        katalog = Path(localappdata) / "ZPO-Tracker"
     else:
         katalog = home / ".local" / "share" / "zpo-tracker"
     katalog.mkdir(parents=True, exist_ok=True)
     return katalog
 
 
-def _domyslna_sciezka_bazy(os_name=None, appdata=None, home=None):
+def _katalog_roaming(os_name=None, appdata=None, home=None):
+    """Stara lokalizacja (Roaming) - tylko na potrzeby migracji."""
+    os_name = os_name if os_name is not None else os.name
+    if os_name != "nt":
+        return None
+    home = Path(home) if home is not None else Path.home()
+    if appdata is None:
+        appdata = os.environ.get("APPDATA")
+    return Path(appdata) / "ZPO-Tracker" if appdata else None
+
+
+def _przenies_ze_starej_lokalizacji(docelowa, stary_katalog):
+    """
+    Jednorazowa migracja Roaming -> Local. Jeśli baza istnieje już
+    w nowej lokalizacji, stara jest ZOSTAWIANA nietknięta: nadpisanie
+    bieżącej pracy porzuconą kopią byłoby gorsze niż zduplikowany plik.
+    """
+    if docelowa.exists() or stary_katalog is None:
+        return
+    stara = stary_katalog / NAZWA_BAZY
+    if not stara.exists():
+        return
+    try:
+        stara.replace(docelowa)
+    except OSError:
+        # inny wolumin albo brak uprawnień - kopiuj i zostaw oryginał
+        import shutil
+        shutil.copy2(stara, docelowa)
+
+
+def _domyslna_sciezka_bazy(os_name=None, localappdata=None, appdata=None, home=None):
     """
     Ścieżka do bazy NIEZALEŻNA od katalogu roboczego (GH #4, krytyczny):
     ścieżka względna "zpo_tracker.db" tworzyła nową, pustą bazę za każdym
     razem, gdy aplikacja była odpalana z innego miejsca (skrót na
     pulpicie, inny folder) - wyglądało to jak reset danych po każdym
-    uruchomieniu. Windows: %APPDATA%\\ZPO-Tracker\\. Reszta:
+    uruchomieniu. Windows: %LOCALAPPDATA%\\ZPO-Tracker\\. Reszta:
     ~/.local/share/zpo-tracker/.
     """
-    katalog = _katalog_danych(os_name=os_name, appdata=appdata, home=home)
-    return str(katalog / "zpo_tracker.db")
+    katalog = _katalog_danych(
+        os_name=os_name, localappdata=localappdata, home=home)
+    docelowa = katalog / NAZWA_BAZY
+    _przenies_ze_starej_lokalizacji(
+        docelowa,
+        _katalog_roaming(os_name=os_name, appdata=appdata, home=home),
+    )
+    return str(docelowa)
 
 
 def _katalog_logow(sciezka_bazy):
@@ -111,6 +158,10 @@ def _upewnij_schemat(conn):
     ).fetchone()
     if row is None:
         repo.utworz_schemat(conn)
+        return
+    # baza z nowszej wersji programu: czytanie jej "jakoś" kończy się cichym
+    # pominięciem kolumn, których ta wersja nie zna
+    repo.sprawdz_zgodnosc_wersji(conn)
 
 
 def main():
@@ -120,7 +171,17 @@ def main():
     katalog = _katalog_danych()
     dziennik.skonfiguruj(katalog)
     dziennik.zainstaluj_haki(katalog=katalog)
-    app = Aplikacja()
+    try:
+        app = Aplikacja()
+    except repo.NiezgodnaWersjaSchematu as e:
+        # czytelny komunikat zamiast crashu bez śladu - w buildzie
+        # console=False użytkownik nie zobaczyłby nawet tracebacku
+        logging.getLogger("zpo_tracker").error("Odmowa otwarcia bazy: %s", e)
+        okno = tk.Tk()
+        okno.withdraw()
+        messagebox.showerror("Nie można otworzyć bazy", str(e))
+        okno.destroy()
+        return
     app.mainloop()
 
 

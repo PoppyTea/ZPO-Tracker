@@ -29,10 +29,23 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   automatyczny dedup z możliwością odrzucenia), `znajdz_podobne`
   (różnica WYŁĄCZNIE w diakrytykach — nigdy automat, patrz
   `../docs/domain-model.md`, przypadek "Wołczuk Rafal"/"Rafał").
-- `repo.py` — dostęp do danych: `zapisz_blok` (formularz → transakcje),
+- `repo.py` — **`transakcja(conn)`**: jawna transakcja na SAVEPOINT,
+  re-entrant (fasady opakowują `zapisz_blok`, które samo woła
+  `get_or_create_*` — zwykłe `BEGIN` by się zagnieździło i rzuciło).
+  **NIE używać wbudowanego `with conn:`** — przy `isolation_level=None`
+  on nic nie wycofuje; kod wygląda poprawnie i nie robi nic (przypięte
+  testem `test_wbudowane_with_conn_nic_nie_wycofuje`). Złapany
+  `IntegrityError` NIE unieważnia transakcji, więc per-wierszowe `except`
+  w `zapisz_blok`/`zaimportuj` działają wewnątrz bez zmian.
+  `WERSJA_SCHEMATU` + `wersja_schematu`/`sprawdz_zgodnosc_wersji`/
+  `wymaga_migracji` — musi zgadzać się z `PRAGMA user_version` na końcu
+  `schema.sql`. Dostęp do danych: `zapisz_blok` (formularz → transakcje,
+  **atomowy**),
   słowniki proste (`pobierz_slownik`/`dodaj_do_slownika`/
   `zmien_nazwe_w_slowniku`/`usun_z_slownika`), `scal_kurierow` (droga
-  naprawy dla ostrzeżeń o podobieństwie), `pobierz_transakcje`,
+  naprawy dla ostrzeżeń o podobieństwie, **atomowy**; przy kolizji
+  `UNIQUE(data,kurier,punkt)` scalenie się nie uda — ale nie zostawi
+  stanu połowicznego), `pobierz_transakcje`,
   `pobierz_punkty`. `_resolve_schema_path` rozróżnia dev vs spakowany
   `.exe` (PyInstaller rozpakowuje dane do `sys._MEIPASS`).
 - `import_orchestrator.py` — cały import w partii: `zwaliduj_wiersze`,
@@ -59,7 +72,11 @@ Warstwa GUI (tkinter, `gui/`) — **zero logiki biznesowej**, tylko zbieranie
 wartości z pól i wywołanie warstwy logiki:
 
 - `app.py` — okno główne, `Notebook` z czterema zakładkami.
-  `_katalog_danych` (baza + log + dziennik razem), `_katalog_logow`
+  `_katalog_danych` — na Windows **`%LOCALAPPDATA%`, nie `%APPDATA%`**
+  (Roaming przy profilach mobilnych wciąga bazę i historię kopii na
+  ścieżkę logowania); `_przenies_ze_starej_lokalizacji` robi jednorazową
+  migrację z Roaming, ale NIE nadpisuje istniejącej bazy lokalnej.
+  Baza + log + dziennik razem; `_katalog_logow`
   (obsługuje bazy specjalne typu `:memory:`, które nie mają katalogu
   nadrzędnego). Haki diagnostyczne podpinane **dwukrotnie i celowo**:
   w `main()` przed zbudowaniem okna (awaria w konstruktorze) oraz na

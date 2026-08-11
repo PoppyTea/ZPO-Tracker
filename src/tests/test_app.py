@@ -14,9 +14,47 @@ from zpo_tracker.gui.app import (
 )
 
 
-def test_domyslna_sciezka_windows_uzywa_appdata(tmp_path):
-    sciezka = _domyslna_sciezka_bazy(os_name="nt", appdata=str(tmp_path), home=str(tmp_path))
-    assert sciezka == str(tmp_path / "ZPO-Tracker" / "zpo_tracker.db")
+def test_domyslna_sciezka_windows_uzywa_localappdata(tmp_path):
+    # %APPDATA% to Roaming: przy profilach mobilnych/przekierowanych (typowe
+    # w dużej organizacji) baza i cała historia kopii lądowałyby na ścieżce
+    # logowania i wylogowania. %LOCALAPPDATA% nigdy nie roamuje.
+    lokalny = tmp_path / "Local"
+    sciezka = _domyslna_sciezka_bazy(
+        os_name="nt", localappdata=str(lokalny), home=str(tmp_path))
+    assert sciezka == str(lokalny / "ZPO-Tracker" / "zpo_tracker.db")
+
+
+def test_migracja_przenosi_baze_z_roaming_do_local(tmp_path):
+    # użytkownicy z wcześniejszej wersji mają dane w Roaming - nie wolno
+    # ich zgubić przy zmianie lokalizacji
+    roaming = tmp_path / "Roaming" / "ZPO-Tracker"
+    roaming.mkdir(parents=True)
+    (roaming / "zpo_tracker.db").write_bytes(b"stare dane")
+    lokalny = tmp_path / "Local"
+
+    sciezka = _domyslna_sciezka_bazy(
+        os_name="nt", localappdata=str(lokalny),
+        appdata=str(tmp_path / "Roaming"), home=str(tmp_path))
+
+    assert Path(sciezka).read_bytes() == b"stare dane"
+    assert not (roaming / "zpo_tracker.db").exists()
+
+
+def test_migracja_nie_nadpisuje_istniejacej_bazy_lokalnej(tmp_path):
+    # jeśli obie istnieją, nowsza lokalizacja wygrywa - inaczej stara,
+    # porzucona kopia z Roaming skasowałaby bieżącą pracę
+    roaming = tmp_path / "Roaming" / "ZPO-Tracker"
+    roaming.mkdir(parents=True)
+    (roaming / "zpo_tracker.db").write_bytes(b"stare")
+    lokalny_katalog = tmp_path / "Local" / "ZPO-Tracker"
+    lokalny_katalog.mkdir(parents=True)
+    (lokalny_katalog / "zpo_tracker.db").write_bytes(b"biezace")
+
+    sciezka = _domyslna_sciezka_bazy(
+        os_name="nt", localappdata=str(tmp_path / "Local"),
+        appdata=str(tmp_path / "Roaming"), home=str(tmp_path))
+
+    assert Path(sciezka).read_bytes() == b"biezace"
 
 
 def test_domyslna_sciezka_linux_uzywa_katalogu_domowego(tmp_path):

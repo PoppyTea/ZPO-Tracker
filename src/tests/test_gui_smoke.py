@@ -72,6 +72,25 @@ def test_aplikacja_podpina_hak_na_wyjatki_z_callbackow(tmp_path):
         dziennik.odepnij()
 
 
+def test_aplikacja_odmawia_otwarcia_bazy_z_nowszej_wersji(tmp_path):
+    # stacja z nieaktualnym .exe otwierająca bazę z nowszej stacji - lepiej
+    # odmówić z komunikatem niż po cichu pominąć nieznane kolumny
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, repo
+
+    sciezka = str(tmp_path / "nowsza.db")
+    przygotowanie = repo.polacz(sciezka)
+    repo.utworz_schemat(przygotowanie)
+    przygotowanie.execute(f"PRAGMA user_version = {repo.WERSJA_SCHEMATU + 1}")
+    przygotowanie.close()
+
+    try:
+        with pytest.raises(repo.NiezgodnaWersjaSchematu):
+            Aplikacja(sciezka_bazy=sciezka)
+    finally:
+        dziennik.odepnij()
+
+
 def test_zakladka_przeglad_pokazuje_wpisana_transakcje(tmp_path):
     from zpo_tracker.gui.app import Aplikacja
     from zpo_tracker import dziennik

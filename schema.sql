@@ -79,3 +79,10 @@ CREATE TABLE transakcje (
 
 CREATE INDEX idx_transakcje_data ON transakcje(data);
 CREATE INDEX idx_transakcje_punkt ON transakcje(punkt_id);
+
+-- Wersja schematu. Podnosić przy KAŻDEJ zmianie struktury.
+-- Bez tego przywrócenie starszej migawki po aktualizacji aplikacji otwiera
+-- bazę o nieaktualnej strukturze i wywala się na "no such column" - już po
+-- nadpisaniu dobrych danych. Musi być zgodna z repo.WERSJA_SCHEMATU
+-- (pilnowane testem test_utworzenie_schematu_ustawia_user_version).
+PRAGMA user_version = 1;
