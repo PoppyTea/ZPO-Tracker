@@ -7,7 +7,9 @@ czego sam import nie potrzebuje: komentarz per blok i odczyt z nazwami.
 import itertools
 import sqlite3
 import sys
+import uuid
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 
 from zpo_tracker.importer import (
@@ -87,6 +89,68 @@ def wymaga_migracji(conn):
     return 0 < wersja_schematu(conn) < WERSJA_SCHEMATU or wersja_schematu(conn) == 0
 
 
+def _istnieje_tabela(conn, nazwa):
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (nazwa,)
+    ).fetchone() is not None
+
+
+def _kolumny(conn, tabela):
+    return {r[1] for r in conn.execute(f"PRAGMA table_info({tabela})")}
+
+
+# Kolumny dołożone do `transakcje` w X+1 (atrybucja i tożsamość wiersza).
+# UNIQUE na `uuid` NIE da się dodać przez ALTER TABLE, więc dla baz
+# migrowanych zakłada się osobny indeks - patrz `migruj`.
+_KOLUMNY_ATRYBUCJI = {
+    "uuid": "TEXT",
+    "autor_id": "TEXT REFERENCES users(id)",
+    "utworzono": "TEXT",
+    "zmodyfikowano": "TEXT",
+}
+
+_DDL_USERS = """
+CREATE TABLE users (
+    id          TEXT PRIMARY KEY,
+    login       TEXT NOT NULL UNIQUE,
+    alias       TEXT,
+    nr_kadrowy  TEXT UNIQUE,
+    utworzono   TEXT,
+    CHECK (nr_kadrowy IS NULL OR (
+        length(nr_kadrowy) = 5
+        AND nr_kadrowy GLOB '[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]'
+    ))
+)
+"""
+
+
+def migruj(conn):
+    """
+    Podnosi istniejącą bazę do `WERSJA_SCHEMATU`. Migracja jest
+    **addytywna i idempotentna**: sprawdza obecność każdego obiektu
+    i dokłada tylko brakujące, zamiast wykonywać kroki po numerze wersji.
+    Dzięki temu przeżywa też bazy w stanie pośrednim (np. z przerwanej
+    wcześniej aktualizacji), które numerowana migracja by pominęła.
+
+    Nie rusza danych - wyłącznie struktura.
+    """
+    with transakcja(conn):
+        if not _istnieje_tabela(conn, "users"):
+            conn.execute(_DDL_USERS)
+
+        obecne = _kolumny(conn, "transakcje")
+        for nazwa, typ in _KOLUMNY_ATRYBUCJI.items():
+            if nazwa not in obecne:
+                conn.execute(f"ALTER TABLE transakcje ADD COLUMN {nazwa} {typ}")
+        # UNIQUE(uuid) jest w schema.sql częścią CREATE TABLE, ale ALTER
+        # TABLE nie umie dodać ograniczenia - stąd równoważny indeks
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_transakcje_uuid"
+            " ON transakcje(uuid)")
+
+        conn.execute(f"PRAGMA user_version = {WERSJA_SCHEMATU}")
+
+
 def sprawdz_zgodnosc_wersji(conn):
     """
     Odrzuca bazę pochodzącą z NOWSZEJ wersji aplikacji. Czytanie takiej
@@ -134,7 +198,7 @@ def transakcja(conn):
     conn.execute(f"RELEASE {nazwa}")
 
 
-def zapisz_blok(conn, blok):
+def zapisz_blok(conn, blok, autor_id=None, teraz=None, operacja_id=None):
     """
     Zapisuje BlankietBlok jako jedną transakcję na WierszBlankietu, z tym
     samym komentarzem dla całego bloku. Zwraca listę dictów:
@@ -146,15 +210,20 @@ def zapisz_blok(conn, blok):
     zapisało się" i wpisywał wszystko od nowa - powstawały duplikaty.
     Pomijanie pojedynczych duplikatów (IntegrityError niżej) działa
     wewnątrz transakcji bez zmian - patrz `transakcja`.
+
+    `autor_id` jest opcjonalny: atrybucja nie może być warunkiem
+    zapisania danych.
     """
     with transakcja(conn):
-        return _zapisz_blok_bez_transakcji(conn, blok)
+        return _zapisz_blok_bez_transakcji(
+            conn, blok, autor_id=autor_id, teraz=teraz)
 
 
-def _zapisz_blok_bez_transakcji(conn, blok):
+def _zapisz_blok_bez_transakcji(conn, blok, autor_id=None, teraz=None):
     kurier_id = get_or_create_kurier(conn, blok.kurier)
     rejon_id = get_or_create_rejon(conn, blok.rejon)
     wykonawca_id = get_or_create_wykonawca(conn, blok.wykonawca)
+    teraz = teraz or datetime.now().isoformat(timespec="seconds")
 
     wyniki = []
     for wiersz in blok.wiersze:
@@ -165,12 +234,14 @@ def _zapisz_blok_bez_transakcji(conn, blok):
             cur = conn.execute(
                 """INSERT INTO transakcje
                    (data, kurier_id, punkt_id, rejon_id, wykonawca_id,
-                    ilosc_total, ilosc_zpo, komentarz)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ilosc_total, ilosc_zpo, komentarz,
+                    uuid, autor_id, utworzono, zmodyfikowano)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     blok.data.isoformat(), kurier_id, punkt_id, rejon_id,
                     wykonawca_id, wiersz.ilosc_total, wiersz.ilosc_zpo,
                     blok.komentarz,
+                    str(uuid.uuid4()), autor_id, teraz, teraz,
                 ),
             )
             wyniki.append({

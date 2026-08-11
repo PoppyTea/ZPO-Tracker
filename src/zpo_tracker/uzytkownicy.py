@@ -1,0 +1,137 @@
+"""
+Tożsamość osoby wprowadzającej dane - kto zmienił który wiersz.
+
+Sedno: `users.id` to **UUIDv5 wyliczone deterministycznie z
+`domena\\login`**, a NIE losowy UUID nadawany przy pierwszym zetknięciu
+z nieznanym loginem. Losowy rozjechałby się między stacjami: każda nadałaby
+temu samemu człowiekowi inny identyfikator, a po synchronizacji (X+3) ta
+sama osoba istniałaby wielokrotnie i atrybucja przestałaby cokolwiek
+znaczyć. UUIDv5 liczy się identycznie na każdej stacji, bez koordynacji
+i bez wyścigu przy pierwszym uruchomieniu.
+
+**Nr kadrowy to atrybut biznesowy OBOK UUID, nie zamiast.** Kusi, żeby
+zrobić z niego klucz główny ("to przecież firmowy identyfikator"), ale
+wpisuje go człowiek, a 5 znaków bez sumy kontrolnej znaczy, że literówka
+jest niewykrywalna i rozniosłaby się po synchronizacji. UUID nie jest
+nigdy wpisywany, więc nie może zostać przekręcony. Trzymanie obu daje
+kontrolę krzyżową za darmo - patrz `ostrzezenia_tozsamosci`.
+
+Numery kadrowe KURIERÓW to zupełnie inny byt: inny format i relacja
+1 kurier : N numerów (patrz docs/roadmap.md). Nie mylić.
+"""
+import os
+import re
+import uuid
+from datetime import datetime
+
+# Stała przestrzeń nazw - NIE zmieniać. Zmiana unieważniłaby wszystkie
+# dotychczasowe identyfikatory i rozdwoiła każdą osobę w bazie.
+NAMESPACE_ZPO = uuid.UUID("c8d99132-35c0-5978-b932-1c21a5d1edb7")
+
+_WZORZEC_NR_KADROWEGO = re.compile(r"^[a-zA-Z0-9]{5}$")
+
+
+def uuid_uzytkownika(login):
+    """
+    Deterministyczny identyfikator osoby. Login jest sprowadzany do małych
+    liter, bo Windows nie rozróżnia wielkości liter w nazwach kont -
+    "JKowalski" i "jkowalski" to ta sama osoba.
+    """
+    return str(uuid.uuid5(NAMESPACE_ZPO, login.strip().lower()))
+
+
+def biezacy_login(srodowisko=None):
+    """
+    Login zalogowanego użytkownika w formie "DOMENA\\konto". Domena jest
+    częścią tożsamości: sam login bywa powtarzalny między domenami.
+    """
+    srodowisko = srodowisko if srodowisko is not None else os.environ
+    konto = (srodowisko.get("USERNAME") or srodowisko.get("USER") or "").strip()
+    domena = (srodowisko.get("USERDOMAIN") or "").strip()
+    if not konto:
+        return ""
+    return f"{domena}\\{konto}" if domena else konto
+
+
+def poprawny_nr_kadrowy(nr):
+    """Dokładnie 5 znaków [a-zA-Z0-9]. Case sensitive (wymóg organizacji)."""
+    if not isinstance(nr, str):
+        return False
+    return bool(_WZORZEC_NR_KADROWEGO.match(nr))
+
+
+def zapewnij_uzytkownika(conn, login, alias=None, nr_kadrowy=None, teraz=None):
+    """
+    Zwraca `users.id` dla podanego loginu, tworząc wpis, jeśli go nie ma.
+    Idempotentne. `alias`/`nr_kadrowy` są aktualizowane, gdy podane -
+    zmiana aliasu NIE zmienia tożsamości (to tylko etykieta wyświetlana).
+    """
+    uid = uuid_uzytkownika(login)
+    teraz = teraz or datetime.now().isoformat(timespec="seconds")
+
+    istnieje = conn.execute(
+        "SELECT id FROM users WHERE id = ?", (uid,)).fetchone()
+    if istnieje is None:
+        conn.execute(
+            "INSERT INTO users(id, login, alias, nr_kadrowy, utworzono)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (uid, login, alias, nr_kadrowy, teraz),
+        )
+        return uid
+
+    if alias is not None:
+        conn.execute("UPDATE users SET alias = ? WHERE id = ?", (alias, uid))
+    if nr_kadrowy is not None:
+        conn.execute(
+            "UPDATE users SET nr_kadrowy = ? WHERE id = ?", (nr_kadrowy, uid))
+    return uid
+
+
+def pobierz_uzytkownika(conn, login):
+    return conn.execute(
+        "SELECT id, login, alias, nr_kadrowy FROM users WHERE id = ?",
+        (uuid_uzytkownika(login),),
+    ).fetchone()
+
+
+def wymaga_uzupelnienia(conn, login):
+    """
+    Czy pokazać popup "podaj imię, nazwisko i nr kadrowy" przy starcie.
+    True także wtedy, gdy użytkownika w ogóle jeszcze nie ma.
+    """
+    wiersz = pobierz_uzytkownika(conn, login)
+    if wiersz is None:
+        return True
+    return not wiersz["alias"] or not wiersz["nr_kadrowy"]
+
+
+def ostrzezenia_tozsamosci(conn, login, nr_kadrowy):
+    """
+    Kontrola krzyżowa UUID <-> nr kadrowy. **Miękkie ostrzeżenia, nie
+    blokady** (docs/ux-ui.md) - zapis ma się udać, człowiek ma się
+    dowiedzieć, że coś nie gra.
+    """
+    ostrzezenia = []
+    if not nr_kadrowy:
+        return ostrzezenia
+    uid = uuid_uzytkownika(login)
+
+    wlasny = conn.execute(
+        "SELECT nr_kadrowy FROM users WHERE id = ?", (uid,)).fetchone()
+    if wlasny and wlasny["nr_kadrowy"] and wlasny["nr_kadrowy"] != nr_kadrowy:
+        ostrzezenia.append(
+            f"To konto miało dotąd numer kadrowy „{wlasny['nr_kadrowy']}”, "
+            f"a podano „{nr_kadrowy}”. Sprawdź, czy to nie literówka."
+        )
+
+    obcy = conn.execute(
+        "SELECT login FROM users WHERE nr_kadrowy = ? AND id <> ?",
+        (nr_kadrowy, uid),
+    ).fetchone()
+    if obcy:
+        ostrzezenia.append(
+            f"Numer kadrowy „{nr_kadrowy}” jest już przypisany do konta "
+            f"„{obcy['login']}”. To zwykle znaczy, że ta sama osoba pracuje "
+            f"na dwóch kontach Windows."
+        )
+    return ostrzezenia

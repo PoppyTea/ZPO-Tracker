@@ -73,8 +73,42 @@ CREATE TABLE transakcje (
     -- wszystkich wierszy jednego bloku REJON w formularzu
     komentarz               TEXT,
 
+    -- Tożsamość wiersza NIEZALEŻNA od klucza naturalnego. Poprawka daty
+    -- albo kuriera zmienia (data,kurier,punkt), więc przy synchronizacji
+    -- (X+3) wyglądałaby jak nowy wiersz i powstałby duplikat.
+    uuid                    TEXT UNIQUE,
+
+    -- Atrybucja: kto i kiedy. Znaczniki czasu służą do audytu i pokazania
+    -- użytkownikowi - NIGDY do automatycznego rozstrzygania konfliktów
+    -- (zegary firmowych maszyn bywają rozjechane, a konflikt ilości i tak
+    -- zawsze rozstrzyga człowiek - patrz docs/roadmap.md).
+    autor_id                TEXT REFERENCES users(id),
+    utworzono               TEXT,
+    zmodyfikowano           TEXT,
+
     -- twarda ochrona przed literalnym duplikatem tego samego wiersza
     UNIQUE(data, kurier_id, punkt_id)
+);
+
+-- Pracownicy działu wprowadzający dane (NIE kurierzy - to inna tabela
+-- i inny format numeru kadrowego, patrz docs/roadmap.md).
+--
+-- `id` to UUIDv5 wyliczone z "domena\login", a NIE losowy UUID nadawany
+-- przy pierwszym zetknięciu z nowym loginem: losowy rozjechałby się między
+-- stacjami (każda nadałaby tej samej osobie inny), a po synchronizacji
+-- (X+3) ta sama osoba istniałaby wielokrotnie.
+CREATE TABLE users (
+    id          TEXT PRIMARY KEY,        -- UUIDv5(domena\login)
+    login       TEXT NOT NULL UNIQUE,    -- "DOMENA\login" z systemu
+    alias       TEXT,                    -- imię i nazwisko, zmienialne
+    nr_kadrowy  TEXT UNIQUE,             -- 5 znaków [a-zA-Z0-9], case sensitive
+    utworzono   TEXT,
+    -- GLOB, nie LIKE: LIKE jest niewrażliwy na wielkość liter, a numer
+    -- kadrowy jest case sensitive (wymóg z organizacji)
+    CHECK (nr_kadrowy IS NULL OR (
+        length(nr_kadrowy) = 5
+        AND nr_kadrowy GLOB '[A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9][A-Za-z0-9]'
+    ))
 );
 
 CREATE INDEX idx_transakcje_data ON transakcje(data);

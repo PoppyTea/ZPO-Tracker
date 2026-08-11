@@ -162,6 +162,8 @@ def _upewnij_schemat(conn):
     # baza z nowszej wersji programu: czytanie jej "jakoś" kończy się cichym
     # pominięciem kolumn, których ta wersja nie zna
     repo.sprawdz_zgodnosc_wersji(conn)
+    if repo.wymaga_migracji(conn):
+        repo.migruj(conn)
 
 
 def main():

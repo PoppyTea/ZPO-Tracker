@@ -254,3 +254,99 @@ def test_starsza_baza_jest_do_migracji_a_nie_do_odrzucenia(conn):
     assert repo.wymaga_migracji(conn) is True
     conn.execute(f"PRAGMA user_version = {repo.WERSJA_SCHEMATU}")
     assert repo.wymaga_migracji(conn) is False
+
+
+# --- migracja z bazy sprzed X+1 (alpha.2) ---
+
+def _baza_alpha2():
+    """
+    Baza dokładnie taka, jaką zostawiła wersja alpha.2: bez user_version,
+    bez tabeli users, bez kolumn atrybucji w transakcje. Realny stan bazy
+    użytkownika, nie hipoteza.
+    """
+    conn = repo.polacz(":memory:")
+    conn.executescript("""
+        CREATE TABLE kurierzy (id INTEGER PRIMARY KEY, imie_nazwisko TEXT NOT NULL UNIQUE);
+        CREATE TABLE rejony (id INTEGER PRIMARY KEY, kod TEXT NOT NULL UNIQUE);
+        CREATE TABLE wykonawcy (id INTEGER PRIMARY KEY, nazwa TEXT NOT NULL UNIQUE);
+        CREATE TABLE firmy_zpo (id INTEGER PRIMARY KEY, nazwa TEXT NOT NULL UNIQUE);
+        CREATE TABLE punkty (
+            id INTEGER PRIMARY KEY, nadawca TEXT NOT NULL, adres TEXT NOT NULL,
+            pni_zpo TEXT UNIQUE, firma_zpo_id INTEGER REFERENCES firmy_zpo(id));
+        CREATE TABLE transakcje (
+            id INTEGER PRIMARY KEY, data TEXT NOT NULL,
+            kurier_id INTEGER NOT NULL REFERENCES kurierzy(id),
+            punkt_id INTEGER NOT NULL REFERENCES punkty(id),
+            rejon_id INTEGER REFERENCES rejony(id),
+            wykonawca_id INTEGER REFERENCES wykonawcy(id),
+            ilosc_total INTEGER NOT NULL, ilosc_zpo INTEGER,
+            ilosc_vinted INTEGER, ilosc_automaty INTEGER,
+            ilosc_kurier48 INTEGER, ilosc_niezrealizowane INTEGER,
+            komentarz TEXT, UNIQUE(data, kurier_id, punkt_id));
+    """)
+    conn.execute("INSERT INTO kurierzy(imie_nazwisko) VALUES ('Kowalski Jan')")
+    conn.execute("INSERT INTO punkty(nadawca, adres) VALUES ('Żabka', 'Odkryta 24')")
+    conn.execute(
+        "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total)"
+        " VALUES ('2026-08-10', 1, 1, 7)")
+    return conn
+
+
+def test_baza_alpha2_wymaga_migracji():
+    conn = _baza_alpha2()
+    try:
+        assert repo.wersja_schematu(conn) == 0
+        assert repo.wymaga_migracji(conn) is True
+    finally:
+        conn.close()
+
+
+def test_migracja_zachowuje_dane_uzytkownika():
+    # to jest cała stawka: migracja nie może zgubić ani jednego wiersza
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        assert conn.execute(
+            "SELECT ilosc_total FROM transakcje").fetchone()[0] == 7
+        assert conn.execute(
+            "SELECT imie_nazwisko FROM kurierzy").fetchone()[0] == "Kowalski Jan"
+    finally:
+        conn.close()
+
+
+def test_migracja_dodaje_users_i_kolumny_atrybucji():
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        conn.execute("SELECT id, login, alias, nr_kadrowy FROM users")  # nie rzuca
+        kolumny = {r[1] for r in conn.execute("PRAGMA table_info(transakcje)")}
+        assert {"uuid", "autor_id", "utworzono", "zmodyfikowano"} <= kolumny
+    finally:
+        conn.close()
+
+
+def test_migracja_podnosi_user_version():
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU
+        assert repo.wymaga_migracji(conn) is False
+    finally:
+        conn.close()
+
+
+def test_migracja_jest_idempotentna():
+    # uruchomienie na już zmigrowanej bazie nie może niczego zepsuć ani
+    # zdublować - inaczej każdy start aplikacji byłby ryzykiem
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        repo.migruj(conn)
+        assert conn.execute("SELECT count(*) FROM transakcje").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_migracja_swiezej_bazy_nic_nie_psuje(conn):
+    repo.migruj(conn)
+    assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU

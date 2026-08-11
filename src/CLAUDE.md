@@ -38,8 +38,12 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   `IntegrityError` NIE unieważnia transakcji, więc per-wierszowe `except`
   w `zapisz_blok`/`zaimportuj` działają wewnątrz bez zmian.
   `WERSJA_SCHEMATU` + `wersja_schematu`/`sprawdz_zgodnosc_wersji`/
-  `wymaga_migracji` — musi zgadzać się z `PRAGMA user_version` na końcu
-  `schema.sql`. Dostęp do danych: `zapisz_blok` (formularz → transakcje,
+  `wymaga_migracji`/`migruj` — musi zgadzać się z `PRAGMA user_version`
+  na końcu `schema.sql`. **`migruj` jest addytywna i idempotentna**
+  (sprawdza obecność każdego obiektu zamiast wykonywać kroki po numerze
+  wersji), więc przeżywa też bazy w stanie pośrednim po przerwanej
+  aktualizacji. Zweryfikowana na realnym imporcie z alpha.2: 1239
+  transakcji / 68 kurierów / 671 punktów zachowane, `integrity_check` ok. Dostęp do danych: `zapisz_blok` (formularz → transakcje,
   **atomowy**),
   słowniki proste (`pobierz_slownik`/`dodaj_do_slownika`/
   `zmien_nazwe_w_slowniku`/`usun_z_slownika`), `scal_kurierow` (droga
@@ -58,6 +62,16 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   (int/date), świadome odstępstwo od niespójności źródła — patrz plan MVP.
 - `podpowiedzi.py` — silnik podpowiedzi (`podpowiedz`,
   `najlepsza_podpowiedz`), źródło kandydatów wstrzykiwane, nie zaszyte.
+- `uzytkownicy.py` — tożsamość osoby wprowadzającej dane. `users.id` to
+  **UUIDv5 z `domena\login`** (`NAMESPACE_ZPO` — nie zmieniać, zmiana
+  rozdwoiłaby każdą osobę), NIE losowy UUID: losowy rozjechałby się między
+  stacjami i po synchronizacji (X+3) ta sama osoba istniałaby wielokrotnie.
+  `nr_kadrowy` (`[a-zA-Z0-9]{5}`, case sensitive) to atrybut biznesowy
+  **obok** UUID, nie zamiast — wpisuje go człowiek, więc literówka jest
+  niewykrywalna. Para daje kontrolę krzyżową (`ostrzezenia_tozsamosci`,
+  miękkie ostrzeżenia). W SQLite pilnuje formatu `GLOB`, nie `LIKE`
+  (`LIKE` jest niewrażliwy na wielkość liter). Numery kadrowe KURIERÓW to
+  inny byt: inny format i relacja 1:N — patrz `../docs/roadmap.md`.
 - `dziennik.py` — diagnostyka. Dwa strumienie o różnym przeznaczeniu:
   log tekstowy (`zpo.log`, kanał wsparcia, może zawierać dane z
   komunikatów wyjątków, zostaje lokalnie) i **dziennik JSONL**
