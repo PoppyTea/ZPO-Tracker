@@ -255,7 +255,8 @@ class ZakladkaWprowadzanie(ttk.Frame):
 
         ostrzezenia, pominiete = [], 0
         for blok in bloki:
-            for wynik in repo.zapisz_blok(self.conn, blok):
+            for wynik in repo.zapisz_blok(
+                    self.conn, blok, autor_id=getattr(self, "autor_id", None)):
                 if wynik["pominieto"]:
                     pominiete += 1
                 ostrzezenia.extend(wynik["ostrzezenia"])

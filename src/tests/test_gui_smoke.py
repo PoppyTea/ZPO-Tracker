@@ -91,6 +91,34 @@ def test_aplikacja_odmawia_otwarcia_bazy_z_nowszej_wersji(tmp_path):
         dziennik.odepnij()
 
 
+def test_zapis_z_formularza_stempluje_autora(tmp_path, monkeypatch):
+    # bez tego kolumny atrybucji istnieją, ale w praktyce zawsze są puste
+    monkeypatch.setenv("USERDOMAIN", "POCZTA-POLSKA")
+    monkeypatch.setenv("USERNAME", "jkowalski")
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, uzytkownicy
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        uzytkownicy.zapewnij_uzytkownika(
+            app.conn, login="POCZTA-POLSKA\\jkowalski",
+            alias="Jan Kowalski", nr_kadrowy="ab12X")
+        blok = BlankietBlok(
+            kurier="Testowy Kurier", data=date(2026, 8, 10), rejon="WA1",
+            wiersze=[WierszBlankietu(nadawca="Żabka", adres="Testowa 1", ilosc_total=2)],
+        )
+        repo.zapisz_blok(app.conn, blok, autor_id=app.autor_id)
+
+        wiersz = app.conn.execute(
+            "SELECT u.alias, t.utworzono FROM transakcje t"
+            " JOIN users u ON u.id = t.autor_id").fetchone()
+        assert wiersz["alias"] == "Jan Kowalski"
+        assert wiersz["utworzono"]
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
 def test_zakladka_przeglad_pokazuje_wpisana_transakcje(tmp_path):
     from zpo_tracker.gui.app import Aplikacja
     from zpo_tracker import dziennik

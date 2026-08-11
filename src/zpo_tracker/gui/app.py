@@ -9,7 +9,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from zpo_tracker import dziennik, repo
+from zpo_tracker import dziennik, repo, uzytkownicy
+from zpo_tracker.gui.dialog_uzytkownika import DialogUzytkownika
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
 from zpo_tracker.gui.zakladka_import_export import ZakladkaImportExport
@@ -145,6 +146,33 @@ class Aplikacja(tk.Tk):
         self.notebook.add(self.zakladka_import_export, text="Import / Export")
 
         self.notebook.add(self.zakladka_slowniki, text="Słowniki")
+
+        self._ustal_uzytkownika()
+
+    def _ustal_uzytkownika(self):
+        """
+        Kto siedzi przy tej stacji. Wykrycie konta Windows jest ciche;
+        popup pojawia się tylko wtedy, gdy brakuje imienia/nazwiska albo
+        numeru kadrowego. Brak atrybucji NIE blokuje pracy - `autor_id`
+        zostaje pusty i tyle.
+        """
+        self.login = uzytkownicy.biezacy_login()
+        self.autor_id = None
+        if not self.login:
+            return
+        self.autor_id = uzytkownicy.zapewnij_uzytkownika(self.conn, self.login)
+        if uzytkownicy.wymaga_uzupelnienia(self.conn, self.login):
+            # after_idle: okno główne musi być już narysowane, inaczej
+            # modal wisi nad pustym prostokątem
+            self.after_idle(self._popros_o_dane_uzytkownika)
+
+    def _popros_o_dane_uzytkownika(self):
+        DialogUzytkownika(self, self.conn, self.login,
+                          on_gotowe=self._zapamietaj_autora)
+
+    def _zapamietaj_autora(self, autor_id):
+        self.autor_id = autor_id
+        self.zakladka_wprowadzanie.autor_id = autor_id
 
     def destroy(self):
         self.conn.close()
