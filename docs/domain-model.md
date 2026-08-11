@@ -18,6 +18,18 @@ wpisów/mies., nawet jeśli obecny ruch jest niższy z powodu utraty klienta)
 i wprowadzić miękką walidację (ostrzeżenia, nie twarde blokady) tam, gdzie
 dziś jej brak.
 
+**Aktualizacja 2026-08-11 — aprobata kierownictwa WER Ciemne:** kierowniczka
+całej jednostki (WER Ciemne, największa rozdzielnia w Polsce — nie tylko
+dział, dla którego projekt powstał) zatwierdziła narzędzie jako element
+zapewniający wyższą jakość danych rozliczeniowych, żeby nie musiała martwić
+się o pomyłki wynikające ze sposobu wprowadzania danych. To nieformalne, ale
+umocowane wysoko poparcie merytoryczne — nie formalne przyjęcie do
+zatwierdzonego przez IT pipeline'u (brak przeglądu bezpieczeństwa,
+podpisanego binarium czy formalnego właściciela po stronie IT). Potwierdza
+trafność diagnozy problemu i podnosi stawkę błędu/utraty danych wyraźnie
+powyżej poziomu prywatnego eksperymentu — konsekwencja dla kierunku prac po
+`0.1-alpha.x` opisana w `roadmap.md`.
+
 ## Kolumny realne
 
 Nie tylko "kurier + ZPO + ilość", jak zakładaliśmy na starcie: data, nadawca,

@@ -10,6 +10,34 @@ Podział odpowiedzialności między dokumentami:
 - GitHub milestones — odzwierciedlają wersje niżej; GitHub issues —
   bieżące bugi i pojedyncze funkcje
 
+## Kierunek po serii 0.1-alpha.x
+
+Aprobata kierownictwa WER Ciemne (patrz `domain-model.md`, sekcja "Cel
+i kontekst") nadaje projektowi wyraźny cel nadrzędny: **zapewnienie
+i utrzymanie jakości danych rozliczeniowych to główny cel programu, nie
+efekt uboczny.** Seria `0.1-alpha.x` adresuje komfort i szybkość
+wprowadzania danych — po jej zamknięciu kolejne kierunki prac budowane są
+WOKÓŁ tego celu, jako środowisko, które jakość danych zapewnia lub wręcz
+gwarantuje, a nie tylko na nią pozwala. Konkretny zakres tej fazy do
+ustalenia po `0.1-alpha.3` (info od Papavera).
+
+## Nazewnictwo wersji — w trakcie rewizji
+
+Etykiety `X+1`/`X+2`/`X+3` używane niżej wkradły się przypadkowo i mają
+zniknąć na rzecz schematu `0.1-alpha.x`. **Pierwsze zadanie planowanej
+wersji `0.1-alpha.3.1`** (wstawka między `0.1-alpha.3` i `0.1-alpha.4`,
+przed rozpoczęciem X+2) to ujednolicenie tego nazewnictwa w całej
+dokumentacji — nie zrobione jeszcze, celowo odłożone do zamknięcia
+`0.1-alpha.3`. Mapowanie do tego czasu:
+
+| Etykieta niżej | Docelowa wersja |
+|---|---|
+| X (wydane) | `0.1.0-alpha.2` |
+| X+1 (w toku) | `0.1-alpha.3` |
+| *(nowa, wstawka)* | `0.1-alpha.3.1` — start: rename X+n → 0.1-alpha.x |
+| X+2 (planowane) | `0.1-alpha.4` |
+| X+3 (planowane) | kolejna wersja serii (numer do ustalenia przy renamingu) |
+
 ## Wersje
 
 | Wersja | Status | Zakres |
