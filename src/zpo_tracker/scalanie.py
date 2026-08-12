@@ -31,9 +31,9 @@ import sqlite3
 from pathlib import Path
 
 from zpo_tracker import repo
-from zpo_tracker.importer import get_or_create_punkt
+from zpo_tracker.importer import get_or_create_punkt, get_or_create_rejon
 from zpo_tracker.normalizacja import (
-    czy_literowka, klucz_bialych_znakow, klucz_rozmyty,
+    czy_literowka, klucz_bialych_znakow, klucz_rozmyty, normalizuj_rejon,
 )
 
 _SLOWNIKI_PROSTE = {
@@ -70,10 +70,17 @@ def _dopasuj_prosty_slownik(conn_docelowa, conn_zrodlowa, tabela, kolumna,
     """
     Zwraca {"mapowanie": {id_zrodlowe: id_docelowe}, "nowe": [...],
     "propozycje": [...], "ostrzezenia": [...]} - patrz docstring modułu.
+
+    `rejony`: wartości przepuszczane przez `normalizuj_rejon` PRZED
+    dopasowaniem, nie tylko przy wstawianiu - inaczej śmieciowy kod
+    zapisany wprost w źródle (np. stara baza sprzed tej reguły) nie
+    trafiłby w kanoniczny wiersz celu, tylko stałby się osobnym "nowym"
+    wpisem o tej samej (nieznormalizowanej) treści.
     """
-    docelowe = {r["id"]: r[kolumna]
+    normalizuj = normalizuj_rejon if tabela == "rejony" else (lambda v: v)
+    docelowe = {r["id"]: normalizuj(r[kolumna])
                 for r in conn_docelowa.execute(f"SELECT id, {kolumna} FROM {tabela}")}
-    zrodlowe = {r["id"]: r[kolumna]
+    zrodlowe = {r["id"]: normalizuj(r[kolumna])
                 for r in conn_zrodlowa.execute(f"SELECT id, {kolumna} FROM {tabela}")}
 
     po_kluczu = {klucz_bialych_znakow(v): id_doc for id_doc, v in docelowe.items()}
@@ -327,9 +334,16 @@ def _wykonaj_scalenie_bez_transakcji(conn_docelowa, conn_zrodlowa,
                for o in dopasowanie["ostrzezenia"] if o["id_zrodlowe"] not in mapa]
         )
         for wpis in nierozstrzygniete:
-            cur = conn_docelowa.execute(
-                f"INSERT INTO {tabela} ({kolumna}) VALUES (?)", (wpis["nazwa"],))
-            mapa[wpis["id_zrodlowe"]] = cur.lastrowid
+            if tabela == "rejony":
+                # get-or-create, NIE ślepy INSERT: dwa różne id źródłowe
+                # mogą normalizować się do tej samej wartości (np. "-" i
+                # "n/a" -> "???") - ślepy INSERT drugiego z nich rzuciłby
+                # IntegrityError na UNIQUE i wycofał całe scalenie
+                mapa[wpis["id_zrodlowe"]] = get_or_create_rejon(conn_docelowa, wpis["nazwa"])
+            else:
+                cur = conn_docelowa.execute(
+                    f"INSERT INTO {tabela} ({kolumna}) VALUES (?)", (wpis["nazwa"],))
+                mapa[wpis["id_zrodlowe"]] = cur.lastrowid
 
         mapy[tabela] = mapa
 
@@ -359,7 +373,11 @@ def _wykonaj_scalenie_bez_transakcji(conn_docelowa, conn_zrodlowa,
         w = dict(w)
         kurier_id = mapy["kurierzy"][w["kurier_id"]]
         punkt_id = mapa_punkty[w["punkt_id"]]
-        rejon_id = mapy["rejony"].get(w["rejon_id"]) if w["rejon_id"] is not None else None
+        # NULL ze źródła (stara, niereperowana baza) NIE może wrócić jako
+        # NULL do celu - trafia w ten sam kanoniczny wiersz co każdy inny
+        # śmieciowy rejon, get_or_create_rejon(None) -> REJON_NIEZNANY
+        rejon_id = (mapy["rejony"][w["rejon_id"]] if w["rejon_id"] is not None
+                    else get_or_create_rejon(conn_docelowa, None))
         wykonawca_id = (mapy["wykonawcy"].get(w["wykonawca_id"])
                          if w["wykonawca_id"] is not None else None)
 

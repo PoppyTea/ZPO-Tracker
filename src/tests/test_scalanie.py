@@ -10,6 +10,7 @@ from datetime import date
 import pytest
 
 from zpo_tracker import repo, scalanie
+from zpo_tracker.normalizacja import REJON_NIEZNANY
 
 
 @pytest.fixture
@@ -61,6 +62,21 @@ def test_dopasowanie_nowy_wpis_w_zrodle(docelowa, zrodlowa):
     assert wynik["mapowanie"] == {}
     assert len(wynik["nowe"]) == 1
     assert wynik["nowe"][0]["nazwa"] == "Nowak Piotr"
+
+
+def test_dopasowanie_rejonu_smieciowego_trafia_w_kanoniczny_wiersz_celu(docelowa, zrodlowa):
+    # źródło ma rejon "-" wpisany bezpośrednio (np. stara baza sprzed tej
+    # reguły) - MUSI trafić w kanoniczny "???" celu (oba mają go od schema.sql),
+    # nie stać się osobnym nowym wpisem "-" w celu
+    zrodlowa.execute("INSERT INTO rejony (kod) VALUES ('-')")
+
+    wynik = scalanie._dopasuj_prosty_slownik(docelowa, zrodlowa, "rejony", "kod")
+
+    id_zrodlowy = zrodlowa.execute("SELECT id FROM rejony WHERE kod='-'").fetchone()[0]
+    id_docelowy_kanoniczny = docelowa.execute(
+        f"SELECT id FROM rejony WHERE kod='{REJON_NIEZNANY}'").fetchone()[0]
+    assert wynik["mapowanie"][id_zrodlowy] == id_docelowy_kanoniczny
+    assert wynik["nowe"] == []
 
 
 def test_dopasowanie_diakrytyki_to_ostrzezenie_nie_automat(docelowa, zrodlowa):
@@ -295,6 +311,48 @@ def test_wykonaj_scalenie_dopasowuje_istniejacego_kuriera_po_bialych_znakach(doc
     scalanie.wykonaj_scalenie(docelowa, sciezka)
 
     assert docelowa.execute("SELECT COUNT(*) FROM kurierzy").fetchone()[0] == 1
+
+
+def test_wykonaj_scalenie_wiele_smieciowych_rejonow_bez_kanonicznego_wiersza_w_celu(
+        docelowa, plik_zrodlowy):
+    # symulacja baz sprzed zaseedowania "???" (repo.napraw_dane jeszcze nie
+    # uruchomiona na żadnej z nich) - bez get_or_create_rejon przy wstawianiu
+    # "nowych" wpisów słownikowych trzy różne id o różnej pisowni śmiecia
+    # dają trzy kolejne INSERT tego samego znormalizowanego kodu -> kolizja
+    # UNIQUE -> IntegrityError -> repo.transakcja wycofuje CAŁE scalenie
+    docelowa.execute("DELETE FROM rejony")
+    sciezka, zrodlowa = plik_zrodlowy
+    zrodlowa.execute("DELETE FROM rejony")
+    for smiec in ("-", "n/a", "?"):
+        zrodlowa.execute("INSERT INTO rejony (kod) VALUES (?)", (smiec,))
+    zrodlowa.commit()
+
+    scalanie.wykonaj_scalenie(docelowa, sciezka)  # nie może rzucić IntegrityError
+
+    kody = [r[0] for r in docelowa.execute("SELECT kod FROM rejony")]
+    assert kody == [REJON_NIEZNANY]  # wszystkie trzy zjechały się w jeden wiersz
+
+
+def test_wykonaj_scalenie_transakcja_z_null_rejonem_dostaje_kanoniczny(docelowa, plik_zrodlowy):
+    # źródło z transakcją bez rejonu w ogóle (rejon_id IS NULL - stara,
+    # niereperowana baza sprzed tej reguły) - scalenie NIE może przepisać
+    # tego NULL-a wprost do bazy docelowej, która ma już naprawione dane
+    sciezka, zrodlowa = plik_zrodlowy
+    kurier_id = zrodlowa.execute(
+        "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
+    punkt_id = zrodlowa.execute(
+        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    zrodlowa.execute(
+        "INSERT INTO transakcje (data, kurier_id, punkt_id, rejon_id, ilosc_total, uuid)"
+        " VALUES ('2026-08-01', ?, ?, NULL, 3, 'uuid-1')", (kurier_id, punkt_id))
+    zrodlowa.commit()
+
+    scalanie.wykonaj_scalenie(docelowa, sciezka)
+
+    kod = docelowa.execute(
+        "SELECT r.kod FROM transakcje t JOIN rejony r ON r.id = t.rejon_id"
+    ).fetchone()[0]
+    assert kod == REJON_NIEZNANY
 
 
 def test_wykonaj_scalenie_jest_atomowe(docelowa, plik_zrodlowy):
