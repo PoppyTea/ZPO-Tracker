@@ -42,7 +42,7 @@ def _resolve_schema_path(frozen=None, meipass=None):
 SCHEMA_PATH = _resolve_schema_path()
 
 # Musi być zgodna z `PRAGMA user_version` na końcu schema.sql - patrz tam.
-WERSJA_SCHEMATU = 1
+WERSJA_SCHEMATU = 2
 
 _licznik_savepointow = itertools.count()
 
@@ -151,6 +151,13 @@ def migruj(conn):
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_transakcje_uuid"
             " ON transakcje(uuid)")
+
+        # 0.1-alpha.3.1: indeksy pod zapytania dedukcyjne formularza -
+        # patrz komentarz przy tych samych CREATE INDEX w schema.sql
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_transakcje_kurier ON transakcje(kurier_id)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_punkty_adres ON punkty(adres)")
 
         conn.execute(f"PRAGMA user_version = {WERSJA_SCHEMATU}")
 

@@ -350,3 +350,43 @@ def test_migracja_jest_idempotentna():
 def test_migracja_swiezej_bazy_nic_nie_psuje(conn):
     repo.migruj(conn)
     assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU
+
+
+# --- migracja `0.1-alpha.3.1`: indeksy pod dedukcję pól formularza ---
+
+def _nazwy_indeksow(conn, tabela):
+    return {r[1] for r in conn.execute(f"PRAGMA index_list({tabela})")}
+
+
+def test_swieza_baza_ma_indeksy_pod_dedukcje(conn):
+    assert "idx_transakcje_kurier" in _nazwy_indeksow(conn, "transakcje")
+    assert "idx_punkty_adres" in _nazwy_indeksow(conn, "punkty")
+
+
+def test_migracja_z_alpha2_dokłada_indeksy():
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        assert "idx_transakcje_kurier" in _nazwy_indeksow(conn, "transakcje")
+        assert "idx_punkty_adres" in _nazwy_indeksow(conn, "punkty")
+    finally:
+        conn.close()
+
+
+def test_migracja_z_alpha3_bez_indeksow_dokłada_je():
+    # baza już z kolumnami atrybucji (alpha.3), ale sprzed indeksów tego
+    # wydania - migruj musi je dołożyć mimo że reszta jest już aktualna
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        conn.execute("DROP INDEX idx_transakcje_kurier")
+        conn.execute("DROP INDEX idx_punkty_adres")
+        conn.execute(f"PRAGMA user_version = 1")  # cofnij, jakby to była realna baza v1
+
+        repo.migruj(conn)
+
+        assert "idx_transakcje_kurier" in _nazwy_indeksow(conn, "transakcje")
+        assert "idx_punkty_adres" in _nazwy_indeksow(conn, "punkty")
+        assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU
+    finally:
+        conn.close()

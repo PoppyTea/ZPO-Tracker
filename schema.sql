@@ -119,9 +119,16 @@ CREATE TABLE users (
 CREATE INDEX idx_transakcje_data ON transakcje(data);
 CREATE INDEX idx_transakcje_punkt ON transakcje(punkt_id);
 
+-- 0.1-alpha.3.1: pod dedukcję pól formularza (dedukcja.py) - bez nich
+-- historia_wykonawcow_kuriera/znajdz_punkty_po_adresie robią pełny SCAN
+-- (EXPLAIN QUERY PLAN, zmierzone), co na wątku głównym Tk rośnie liniowo
+-- z historią transakcji.
+CREATE INDEX idx_transakcje_kurier ON transakcje(kurier_id);
+CREATE INDEX idx_punkty_adres ON punkty(adres);
+
 -- Wersja schematu. Podnosić przy KAŻDEJ zmianie struktury.
 -- Bez tego przywrócenie starszej migawki po aktualizacji aplikacji otwiera
 -- bazę o nieaktualnej strukturze i wywala się na "no such column" - już po
 -- nadpisaniu dobrych danych. Musi być zgodna z repo.WERSJA_SCHEMATU
 -- (pilnowane testem test_utworzenie_schematu_ustawia_user_version).
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
