@@ -117,7 +117,15 @@ class PodzakladkaPunktowZpo(ttk.Frame):
             ttk.Entry(ramka_nowy, textvariable=var, width=szer).pack(side="left", padx=(2, 10))
         ttk.Button(ramka_nowy, text="+ dodaj", command=self.dodaj).pack(side="left")
 
-        kolumny = [("nadawca", "Nadawca / firma ZPO", 160), ("adres", "Adres", 260), ("pni_zpo", "PNI ZPO", 100)]
+        # nadawca i firma ZPO to DWIE różne wartości (punkty.nadawca vs
+        # firmy_zpo.nazwa) - pokazywanie ich pod jednym nagłówkiem chowało
+        # rozjazd między nimi, czyli dokładnie to, co trzeba było zobaczyć
+        kolumny = [
+            ("nadawca", "Nadawca (punkt)", 150),
+            ("firma_zpo", "Firma ZPO (słownik)", 150),
+            ("adres", "Adres", 240),
+            ("pni_zpo", "PNI ZPO", 90),
+        ]
         self.tree = ttk.Treeview(self, columns=[k for k, _, _ in kolumny], show="headings")
         for klucz, naglowek, szerokosc in kolumny:
             self.tree.heading(klucz, text=naglowek)
@@ -129,7 +137,9 @@ class PodzakladkaPunktowZpo(ttk.Frame):
     def odswiez(self):
         self.tree.delete(*self.tree.get_children())
         for p in repo.pobierz_punkty(self.conn):
-            self.tree.insert("", "end", values=(p["nadawca"], p["adres"], p["pni_zpo"] or ""))
+            self.tree.insert("", "end", values=(
+                p["nadawca"], p["firma_zpo"] or "", p["adres"], p["pni_zpo"] or "",
+            ))
 
     def dodaj(self):
         nadawca, adres = self.var_nadawca.get().strip(), self.var_adres.get().strip()

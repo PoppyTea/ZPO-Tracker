@@ -128,6 +128,32 @@ def test_zmien_nazwe_w_slowniku(conn):
     assert repo.pobierz_slownik(conn, "rejony") == [{"id": wpis_id, "nazwa": "WA88"}]
 
 
+def test_zmiana_nazwy_firmy_zpo_propaguje_do_punktow(conn):
+    # firmy_zpo to jedyny "prosty słownik", który ma zdenormalizowanego
+    # bliźniaka w punkty.nadawca - bez propagacji rename w Słownikach
+    # natychmiast rozjeżdża obie kopie i nic tego nie naprawia
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
+    firma_id = repo.pobierz_slownik(conn, "firmy_zpo")[0]["id"]
+
+    repo.zmien_nazwe_w_slowniku(conn, "firmy_zpo", firma_id, "Żabka Polska")
+
+    nadawcy = [r[0] for r in conn.execute("SELECT nadawca FROM punkty")]
+    assert nadawcy == ["Żabka Polska"]
+
+
+def test_zmiana_nazwy_zwyklego_slownika_nie_rusza_punktow(conn):
+    # kurierzy/wykonawcy/rejony są referencowane wyłącznie przez FK -
+    # propagacja dotyczy TYLKO firmy_zpo, nie wszystkich słowników
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
+    wpis_id = repo.dodaj_do_slownika(conn, "wykonawcy", "Koli")
+
+    repo.zmien_nazwe_w_slowniku(conn, "wykonawcy", wpis_id, "Koli sp. z o.o.")
+
+    assert [r[0] for r in conn.execute("SELECT nadawca FROM punkty")] == ["Żabka"]
+
+
 def test_usun_z_slownika_nieuzywany_wpis(conn):
     wpis_id = repo.dodaj_do_slownika(conn, "firmy_zpo", "Testowa Sieć")
     repo.usun_z_slownika(conn, "firmy_zpo", wpis_id)

@@ -75,18 +75,30 @@ def get_or_create_punkt(conn, nadawca, adres, pni_zpo):
     """
     warnings = []
     if pni_zpo:
-        firma_zpo_id = get_or_create_firma_zpo(conn, nadawca)
+        # get_or_create_firma_zpo MUSI być za tym SELECT-em: wołane wcześniej
+        # zakładało wpis w firmy_zpo także wtedy, gdy punkt już istniał pod
+        # inną pisownią sieci - a wtedy jego id było wyrzucane i zostawał
+        # osierocony wpis w słowniku, którego nie referencuje żaden punkt.
         row = conn.execute(
-            "SELECT id, adres FROM punkty WHERE pni_zpo = ?", (pni_zpo,)
+            "SELECT id, adres, nadawca FROM punkty WHERE pni_zpo = ?", (pni_zpo,)
         ).fetchone()
         if row:
-            punkt_id, stored_adres = row
+            punkt_id, stored_adres, stored_nadawca = row
             if stored_adres != adres:
                 warnings.append(
                     f"PNI ZPO {pni_zpo} był już zarejestrowany pod adresem "
                     f"'{stored_adres}', teraz podano '{adres}' - zignorowano nowy adres."
                 )
+            if stored_nadawca != nadawca:
+                # ta sama klasa problemu co rozjazd adresu wyżej: PNI jest
+                # kluczem, więc nazwa sieci ze źródła jest ignorowana - ale
+                # człowiek musi się o tym dowiedzieć
+                warnings.append(
+                    f"PNI ZPO {pni_zpo} był już zarejestrowany dla nadawcy "
+                    f"'{stored_nadawca}', teraz podano '{nadawca}' - zignorowano nowego nadawcę."
+                )
             return punkt_id, warnings
+        firma_zpo_id = get_or_create_firma_zpo(conn, nadawca)
         cur = conn.execute(
             "INSERT INTO punkty (nadawca, adres, pni_zpo, firma_zpo_id) VALUES (?, ?, ?, ?)",
             (nadawca, adres, pni_zpo, firma_zpo_id),

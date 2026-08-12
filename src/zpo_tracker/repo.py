@@ -287,11 +287,24 @@ def dodaj_do_slownika(conn, tabela, nazwa):
 
 
 def zmien_nazwe_w_slowniku(conn, tabela, wpis_id, nowa_nazwa):
+    """
+    `firmy_zpo` wymaga dodatkowej propagacji: w odróżnieniu od pozostałych
+    słowników (referencowanych wyłącznie przez FK) nazwa sieci istnieje
+    DRUGI raz jako tekst w `punkty.nadawca`. Bez tego rename w Słownikach
+    rozjeżdżał obie kopie na stałe i nic tego nie naprawiało.
+    """
     kolumna = _TABELE_PROSTE[tabela]
-    conn.execute(
-        f"UPDATE {tabela} SET {kolumna} = ? WHERE id = ?",
-        (klucz_bialych_znakow(nowa_nazwa), wpis_id),
-    )
+    nowa_nazwa = klucz_bialych_znakow(nowa_nazwa)
+    with transakcja(conn):
+        conn.execute(
+            f"UPDATE {tabela} SET {kolumna} = ? WHERE id = ?",
+            (nowa_nazwa, wpis_id),
+        )
+        if tabela == "firmy_zpo":
+            conn.execute(
+                "UPDATE punkty SET nadawca = ? WHERE firma_zpo_id = ?",
+                (nowa_nazwa, wpis_id),
+            )
 
 
 def usun_z_slownika(conn, tabela, wpis_id):

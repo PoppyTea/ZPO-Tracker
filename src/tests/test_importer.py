@@ -107,6 +107,28 @@ def test_get_or_create_punkt_links_firma_zpo_when_pni_present(conn):
     assert firma[0] == "Żabka"
 
 
+def test_znany_pni_z_inna_nazwa_sieci_nie_tworzy_osieroconej_firmy(conn):
+    # get_or_create_firma_zpo wołane PRZED sprawdzeniem PNI zostawiało wpis
+    # w firmy_zpo, którego nie referencuje żaden punkt i którego nie widać
+    # w żadnej podpowiedzi - cichy śmieć w słowniku przy każdym imporcie
+    # tego samego punktu zapisanego inaczej
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
+    get_or_create_punkt(conn, "ZABKA", "Odkryta 24", "228648")
+
+    nazwy = [r[0] for r in conn.execute("SELECT nazwa FROM firmy_zpo")]
+    assert nazwy == ["Żabka"]
+
+
+def test_znany_pni_z_inna_nazwa_sieci_ostrzega(conn):
+    # rozjazd adresu przy tym samym PNI już ostrzegał, rozjazd nadawcy nie -
+    # a to ta sama klasa problemu i tak samo wymaga oka człowieka
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
+    _, ostrzezenia = get_or_create_punkt(conn, "Groszek", "Odkryta 24", "228648")
+
+    assert len(ostrzezenia) == 1
+    assert "Żabka" in ostrzezenia[0] and "Groszek" in ostrzezenia[0]
+
+
 def test_get_or_create_punkt_no_firma_zpo_for_regular_client(conn):
     # zwykły nadawca (ZUS, PKO...) bez PNI nie ma firmy ZPO
     pid, _ = get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
