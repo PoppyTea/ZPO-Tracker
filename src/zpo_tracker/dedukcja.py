@@ -215,3 +215,20 @@ def kolejnosc_pol(tryb, wynik_naglowka, wyniki_wierszy):
         if wynik.pola.get("ilosc_zpo") and wynik.pola["ilosc_zpo"].aktywne:
             kolejnosc.append(("wiersz", i, "ilosc_zpo"))
     return kolejnosc
+
+
+def przesun_w_kolejnosci(kolejnosc, biezace, kierunek):
+    """
+    Następny/poprzedni klucz pola dla Tab/Enter (kierunek=1) albo
+    Shift-Tab/ISO_Left_Tab (kierunek=-1), z zawijaniem na końcach.
+    `biezace` spoza `kolejnosc` (np. fokus trafił z zewnątrz w pole
+    nieaktywne) startuje od początku/końca zamiast wybuchać. Pusta
+    `kolejnosc` -> None (nie ma dokąd przejść).
+    """
+    if not kolejnosc:
+        return None
+    try:
+        i = kolejnosc.index(biezace)
+    except ValueError:
+        return kolejnosc[0] if kierunek >= 0 else kolejnosc[-1]
+    return kolejnosc[(i + kierunek) % len(kolejnosc)]

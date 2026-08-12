@@ -298,3 +298,38 @@ def test_kolejnosc_nieznany_tryb_rzuca(conn):
     naglowek = dedukcja.dedukuj_naglowek(conn, kurier="Kowalski Jan", data=date(2026, 8, 11))
     with pytest.raises(NotImplementedError):
         dedukcja.kolejnosc_pol("polauto", naglowek, [])
+
+
+# --- przesun_w_kolejnosci: Tab/Enter (+1) i Shift-Tab/ISO_Left_Tab (-1) ---
+
+def test_przesun_do_przodu_zwraca_nastepny_klucz():
+    kolejnosc = [("naglowek", "kurier"), ("naglowek", "data"), ("wiersz", 0, "adres")]
+    assert dedukcja.przesun_w_kolejnosci(kolejnosc, ("naglowek", "kurier"), 1) == ("naglowek", "data")
+
+
+def test_przesun_do_tylu_zwraca_poprzedni_klucz():
+    kolejnosc = [("naglowek", "kurier"), ("naglowek", "data"), ("wiersz", 0, "adres")]
+    assert dedukcja.przesun_w_kolejnosci(kolejnosc, ("wiersz", 0, "adres"), -1) == ("naglowek", "data")
+
+
+def test_przesun_do_przodu_zawija_na_koncu():
+    kolejnosc = [("naglowek", "kurier"), ("naglowek", "data")]
+    assert dedukcja.przesun_w_kolejnosci(kolejnosc, ("naglowek", "data"), 1) == ("naglowek", "kurier")
+
+
+def test_przesun_do_tylu_zawija_na_poczatku():
+    kolejnosc = [("naglowek", "kurier"), ("naglowek", "data")]
+    assert dedukcja.przesun_w_kolejnosci(kolejnosc, ("naglowek", "kurier"), -1) == ("naglowek", "data")
+
+
+def test_przesun_gdy_biezace_pole_nie_jest_w_kolejnosci_zaczyna_od_poczatku():
+    # np. fokus wszedł do formularza z zewnątrz (kliknięcie myszą w pole
+    # nieaktywne, które nie jest w kolejnosci) - Tab musi mimo to gdzieś
+    # wylądować, nie wybuchnąć ValueError
+    kolejnosc = [("naglowek", "kurier"), ("naglowek", "data")]
+    assert dedukcja.przesun_w_kolejnosci(kolejnosc, ("wiersz", 0, "pni_zpo"), 1) == ("naglowek", "kurier")
+    assert dedukcja.przesun_w_kolejnosci(kolejnosc, ("wiersz", 0, "pni_zpo"), -1) == ("naglowek", "data")
+
+
+def test_przesun_pusta_kolejnosc_zwraca_none():
+    assert dedukcja.przesun_w_kolejnosci([], ("naglowek", "kurier"), 1) is None
