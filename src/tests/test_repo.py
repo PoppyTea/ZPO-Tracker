@@ -287,3 +287,100 @@ def test_pobierz_transakcje_zwraca_czytelne_nazwy(conn):
     assert w["nadawca"] == "Żabka"
     assert w["rejon"] == "WA87"
     assert w["ilosc_total"] == 3
+
+
+# --- zapytania dedukcyjne (0.1-alpha.3.1, patrz dedukcja.py) ---
+
+def test_znajdz_punkty_po_adresie_trafienie_dokladne(conn):
+    repo.zapisz_blok(conn, _blok())
+    wynik = repo.znajdz_punkty_po_adresie(conn, "Odkryta 24")
+    assert len(wynik) == 1
+    assert wynik[0]["nadawca"] == "Żabka"
+    assert wynik[0]["adres"] == "Odkryta 24"
+
+
+def test_znajdz_punkty_po_adresie_pusty_wynik(conn):
+    assert repo.znajdz_punkty_po_adresie(conn, "Nieistniejąca 1") == []
+
+
+def test_znajdz_punkty_po_adresie_trafienie_rozmyte_gdy_brak_dokladnego(conn):
+    # punkt w bazie znormalizowany (klucz_bialych_znakow), ale to, co
+    # wpisuje użytkownik, nie musi być - bez fuzzy fallbacku "odkryta  24"
+    # (podwójna spacja, mała litera) dałoby zero trafień
+    repo.zapisz_blok(conn, _blok())
+    wynik = repo.znajdz_punkty_po_adresie(conn, "odkryta  24")
+    assert len(wynik) == 1
+    assert wynik[0]["adres"] == "Odkryta 24"
+
+
+def test_znajdz_punkty_po_adresie_wiele_nadawcow_pod_tym_samym_adresem(conn):
+    repo.zapisz_blok(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Solidarności 117",
+                        pni_zpo="228648", ilosc_total=3),
+    ]))
+    repo.zapisz_blok(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Gemartis", adres="Solidarności 117", ilosc_total=1),
+    ]))
+    wynik = repo.znajdz_punkty_po_adresie(conn, "Solidarności 117")
+    nadawcy = {w["nadawca"] for w in wynik}
+    assert nadawcy == {"Żabka", "Gemartis"}
+
+
+def test_czy_nadawca_ma_pni_prawda(conn):
+    repo.zapisz_blok(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24",
+                        pni_zpo="228648", ilosc_total=3),
+    ]))
+    assert repo.czy_nadawca_ma_pni(conn, "Żabka") is True
+
+
+def test_czy_nadawca_ma_pni_falsz_dla_zwyklego_nadawcy(conn):
+    repo.zapisz_blok(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="ZUS", adres="Senatorska 6/8", ilosc_total=1),
+    ]))
+    assert repo.czy_nadawca_ma_pni(conn, "ZUS") is False
+
+
+def test_czy_nadawca_ma_pni_nieznany_nadawca(conn):
+    assert repo.czy_nadawca_ma_pni(conn, "Nikt Taki") is False
+
+
+def test_historia_rejonow_punktu_jednoznaczna(conn):
+    repo.zapisz_blok(conn, _blok(rejon="WA87"))
+    punkt_id = conn.execute("SELECT id FROM punkty").fetchone()[0]
+    historia = repo.historia_rejonow_punktu(conn, punkt_id)
+    assert historia == [{"kod": "WA87", "liczba": 1, "ostatnia_data": "2026-08-10"}]
+
+
+def test_historia_rejonow_punktu_posortowana_po_liczbie(conn):
+    repo.zapisz_blok(conn, _blok(rejon="WA87", data=date(2026, 8, 1)))
+    repo.zapisz_blok(conn, _blok(rejon="WA87", data=date(2026, 8, 2)))
+    repo.zapisz_blok(conn, _blok(rejon="WA88", data=date(2026, 8, 3)))
+    punkt_id = conn.execute("SELECT id FROM punkty").fetchone()[0]
+    historia = repo.historia_rejonow_punktu(conn, punkt_id)
+    assert [h["kod"] for h in historia] == ["WA87", "WA88"]
+    assert historia[0]["liczba"] == 2
+
+
+def test_historia_rejonow_punktu_brak_historii(conn):
+    assert repo.historia_rejonow_punktu(conn, 999999) == []
+
+
+def test_historia_wykonawcow_kuriera_jednoznaczna(conn):
+    repo.zapisz_blok(conn, _blok(wykonawca="Koli"))
+    historia = repo.historia_wykonawcow_kuriera(conn, "Kowalski Jan")
+    assert historia == [{"nazwa": "Koli", "liczba": 1, "ostatnia_data": "2026-08-10"}]
+
+
+def test_historia_wykonawcow_kuriera_posortowana_po_ostatniej_dacie(conn):
+    # 69/70 kurierów w realnych danych ma jednego wykonawcę - niejednoznaczność
+    # to realna zmiana firmy, więc sortujemy po świeżości, nie po liczbie
+    repo.zapisz_blok(conn, _blok(wykonawca="Koli", data=date(2026, 8, 1)))
+    repo.zapisz_blok(conn, _blok(wykonawca="Koli", data=date(2026, 8, 2)))
+    repo.zapisz_blok(conn, _blok(wykonawca="Translist", data=date(2026, 8, 5)))
+    historia = repo.historia_wykonawcow_kuriera(conn, "Kowalski Jan")
+    assert [h["nazwa"] for h in historia] == ["Translist", "Koli"]
+
+
+def test_historia_wykonawcow_kuriera_nowy_kurier(conn):
+    assert repo.historia_wykonawcow_kuriera(conn, "Nikt Taki") == []

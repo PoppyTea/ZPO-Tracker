@@ -524,3 +524,70 @@ def pobierz_transakcje(conn, limit=200):
         (limit,),
     ).fetchall()
     return [dict(w) for w in wiersze]
+
+
+# --- zapytania dedukcyjne dla formularza wprowadzania (dedukcja.py) ---
+
+def znajdz_punkty_po_adresie(conn, adres):
+    """
+    Kandydaci punktów dla adresu wpisanego w formularzu - z preferencją
+    trafienia DOKŁADNEGO (po indeksie `idx_punkty_adres`) nad rozmytym.
+    Punkty w bazie są znormalizowane (`models.py`: `klucz_bialych_znakow`),
+    a to, co wpisuje człowiek, nie musi być - bez fuzzy fallbacku
+    "odkryta  24" dałoby zero trafień, a przy zapisie zduplikowany punkt.
+    """
+    dokladne = conn.execute(
+        "SELECT id, nadawca, adres, pni_zpo FROM punkty WHERE adres = ?",
+        (adres,),
+    ).fetchall()
+    if dokladne:
+        return [dict(r) for r in dokladne]
+
+    klucz = klucz_rozmyty(adres)
+    wszystkie = conn.execute("SELECT id, nadawca, adres, pni_zpo FROM punkty").fetchall()
+    return [dict(r) for r in wszystkie if klucz_rozmyty(r["adres"]) == klucz]
+
+
+def czy_nadawca_ma_pni(conn, nadawca):
+    """Rządzi aktywnością pola "w tym ZPO" w trybie auto - wyliczane w
+    locie (EXISTS), NIGDY przechowywane, żeby nie mogło się rozjechać."""
+    return bool(conn.execute(
+        "SELECT EXISTS(SELECT 1 FROM punkty WHERE nadawca = ? AND pni_zpo IS NOT NULL)",
+        (nadawca,),
+    ).fetchone()[0])
+
+
+def historia_rejonow_punktu(conn, punkt_id):
+    """Rejony, którymi historycznie jeżdżono do tego punktu, najczęstszy
+    pierwszy - źródło dedukcji rejonu (dedukcja.py)."""
+    wiersze = conn.execute(
+        """SELECT r.kod AS kod, COUNT(*) AS liczba, MAX(t.data) AS ostatnia_data
+           FROM transakcje t JOIN rejony r ON r.id = t.rejon_id
+           WHERE t.punkt_id = ?
+           GROUP BY r.kod
+           ORDER BY liczba DESC""",
+        (punkt_id,),
+    ).fetchall()
+    return [dict(w) for w in wiersze]
+
+
+def historia_wykonawcow_kuriera(conn, kurier):
+    """
+    Wykonawcy, dla których historycznie jeździł ten kurier - świeższy
+    pierwszy, NIE najliczniejszy: 69/70 kurierów w realnych danych ma
+    jednego wykonawcę, więc niejednoznaczność to najczęściej realna zmiana
+    firmy, nie szum - wartość dominująca liczebnie byłaby wtedy tą
+    NIEAKTUALNĄ. `kurier` to nazwa, nie id - nowy kurier bez historii
+    zwraca po prostu pustą listę.
+    """
+    wiersze = conn.execute(
+        """SELECT w.nazwa AS nazwa, COUNT(*) AS liczba, MAX(t.data) AS ostatnia_data
+           FROM transakcje t
+           JOIN kurierzy k ON k.id = t.kurier_id
+           JOIN wykonawcy w ON w.id = t.wykonawca_id
+           WHERE k.imie_nazwisko = ?
+           GROUP BY w.nazwa
+           ORDER BY ostatnia_data DESC""",
+        (kurier,),
+    ).fetchall()
+    return [dict(w) for w in wiersze]
