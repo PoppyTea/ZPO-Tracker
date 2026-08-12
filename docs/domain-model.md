@@ -63,3 +63,13 @@ ilość_total, ilość_zpo, PNI ZPO, ilość_vinted, ilość_automaty, kurier_48
 
 Zobacz też `normalization-v2.md` dla propozycji rozbicia tych ustaleń na
 znormalizowany schemat relacyjny.
+
+## Aliasy semantyczne — kolumna `nadawca`
+
+Do wyszukiwania semantycznego w przyszłości (silnik podpowiedzi, dane
+referencyjne): w rozmowach z użytkownikami działu ta sama kolumna bywa
+nazywana *sklep*, *nazwa ZPO*, *właściciel ZPO*, *nazwa miejsca nadania*.
+W pliku źródłowym `.xlsx` nagłówek to „Pełna Nazwa Nadawcy". Wszystkie
+odnoszą się do jednej rzeczy: nazwy podmiotu, który nadaje przesyłkę pod
+danym adresem (`punkty.nadawca`, zdenormalizowana kopia `firmy_zpo.nazwa`
+dla punktów z PNI ZPO — patrz `../src/CLAUDE.md`, `importer.py`).

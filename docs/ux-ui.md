@@ -49,11 +49,8 @@ dołożyć później bez przeprojektowywania silnika — architektura podpowiedz
 powinna to od razu uwzględniać (źródło danych jako wymienny komponent, nie
 zaszyte na sztywno).
 
-**Nieustalone / do doprecyzowania:** dokładny mechanizm interakcji
-(dropdown z filtrowaniem na żywo? kolejność sugestii — ostatnio używane
-najpierw? liczba znaków przed pokazaniem podpowiedzi?). To zostało
-zasygnalizowane w rozmowie, ale nie doprecyzowane — do ustalenia przed/przy
-implementacji formularza.
+Mechanizm interakcji ustalony i zrealizowany w `0.1-alpha.3.1` — patrz
+sekcja "Dedukcja pól, wskaźniki, tryb auto" niżej.
 
 ## Narzędzie do przeglądu kurierów (ustalone, osobne od głównego UI)
 
@@ -72,3 +69,48 @@ automatyczne scalenie.
 **Docelowy interfejs produkcyjny to wciąż tkinter** (offline, bez
 instalacji, bez przeglądarki) — HTML służy wyłącznie do prototypowania
 i walidacji przepływu UX przed implementacją.
+
+## Dedukcja pól, wskaźniki, tryb auto (`0.1-alpha.3.1`, zrealizowane)
+
+Odpowiedź na pytanie z sekcji "Silnik podpowiedzi" wyżej — jak dokładnie
+działa mechanizm interakcji. Silnik dedukcji: `src/zpo_tracker/dedukcja.py`.
+
+**Pola główne:** Kurier, Data, Adres, Ilość, „w tym ZPO". **Drugorzędne
+(dedukowane):** Nadawca, PNI ZPO, Rejon, Wykonawca. Ilość/„w tym ZPO" mają
+status wyjątkowy: główne pod względem aktywności/nawigacji/blokady
+zapisu, ale nigdy nie bramują ani nie są źródłem dedukcji pozostałych pól
+— dedukcja rusza z kuriera/adresu niezależnie od tego, czy Ilość jest
+jeszcze wypełniona.
+
+**Zasada jednolita:** jednoznaczne → pole wypełnia się samo i staje
+readonly (zaznaczalne, ale niepomijane wzrokiem — zielone); niejednoznaczne
+→ pole NIE wypełnia się, aktywuje się, sprzeczne warianty pokazują się
+jako podpowiedzi (pomarańczowe). Nowy adres bez żadnego dopasowania →
+czerwone, aktywne, do wypełnienia ręcznie.
+
+Kolejność rozstrzygania w wierszu: **najpierw punkt** (z adresu,
+opcjonalnie zawężony ręcznie wpisanym nadawcą), dopiero z rozstrzygniętego
+punktu nadawca/PNI/rejon. PNI nigdy nie jest dedukowane niezależnie od
+nadawcy. Wykonawca dedukowany z historii kuriera na poziomie nagłówka
+blankietu (jeden blankiet = jeden kurier = jeden wykonawca).
+
+**Kolory wskaźnika** (pasek po lewej stronie pola,
+`gui/widget_pole.PoleZeWskaznikiem`): szary (nieaktywne/brak danych),
+zielony (wypełnione, OK), pomarańczowy (wymaga wyboru spośród wariantów),
+czerwony (nowy punkt/brak dopasowania, wymaga ręcznego wpisania). Pole
+aktywne (pomarańczowe/czerwone) dostaje dodatkowo obwódkę w tym samym
+kolorze.
+
+**Nawigacja — tryb auto:** TAB/Enter są równoważne i prowadzą WYŁĄCZNIE
+przez pola główne plus każde pole, które akurat wymaga uwagi (aktywne
+drugorzędne) — kolejność liczona dynamicznie z wyniku dedukcji
+(`dedukcja.kolejnosc_pol`), nie z układu widgetów na ekranie, bo pole
+może aktywować się "za" tym, na którym użytkownik już jest. Pole następne
+w kolejności (dokądkolwiek doprowadzi kolejny Tab) dostaje własne,
+cieńsze podświetlenie tym samym motywem koloru — widoczny sygnał "tu
+wyląduję dalej", nawet gdy pole jest wciąż "w przygotowaniu" (dedukcja
+jeszcze nie zdążyła go rozstrzygnąć).
+
+**Świadomie odłożone do `0.1-alpha.3.2`** (patrz `roadmap.md`): tryb
+pół-auto i manualny, przełącznik trybów + `settings.json`, blokowanie
+pola kliknięciem we wskaźnik.

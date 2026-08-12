@@ -27,7 +27,7 @@ ustalenia po `0.1-alpha.3` (info od Papavera).
 |---|---|---|
 | `v0.1.0-alpha.2` | wydane | MVP: import/export, formularz blankietowy, słowniki, podpowiedzi |
 | `v0.1.0-alpha.3` | wydane | trwałość danych, atrybucja, ręczne scalanie baz (niżej) |
-| **`0.1-alpha.3.1`** | w toku | dedukcja pól formularza, wskaźniki stanu, tryb auto |
+| **`0.1-alpha.3.1`** | wydane | dedukcja pól formularza, wskaźniki stanu, tryb auto |
 | **`0.1-alpha.4`** | planowane | przebudowa UI/UX pod realne potrzeby + kanał feedbacku |
 | **`0.1-alpha.5`** | planowane | tryb pół-auto wprowadzania (wymaga sensownego interfejsu) |
 | **`0.1-alpha.6`** | planowane | automatyczna synchronizacja między stacjami |

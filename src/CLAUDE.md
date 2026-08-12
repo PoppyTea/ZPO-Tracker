@@ -21,40 +21,87 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
 - `models.py` — pydantic v2. `WierszImportu` (walidacja wiersza importu,
   konwersja `datetime`→`date`, normalizacja białych znaków na
   kurier/nadawca/adres — bez tego "Michalak Maciej " ląduje jako inny
-  kurier niż "Michalak Maciej", patrz historia commitów). `BlankietBlok`
-  / `WierszBlankietu` (dane z formularza wprowadzania).
+  kurier niż "Michalak Maciej", patrz historia commitów). `Blankiet` /
+  `WierszBlankietu` (dane z formularza wprowadzania) — `rejon` żyje PER
+  WIERSZ od `0.1-alpha.3.1` (dedukowany z adresu, patrz `dedukcja.py`),
+  `komentarz` per blok zniknął z formularza (kolumna w bazie zostaje).
 - `normalizacja.py` — trzy poziomy pewności: `klucz_bialych_znakow`
   (bezpieczne automatyczne scalanie), `klucz_rozmyty` +
   `odleglosc_edycyjna`/`czy_literowka` (prawdopodobna literówka,
   automatyczny dedup z możliwością odrzucenia), `znajdz_podobne`
   (różnica WYŁĄCZNIE w diakrytykach — nigdy automat, patrz
   `../docs/domain-model.md`, przypadek "Wołczuk Rafal"/"Rafał").
+  `normalizuj_rejon`/`REJON_NIEZNANY = "???"` — kanoniczny "rejon
+  nieznany", stosowany na KAŻDEJ ścieżce zapisu rejonu (formularz, import,
+  Słowniki, scalanie baz) i przy jednorazowej naprawie już zapisanych
+  danych, patrz `repo.napraw_dane` niżej.
 - `repo.py` — **`transakcja(conn)`**: jawna transakcja na SAVEPOINT,
-  re-entrant (fasady opakowują `zapisz_blok`, które samo woła
+  re-entrant (fasady opakowują `zapisz_blankiet`, które samo woła
   `get_or_create_*` — zwykłe `BEGIN` by się zagnieździło i rzuciło).
   **NIE używać wbudowanego `with conn:`** — przy `isolation_level=None`
   on nic nie wycofuje; kod wygląda poprawnie i nie robi nic (przypięte
   testem `test_wbudowane_with_conn_nic_nie_wycofuje`). Złapany
   `IntegrityError` NIE unieważnia transakcji, więc per-wierszowe `except`
-  w `zapisz_blok`/`zaimportuj` działają wewnątrz bez zmian.
-  `WERSJA_SCHEMATU` + `wersja_schematu`/`sprawdz_zgodnosc_wersji`/
-  `wymaga_migracji`/`migruj` — musi zgadzać się z `PRAGMA user_version`
-  na końcu `schema.sql`. **`migruj` jest addytywna i idempotentna**
-  (sprawdza obecność każdego obiektu zamiast wykonywać kroki po numerze
-  wersji), więc przeżywa też bazy w stanie pośrednim po przerwanej
-  aktualizacji. Zweryfikowana na realnym imporcie z alpha.2: 1239
-  transakcji / 68 kurierów / 671 punktów zachowane, `integrity_check` ok. Dostęp do danych: `zapisz_blok` (formularz → transakcje,
-  **atomowy**),
-  słowniki proste (`pobierz_slownik`/`dodaj_do_slownika`/
-  `zmien_nazwe_w_slowniku`/`usun_z_slownika`), `scal_kurierow` (droga
-  naprawy dla ostrzeżeń o podobieństwie, **atomowy**; przy kolizji
+  w `zapisz_blankiet`/`zaimportuj` działają wewnątrz bez zmian.
+  `WERSJA_SCHEMATU` (**2** od `0.1-alpha.3.1` — dwa indeksy,
+  `idx_transakcje_kurier`/`idx_punkty_adres`, dla zapytań dedukcyjnych
+  niżej; jedyny uprawniony powód bumpa — sama naprawa danych wersji NIE
+  podbija, bo nie zmienia struktury) + `wersja_schematu`/
+  `sprawdz_zgodnosc_wersji`/`wymaga_migracji`/`migruj` — musi zgadzać się
+  z `PRAGMA user_version` na końcu `schema.sql`. **`migruj` jest
+  addytywna i idempotentna** (sprawdza obecność każdego obiektu zamiast
+  wykonywać kroki po numerze wersji), więc przeżywa też bazy w stanie
+  pośrednim po przerwanej aktualizacji. Zweryfikowana na realnym
+  imporcie z alpha.2: 1239 transakcji / 68 kurierów / 671 punktów
+  zachowane, `integrity_check` ok.
+  `napraw_dane(conn)` — celowo POZA `migruj`: bezwarunkowa, idempotentna
+  (sprawdza stan, nie numer wersji — inaczej odpaliłaby się raz i baza
+  scalona później z niepoprawioną kopią zostałaby zepsuta na trwałe),
+  wołana z `app.py` po starcie, opakowana w `operacje.wykonaj` (migawka +
+  dziennik — to największa mutacja danych w wydaniu, musi mieć punkt
+  powrotu) wewnątrz `try/except` z degradacją "nie naprawiono, pracuj
+  dalej" — `main()` łapie wyłącznie `NiezgodnaWersjaSchematu`, więc każdy
+  inny wyjątek w naprawie zablokowałby start aplikacji NA STAŁE u
+  użytkownika bez admina i konsoli. Sprząta rejony spoza
+  `normalizacja.REJON_NIEZNANY` i rozjazd `firmy_zpo.nazwa`/
+  `punkty.nadawca` (patrz `importer.py` niżej).
+  Dostęp do danych: `zapisz_blankiet` (formularz → transakcje,
+  **atomowy**, `rejon_id` liczone PER WIERSZ od `0.1-alpha.3.1` — rejon
+  zszedł z bloku do wiersza, `zapisz_bloki` zniknęło), słowniki proste
+  (`pobierz_slownik`/`dodaj_do_slownika`/`zmien_nazwe_w_slowniku`/
+  `usun_z_slownika` — rename `firmy_zpo` propaguje do `punkty.nadawca`,
+  kanoniczny wiersz `???` nie da się zmienić/skasować), `scal_kurierow`
+  (droga naprawy dla ostrzeżeń o podobieństwie, **atomowy**; przy kolizji
   `UNIQUE(data,kurier,punkt)` scalenie się nie uda — ale nie zostawi
-  stanu połowicznego), `pobierz_transakcje`,
-  `pobierz_punkty`. `zapisz_bloki` — kilka `BlankietBlok` (jeden formularz
-  = kilka bloków rejonu) jako JEDNA operacja dla `operacje.wykonaj`, żeby
-  cofnięcie cofało cały formularz, nie pojedynczy blok. `_resolve_schema_path`
-  rozróżnia dev vs spakowany `.exe` (PyInstaller rozpakowuje dane do
-  `sys._MEIPASS`).
+  stanu połowicznego), `pobierz_transakcje`, `pobierz_punkty`. Zapytania
+  dedukcyjne (`znajdz_punkty_po_adresie`/`czy_nadawca_ma_pni`/
+  `historia_rejonow_punktu`/`historia_wykonawcow_kuriera`) — jedyny
+  konsument to `dedukcja.py` niżej. `_resolve_schema_path` rozróżnia dev
+  vs spakowany `.exe` (PyInstaller rozpakowuje dane do `sys._MEIPASS`).
+- `dedukcja.py` — silnik dedukcji pól formularza (`0.1-alpha.3.1`), bez
+  display. Rozstrzyga najpierw **punkt** (z adresu, przez
+  `repo.znajdz_punkty_po_adresie`, opcjonalnie zawężony ręcznie wpisanym
+  nadawcą), dopiero z rozstrzygniętego punktu wyprowadza nadawcę/PNI/
+  rejon — PNI NIGDY nie jest dedukowane niezależnie od nadawcy (adres
+  z dwoma nadawcami inaczej podpinałby transakcję pod zły punkt po
+  cichu, skoro `importer.get_or_create_punkt` kluczuje po PNI, nie po
+  adresie). Wykonawca dedukowany z historii kuriera na poziomie
+  NAGŁÓWKA blankietu, nie wiersza (`dedukuj_naglowek` — jeden blankiet =
+  jeden kurier = jeden wykonawca). Zasada jednolita: jednoznaczne →
+  wypełnia; niejednoznaczne → NIE wypełnia, aktywuje pole, warianty jako
+  `StanPola.kandydaci`. Ilość/„w tym ZPO" nigdy nie bramują ani nie są
+  źródłem dedukcji innych pól — dedukcja rusza z kuriera/adresu
+  niezależnie od stanu Ilości; jej jedyna rola to jednokierunkowe
+  autouzupełnienie „w tym ZPO", bramowane `czy_nadawca_ma_pni`.
+  `sprawdz_niezmienniki` — stany zakazane (pomarańcz/czerwień bez
+  `aktywne`, aktywne+niekolorowe-szare bez `w_nawigacji`), wołane
+  w testach. `kolejnosc_pol(tryb, ...)` zwraca KLUCZE pól (krotki), nie
+  widgety — mapowanie klucz→widget zostaje w `gui/` (patrz Work Guidance
+  niżej); pole pomarańczowe/czerwone wchodzi do kolejności niezależnie od
+  tego, czy jest polem głównym, inaczej nie da się go wypełnić
+  z klawiatury. `przesun_w_kolejnosci` — czysty next/prev po tej liście
+  (zawija na końcach), napędza Tab/Enter/Shift-Tab w
+  `gui/zakladka_wprowadzanie.py`.
 - `import_orchestrator.py` — cały import w partii: `zwaliduj_wiersze`,
   `znajdz_propozycje_scalenia_kurierow` (literówki, auto-merge PRZED
   zapisem, nie cofanie po fakcie), `znajdz_ostrzezenia_podobienstwa_kurierow`
@@ -178,9 +225,18 @@ wartości z pól i wywołanie warstwy logiki:
   ostrzeżenie i kończy się przed `mainloop()`, nie po cichu otwiera drugie
   okno na tej samej bazie. `zrzuty.zrob_zrzut` wołane obok przycinania
   migawek, tylko jeśli dzisiejszy zrzut jeszcze nie istnieje.
-- `zakladka_przeglad.py`, `zakladka_wprowadzanie.py` (formularz
-  blankietowy: bloki REJON+DATA, rejon opcjonalny/nieznany + komentarz
-  per blok), `zakladka_import_export.py` (+ `DialogKorektyImportu` —
+- `zakladka_przeglad.py`, `zakladka_wprowadzanie.py` (formularz: nagłówek
+  kurier+data+wykonawca(dedukowany) + płaska lista wierszy — bloki
+  REJON+DATA i komentarz per blok zniknęli w `0.1-alpha.3.1`, rejon
+  zszedł do wiersza i jest dedukowany z adresu razem z nadawcą/PNI przez
+  `dedukcja.py`. `WierszWidget` NIE jest już `Frame'em`: jego komórki
+  (`widget_pole.PoleZeWskaznikiem`) grid-ują się wprost do jednej
+  wspólnej siatki z etykietami nagłówka kolumn (wiersz 0), więc rozjazd
+  szerokości kolumn jest konstrukcyjnie niemożliwy. Nawigacja
+  Tab/Enter/Shift-Tab/`ISO_Left_Tab` idzie przez `dedukcja.kolejnosc_pol`
+  + `przesun_w_kolejnosci`, NIE przez naturalny porządek widgetów w
+  gridzie — pole aktywowane niejednoznacznie (np. nadawca) może wylądować
+  "za" polem, na którym użytkownik już jest), `zakladka_import_export.py` (+ `DialogKorektyImportu` —
   ekran korekty pokazuje WYŁĄCZNIE wiersze wymagające uwagi),
   `zakladka_slowniki.py` (podzakładki kurierzy/punkty ZPO/wykonawcy/
   rejony/firmy ZPO), `zakladka_scalanie.py` (`DialogKorektyScalania` -
@@ -207,9 +263,34 @@ wartości z pól i wywołanie warstwy logiki:
 - `widget_autocomplete.py` — dropdown + klawiatura (bez ghost textu).
   Zweryfikowany w izolacji (zrzuty ekranu: dropdown renderuje się
   poprawnie, dopasowanie rozmyte działa, Tab/strzałki/zatwierdzanie
-  działają) — patrz Verification. **Wpięty do `zakladka_wprowadzanie.py`**
-  (pola kurier, nadawca, adres), źródło kandydatów z
-  `repo.pobierz_punkty`/`pobierz_slownik`.
+  działają) — patrz Verification. `ustaw_stan_pola(state, takefocus)` —
+  NIE samo `state`: `readonly` samo w sobie nie wypada z nawigacji Tab,
+  dopiero razem z `takefocus=0` (zweryfikowane empirycznie).
+  `ustaw_zrodlo_kandydatow` — podmiana źródła w locie, pole dedukowane
+  niejednoznacznie dostaje własną zawężoną listę (`dedukcja.StanPola.
+  kandydaci`) zamiast pełnego słownika. `on_dalej` — Tab/Return go wołają
+  zamiast domyślnego przejścia Tk; `_zatwierdz_i_dalej` zwraca `"break"`
+  TYLKO gdy podany, inaczej Tab w tym polu przestałby działać całkowicie.
+  `rozwijaj_na_pusty_fokus` — pokazuje kandydatów na pustym polu od razu
+  po fokusie (bo `podpowiedz("")` zwraca `[]` — bez tego pole
+  pomarańczowe z konkretnymi wariantami nie pokazałoby nic akurat wtedy,
+  gdy afordancja jest najbardziej potrzebna); domyślnie WYŁĄCZONE, żeby
+  pełny słownik (kurier/nadawca/adres) nie wyskakiwał na każdy fokus.
+  **Wpięty do `zakladka_wprowadzanie.py`** (kurier, nadawca, adres, a od
+  `0.1-alpha.3.1` też rejon i wykonawca — dla pokazywania kandydatów
+  dedukcji), źródło kandydatów z `repo.pobierz_punkty`/`pobierz_slownik`/
+  `dedukcja.StanPola.kandydaci`.
+- `widget_pole.py` — `PoleZeWskaznikiem` (`0.1-alpha.3.1`): `tk.Frame`
+  (NIE `ttk.Frame` — `highlightthickness`/`highlightbackground` na
+  obwódkę jest opcją tk-ową) owijający widget pola paskiem koloru stanu
+  (`dedukcja.STANY`) + obwódką: "wymaga uwagi" (2px, wygrywa przy
+  konflikcie) albo "następne w kolejce Tab" (1px, ten sam motyw koloru).
+  Konstruktor bierze FABRYKĘ widgetu (`parent -> widget`), nie gotowy
+  widget — Tk pakuje/griduje widget do jego rzeczywistego rodzica
+  z konstrukcji, więc gotowy widget zbudowany z innym rodzicem
+  wylądowałby jako rodzeństwo wrappera, nie w jego środku (złapane
+  eksperymentalnie przed napisaniem finalnej wersji, patrz historia
+  commitów).
 
 ## Work Guidance
 
@@ -251,9 +332,21 @@ wskazuje na `uv`/inny menedżer zamiast na systemowego Pythona.
 
 `widget_autocomplete.py` zweryfikowany w izolacji przez systemowy Python:
 dropdown renderuje się poprawnie, dopasowanie rozmyte i klawiatura działają
-zgodnie z projektem. Wpięty do `zakladka_wprowadzanie.py` (pola
-kurier/nadawca/adres, źródło kandydatów z `repo.pobierz_punkty`/
-`pobierz_slownik`).
+zgodnie z projektem. Wpięty do `zakladka_wprowadzanie.py` (kurier, nadawca,
+adres, rejon, wykonawca — patrz Local Contracts).
+
+Dedukcja pól, wskaźniki i nawigacja (`0.1-alpha.3.1`) zweryfikowane
+bezgłowo pod Xvfb (`test_dedukcja.py`, `test_widget_pole.py`,
+`test_widget_autocomplete.py`, `test_nawigacja_wprowadzanie.py` —
+`focus_get()` po Tab/Enter/Shift-Tab/`ISO_Left_Tab`, w tym jedno
+`event_generate("<Tab>")` jako dowód end-to-end, nie tylko wywołania
+metod bezpośrednio) oraz zrzutem ekranu: nagłówek kolumn wyrównany z
+danymi, kolorowa obwódka na polu niejednoznacznym (nadawca/wykonawca
+pomarańczowe), szare tło na polu nieaktywnym/dedukowanym. **Nie
+zweryfikowane pod motywem `vista`** — `PoleZeWskaznikiem` to `tk.Frame`
+w aplikacji poza tym `ttk`, więc tło może odróżniać się wizualnie od
+reszty formularza tylko na Windowsie (`clam`/`default` pod Xvfb tego nie
+pokażą), patrz `../docs/environment.md`.
 
 `zakladka_historia.py` + `operacje.wykonaj`/`cofnij` zweryfikowane end-to-end
 (zrzut ekranu i testy w `test_gui_smoke.py`): zapis z formularza,

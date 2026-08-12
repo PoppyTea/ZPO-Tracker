@@ -59,3 +59,9 @@ jednostki pracy do wzięcia; tam co i kiedy.
 - [x] Wpięcie `widget_autocomplete.py` do formularza wprowadzania (pola
       kurier/nadawca/adres w `zakladka_wprowadzanie.py`)
 - [x] Publiczne repozytorium GitHub (`github.com/PoppyTea/ZPO-Tracker`)
+- [x] `0.1-alpha.3.1` — dedukcja pól formularza z bazy (`dedukcja.py`),
+      kolorowe wskaźniki stanu (`widget_pole.PoleZeWskaznikiem`), tryb
+      auto z nawigacją Tab/Enter/Shift-Tab/`ISO_Left_Tab` liczoną
+      z `kolejnosc_pol` + podświetleniem następnego pola; naprawa
+      `firmy_zpo`↔`punkty.nadawca` i kanoniczny `???` dla rejonu na
+      wszystkich ścieżkach zapisu, patrz `ux-ui.md`
