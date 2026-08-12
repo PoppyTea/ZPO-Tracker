@@ -31,9 +31,18 @@ class PoleZeWskaznikiem(tk.Frame):
     Entry/ttk.Entry dostaje surowe `configure(state=..., takefocus=...)`.
     """
 
-    def __init__(self, parent, widget_pola, **kwargs):
+    def __init__(self, parent, fabryka_widgetu_pola, **kwargs):
+        """
+        `fabryka_widgetu_pola`: wywoływalne przyjmujące JEDEN argument
+        (rodzica) i zwracające widget pola, np. `lambda p: ttk.Entry(p,
+        textvariable=var)` albo sama klasa (`tk.Entry`). NIE gotowy
+        widget - Tk pakuje/griduje widget do jego RZECZYWISTEGO rodzica
+        ustalonego przy tworzeniu, więc widget zbudowany z innym
+        rodzicem niż ten wrapper wylądowałby wizualnie jako rodzeństwo w
+        oknie nadrzędnym, nie wewnątrz paska ze wskaźnikiem (sprawdzone
+        eksperymentalnie).
+        """
         super().__init__(parent, highlightthickness=0, **kwargs)
-        self.widget_pola = widget_pola
         self._stan = "szary"
         self._aktywne = False
         self._nastepne = False
@@ -42,6 +51,7 @@ class PoleZeWskaznikiem(tk.Frame):
         self.pasek = tk.Frame(self, width=4, background=KOLORY["szary"])
         self.pasek.pack(side="left", fill="y")
         self.pasek.pack_propagate(False)
+        self.widget_pola = fabryka_widgetu_pola(self)
         self.widget_pola.pack(side="left", fill="both", expand=True)
 
     def ustaw_stan(self, stan):

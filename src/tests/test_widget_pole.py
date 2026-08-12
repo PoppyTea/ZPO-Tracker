@@ -39,10 +39,20 @@ def root():
 
 @pytest.fixture
 def pole(root):
-    wewnetrzny = tk.Entry(root)
-    p = PoleZeWskaznikiem(root, wewnetrzny)
+    p = PoleZeWskaznikiem(root, tk.Entry)
     p.pack()
     return p
+
+
+def test_widget_pola_jest_realnie_zagniezdzony_w_wrapperze(pole):
+    # regresja: `widget_pola.pack()` pakuje widget do JEGO WŁASNEGO
+    # rodzica tkinter (ustalonego przy tworzeniu), nie do tego, w czym
+    # ktoś go później pack()/grid() - gdyby widget_pola powstawał z innym
+    # parentem niż `self`, pasek koloru i pole żyłyby jako RODZEŃSTWO w
+    # oknie nadrzędnym, nie wewnątrz tego samego wrappera (sprawdzone
+    # eksperymentalnie przed napisaniem tego testu)
+    assert pole.widget_pola in pole.winfo_children()
+    assert pole.widget_pola.winfo_parent() == str(pole)
 
 
 def test_domyslny_stan_jest_szary(pole):
@@ -118,8 +128,7 @@ def test_wspiera_widget_z_ustaw_stan_pola(root):
         def ustaw_stan_pola(self, state, takefocus):
             self.wolania.append((state, takefocus))
 
-    wewnetrzny = _Fejk(root)
-    p = PoleZeWskaznikiem(root, wewnetrzny)
+    p = PoleZeWskaznikiem(root, _Fejk)
     p.ustaw_aktywnosc(True)
     p.ustaw_aktywnosc(False)
-    assert wewnetrzny.wolania == [("normal", 1), ("readonly", 0)]
+    assert p.widget_pola.wolania == [("normal", 1), ("readonly", 0)]
