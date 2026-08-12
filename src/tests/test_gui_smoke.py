@@ -141,7 +141,7 @@ def test_zakladka_przeglad_pokazuje_wpisana_transakcje(tmp_path):
         dziennik.odepnij()
 
 
-# --- migawki + cofanie (X+1): zakładka Historia, operacje.wykonaj/cofnij ---
+# --- migawki + cofanie (`0.1-alpha.3`): zakładka Historia, operacje.wykonaj/cofnij ---
 
 def test_zakladka_historia_istnieje(tmp_path):
     from zpo_tracker.gui.app import Aplikacja
@@ -398,7 +398,7 @@ def test_cofnij_wybrany_pokazuje_dialog_alternatyw_gdy_migawka_zniknela(tmp_path
 
 
 def test_main_druga_instancja_pokazuje_ostrzezenie_i_nie_otwiera_okna(tmp_path, monkeypatch):
-    # jedna instancja na katalog danych (X+1) - main() musi wrócić PRZED
+    # jedna instancja na katalog danych (`0.1-alpha.3`) - main() musi wrócić PRZED
     # app.mainloop(), inaczej ten test zawiesiłby cały zestaw
     from zpo_tracker.gui import app as app_modul
     from zpo_tracker import blokada, dziennik

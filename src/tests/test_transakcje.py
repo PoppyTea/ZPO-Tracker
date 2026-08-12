@@ -256,7 +256,7 @@ def test_starsza_baza_jest_do_migracji_a_nie_do_odrzucenia(conn):
     assert repo.wymaga_migracji(conn) is False
 
 
-# --- migracja z bazy sprzed X+1 (alpha.2) ---
+# --- migracja z bazy sprzed `0.1-alpha.3` (czyli z alpha.2) ---
 
 def _baza_alpha2():
     """

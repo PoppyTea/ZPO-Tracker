@@ -68,7 +68,7 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
 - `uzytkownicy.py` — tożsamość osoby wprowadzającej dane. `users.id` to
   **UUIDv5 z `domena\login`** (`NAMESPACE_ZPO` — nie zmieniać, zmiana
   rozdwoiłaby każdą osobę), NIE losowy UUID: losowy rozjechałby się między
-  stacjami i po synchronizacji (X+3) ta sama osoba istniałaby wielokrotnie.
+  stacjami i po ich zsynchronizowaniu ta sama osoba istniałaby wielokrotnie.
   `nr_kadrowy` (`[a-zA-Z0-9]{5}`, case sensitive) to atrybut biznesowy
   **obok** UUID, nie zamiast — wpisuje go człowiek, więc literówka jest
   niewykrywalna. Para daje kontrolę krzyżową (`ostrzezenia_tozsamosci`,
@@ -146,7 +146,7 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
 - `zrzuty.py` — warstwa ZIMNA, osobna od `kopie.py`: gzipowany tekstowy SQL
   (`conn.iterdump()`, NIE binarny `.db`) — czytelny po rozpakowaniu,
   przenośny między maszynami/wersjami SQLite, planowany format wymiany dla
-  synchronizacji stacji (X+3). Jeden zrzut na dzień (`zrob_zrzut` nadpisuje
+  synchronizacji między stacjami. Jeden zrzut na dzień (`zrob_zrzut` nadpisuje
   przy powtórnym wywołaniu tego samego dnia), **NIE przycinany** jak
   migawki — to archiwum długoterminowe, nie punkty przywracania pojedynczej
   operacji, a przy tej skali danych (dept-owa baza) rozmiar jest

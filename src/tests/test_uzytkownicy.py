@@ -4,7 +4,7 @@ Atrybucja zmian do autora. SQLite w pamięci, bez mocków. TDD.
 Sedno projektu: `users.id` to **UUIDv5 wyliczone z `domena\\login`**, a nie
 losowy UUID nadawany przy pierwszym zetknięciu z nowym loginem. Losowy
 rozjechałby się między stacjami - każda nadałaby temu samemu człowiekowi
-inny identyfikator, a po synchronizacji (X+3) ta sama osoba istniałaby
+inny identyfikator, a po ich zsynchronizowaniu ta sama osoba istniałaby
 wielokrotnie. UUIDv5 liczy się identycznie wszędzie, bez koordynacji
 i bez wyścigu przy pierwszym uruchomieniu.
 
@@ -193,7 +193,7 @@ def test_zapisz_blok_stempluje_autora_i_czas(conn):
 
 def test_zapisz_blok_nadaje_uuid_kazdemu_wierszowi(conn):
     # tożsamość wiersza niezależna od klucza naturalnego: poprawka daty
-    # albo kuriera zmienia klucz, a przy synchronizacji (X+3) wyglądałoby
+    # albo kuriera zmienia klucz, a przy synchronizacji między stacjami wyglądałoby
     # to jak nowy wiersz i powstałby duplikat
     repo.zapisz_blok(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Żabka", adres=f"Ulica {i}", ilosc_total=1)

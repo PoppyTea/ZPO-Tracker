@@ -1,6 +1,6 @@
 """
-Blokada jednej instancji na katalog danych (`app.main`, patrz X+1 w
-roadmap.md) - blokada pliku na poziomie systemu operacyjnego, NIE zapis
+Blokada jednej instancji na katalog danych (`app.main`, patrz `0.1-alpha.3`
+w roadmap.md) - blokada pliku na poziomie systemu operacyjnego, NIE zapis
 PID-u do pliku i sprawdzanie go później: PID martwego procesu bywa
 ponownie przydzielony innemu, żywemu procesowi (typowe po restarcie
 systemu), więc sama obecność pliku z PID-em niczego by nie gwarantowała.

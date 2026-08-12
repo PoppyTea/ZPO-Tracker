@@ -2,7 +2,8 @@
 Fasada łącząca migawki (kopie.py) z dziennikiem (dziennik.py): każda
 mutująca operacja dostaje migawkę SPRZED wykonania + wpis w dzienniku,
 więc cofnięcie do dowolnego punktu w historii jest zawsze możliwe - cel
-X+1 "żaden pojedynczy błąd nie kosztuje więcej niż jedną operację". TDD.
+`0.1-alpha.3` "żaden pojedynczy błąd nie kosztuje więcej niż jedną
+operację". TDD.
 """
 import sqlite3
 

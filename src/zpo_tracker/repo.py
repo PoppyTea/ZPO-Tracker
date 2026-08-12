@@ -77,9 +77,9 @@ class NiezgodnaWersjaSchematu(Exception):
 def wersja_schematu(conn):
     """
     Wersja struktury bazy (`PRAGMA user_version`). Pusta/nieznana baza
-    zwraca 0. Potrzebne przy przywracaniu migawek i - docelowo (X+3) -
-    przy synchronizacji: stacje aktualizowane w różnym czasie będą miały
-    różne wersje schematu.
+    zwraca 0. Potrzebne przy przywracaniu migawek i - docelowo - przy
+    synchronizacji między stacjami: stacje aktualizowane w różnym czasie
+    będą miały różne wersje schematu.
     """
     return conn.execute("PRAGMA user_version").fetchone()[0]
 
@@ -99,7 +99,7 @@ def _kolumny(conn, tabela):
     return {r[1] for r in conn.execute(f"PRAGMA table_info({tabela})")}
 
 
-# Kolumny dołożone do `transakcje` w X+1 (atrybucja i tożsamość wiersza).
+# Kolumny dołożone do `transakcje` w `0.1-alpha.3` (atrybucja i tożsamość wiersza).
 # UNIQUE na `uuid` NIE da się dodać przez ALTER TABLE, więc dla baz
 # migrowanych zakłada się osobny indeks - patrz `migruj`.
 _KOLUMNY_ATRYBUCJI = {
@@ -156,7 +156,7 @@ def sprawdz_zgodnosc_wersji(conn):
     Odrzuca bazę pochodzącą z NOWSZEJ wersji aplikacji. Czytanie takiej
     bazy "jakoś" kończy się cichym gubieniem kolumn, których ta wersja nie
     zna - a przy synchronizacji między stacjami aktualizowanymi w różnym
-    czasie (X+3) to sytuacja spodziewana, nie egzotyczna.
+    czasie to sytuacja spodziewana, nie egzotyczna.
     """
     wersja = wersja_schematu(conn)
     if wersja > WERSJA_SCHEMATU:

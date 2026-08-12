@@ -21,33 +21,18 @@ WOKÓŁ tego celu, jako środowisko, które jakość danych zapewnia lub wręcz
 gwarantuje, a nie tylko na nią pozwala. Konkretny zakres tej fazy do
 ustalenia po `0.1-alpha.3` (info od Papavera).
 
-## Nazewnictwo wersji — w trakcie rewizji
-
-Etykiety `X+1`/`X+2`/`X+3` używane niżej wkradły się przypadkowo i mają
-zniknąć na rzecz schematu `0.1-alpha.x`. **Pierwsze zadanie planowanej
-wersji `0.1-alpha.3.1`** (wstawka między `0.1-alpha.3` i `0.1-alpha.4`,
-przed rozpoczęciem X+2) to ujednolicenie tego nazewnictwa w całej
-dokumentacji — nie zrobione jeszcze, celowo odłożone do zamknięcia
-`0.1-alpha.3`. Mapowanie do tego czasu:
-
-| Etykieta niżej | Docelowa wersja |
-|---|---|
-| X (wydane) | `0.1.0-alpha.2` |
-| X+1 (w toku) | `0.1-alpha.3` |
-| *(nowa, wstawka)* | `0.1-alpha.3.1` — start: rename X+n → 0.1-alpha.x |
-| X+2 (planowane) | `0.1-alpha.4` |
-| X+3 (planowane) | kolejna wersja serii (numer do ustalenia przy renamingu) |
-
 ## Wersje
 
 | Wersja | Status | Zakres |
 |---|---|---|
 | `v0.1.0-alpha.2` | wydane | MVP: import/export, formularz blankietowy, słowniki, podpowiedzi |
-| **X+1** | w toku | trwałość danych, atrybucja, ręczne scalanie baz (niżej) |
-| **X+2** | planowane | przebudowa UI/UX pod realne potrzeby + kanał feedbacku |
-| **X+3** | planowane | automatyczna synchronizacja między stacjami |
+| `v0.1.0-alpha.3` | wydane | trwałość danych, atrybucja, ręczne scalanie baz (niżej) |
+| **`0.1-alpha.3.1`** | w toku | dedukcja pól formularza, wskaźniki stanu, tryb auto |
+| **`0.1-alpha.4`** | planowane | przebudowa UI/UX pod realne potrzeby + kanał feedbacku |
+| **`0.1-alpha.5`** | planowane | tryb pół-auto wprowadzania (wymaga sensownego interfejsu) |
+| **`0.1-alpha.6`** | planowane | automatyczna synchronizacja między stacjami |
 
-### X+1 — domknięcie MVP: trwałość, atrybucja, scalanie
+### `0.1-alpha.3` — domknięcie MVP: trwałość, atrybucja, scalanie
 
 Cel: żaden pojedynczy błąd (użytkownika, aplikacji, dysku) nie kosztuje
 więcej niż jedną operację pracy, a każda zmiana ma znanego autora.
@@ -69,11 +54,35 @@ Zakres:
   awarii (`sys.excepthook`, `Tk.report_callback_exception`, `faulthandler`)
 - atrybucja: tabela `users`, `transakcje.autor_id`/`uuid`/znaczniki czasu
 - migawki + cofanie (`kopie.py`, `operacje.py`, zakładka Historia)
-- zrzuty `.sql.gz` — warstwa zimna **i zarazem format wymiany dla X+3**
+- zrzuty `.sql.gz` — warstwa zimna **i zarazem format wymiany dla
+  synchronizacji między stacjami**
 - **ręczne scalanie dwóch baz** z obsługą konfliktów
 - blokada uruchomienia drugiej instancji
 
-### X+2 — UI/UX
+### `0.1-alpha.3.1` — dedukcja pól, wskaźniki, tryb auto
+
+Cel: **program przestaje wymuszać pracę po staremu.** Po wpisaniu kuriera,
+daty, adresu i ilości reszta wiersza (nadawca, PNI, rejon, wykonawca) wchodzi
+sama z bazy, a każde pole kolorowym paskiem po lewej mówi, czy jest OK
+(zielony), wymaga uwagi (pomarańczowy), czy blokuje zapis (czerwony).
+
+Zakres:
+
+- **blankiet = 1 na (kurier, data)** — bloki rejonów znikają, zostaje
+  nagłówek + płaska lista wierszy
+- **`rejon` schodzi do wiersza** i jest dedukowany z adresu; `wykonawca`
+  z kuriera
+- reguła jednolita: jednoznaczne → wypełniamy; niejednoznaczne → NIE
+  wypełniamy, aktywujemy pole, warianty dajemy jako podpowiedzi
+- `dedukcja.py` — silnik rozstrzygający najpierw **punkt**, a dopiero z niego
+  nadawcę/PNI/rejon (PNI dedukowane niezależnie podpinałoby transakcje pod
+  zły punkt)
+- wskaźniki stanu pól + nawigacja TAB/Enter wyłącznie po polach głównych,
+  Enter działa jak TAB, podświetlenie następnego pola
+- `???` jako kanoniczny „rejon nieznany" we wszystkich ścieżkach zapisu
+- naprawa błędu `firmy_zpo` ↔ `punkty.nadawca` + naprawa istniejących baz
+
+### `0.1-alpha.4` — UI/UX
 
 Przebudowa interfejsu pod realne potrzeby i wygodę użytkowników, z łatwym
 kanałem zbierania feedbacku. Poprzedzona rozstrzygnięciem pytania
@@ -81,12 +90,24 @@ o architekturę docelową (patrz Otwarte pytania, punkt 1) — nawigacja
 w hubie wygląda inaczej niż w aplikacji monolitycznej, więc odwrotna
 kolejność oznacza projektowanie UI dwa razy.
 
-### X+3 — synchronizacja między stacjami
+### `0.1-alpha.5` — tryb pół-auto
+
+Trzeci tryb wprowadzania obok auto i manualnego: dedukcje są wypełniane,
+ale **wszystkie** pola pozostają aktywne, a TAB/Enter skacze jak w trybie
+auto. Wejście na pole drugorzędne pokazuje wydedukowaną wartość zaznaczoną;
+znika ona dopiero przy pierwszym wpisanym znaku. Dopuszcza ręcznie
+zablokowane pola (klik we wskaźnik).
+
+Świadomie odłożone: tryb ma sens tylko z sensownym interfejsem do blokowania
+pól, a ten wymaga wskaźników z `0.1-alpha.3.1` jako fundamentu.
+
+### `0.1-alpha.6` — synchronizacja między stacjami
 
 Ok. 10 stacji w dziale, wymiana raz dziennie. Kluczowe rozpoznanie:
 **„scalanie dwóch baz" i „synchronizacja" to ta sama maszyneria** —
-sync = scalanie + transport + wyzwalacz. Dlatego X+1 dostarcza scalanie
-i format wymiany, a X+3 dokłada wyłącznie transport i harmonogram.
+sync = scalanie + transport + wyzwalacz. Dlatego `0.1-alpha.3` dostarczyła
+scalanie i format wymiany, a ta wersja dokłada wyłącznie transport
+i harmonogram.
 
 Transport: katalog wymiany (udział SMB i/lub wydzielona przestrzeń na
 firmowym OneDrive), **wymienny** — konfigurowalna ścieżka, nie zaszyta.
@@ -118,8 +139,8 @@ Uwagi projektowe:
 Replikacja na ~10 stacji chroni przed **awarią sprzętu**, ale wiernie
 powiela **błąd logiczny** — zły import rozejdzie się na wszystkie stacje.
 Nie chroni też danych wpisanych dziś, jeszcze niezsynchronizowanych.
-Migawki lokalne zostają potrzebne niezależnie od X+3; to mechanizmy
-komplementarne, nie zamienne.
+Migawki lokalne zostają potrzebne niezależnie od synchronizacji; to
+mechanizmy komplementarne, nie zamienne.
 
 ## Otwarte pytania kierunkowe (wersja nieprzypisana)
 
@@ -138,7 +159,7 @@ Temat na osobną dyskusję. Pytania:
 
 To nie jest pytanie o funkcję, tylko o granice systemu — rozstrzyga, czy
 `zpo_tracker` zostaje aplikacją, czy staje się jednym modułem większej
-całości. **Warto rozstrzygnąć przed X+2**, z powodu opisanego wyżej.
+całości. **Warto rozstrzygnąć przed `0.1-alpha.4`**, z powodu opisanego wyżej.
 
 ### 2. Aktualizacje
 
@@ -147,7 +168,7 @@ całości. **Warto rozstrzygnąć przed X+2**, z powodu opisanego wyżej.
       trzeba sprawdzić, czy obejmuje to pobieranie artefaktów. Tanie do
       sprawdzenia, a bramkuje całą strategię aktualizacji.
 
-Powiązanie z resztą: jeśli X+3 da katalog wymiany, **ten sam katalog może
+Powiązanie z resztą: jeśli synchronizacja da katalog wymiany, **ten sam katalog może
 rozdawać nowe wersje `.exe`** — GitHub przestaje być wtedy potrzebny jako
 kanał dystrybucji.
 
@@ -162,3 +183,18 @@ Konsekwencja: `schema_v2_draft.sql` zawiera
 **nie jest w stanie wyrazić 1:N**. Wymaga osobnej tabeli
 `numery_kadrowe_kurierow(kurier_id, numer)`. Poprawione w drafcie, żeby
 nikt nie zaimplementował wadliwego wzorca.
+
+### 4. Rejonarz — docelowe źródło rejonów
+
+Rejony pochodzą realnie z **rejonarza** (zewnętrzny rejestr przypisujący
+rejon do adresu). Docelowo pole `rejon` ma **zniknąć z formularza
+całkowicie** — zamiast wpisywać je albo dedukować z własnej historii,
+program pytałby rejonarz o rejon dla adresu.
+
+Dedukcja rejonu z adresu wprowadzona w `0.1-alpha.3.1` jest krokiem w tę
+stronę: odwzorowuje docelowy wzorzec (adres → rejon) na danych, które już
+mamy. Kiedy pojawi się integracja, zmienia się źródło odpowiedzi, nie
+kształt formularza.
+
+Do rozstrzygnięcia przed rozpoczęciem: w jakiej formie rejonarz jest
+dostępny (plik? eksport? API?) i jak często się zmienia.

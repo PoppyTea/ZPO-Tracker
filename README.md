@@ -20,13 +20,16 @@ Modernizacja procesu wprowadzania danych otrzymywanych w formie papierowej + zmi
 
 ## Status i plan
 
-Wydane: `v0.1.0-alpha.2` — działające MVP (import/export `.xlsx`, formularz
-blankietowy, słowniki, podpowiedzi).
+Wydane: `v0.1.0-alpha.3` — MVP (import/export `.xlsx`, formularz blankietowy,
+słowniki, podpowiedzi) plus trwałość danych: transakcje, migawki i cofanie
+operacji, logi diagnostyczne, atrybucja zmian do autora, ręczne scalanie
+dwóch baz.
 
-W toku (**X+1**): trwałość danych (transakcje, migawki, cofanie operacji),
-logi diagnostyczne, atrybucja zmian do autora, ręczne scalanie dwóch baz.
-Dalej: **X+2** przebudowa UI/UX, **X+3** automatyczna synchronizacja między
-stacjami. Pełna kolejność i otwarte pytania kierunkowe: `docs/roadmap.md`.
+W toku (**`0.1-alpha.3.1`**): automatyczna dedukcja pól formularza z bazy,
+kolorowe wskaźniki stanu pól, tryb auto. Dalej: **`0.1-alpha.4`** przebudowa
+UI/UX, **`0.1-alpha.5`** tryb pół-auto, **`0.1-alpha.6`** automatyczna
+synchronizacja między stacjami. Pełna kolejność i otwarte pytania
+kierunkowe: `docs/roadmap.md`.
 
 ## Szybki start
 

@@ -32,9 +32,9 @@ knowledge lives in `docs/`, one topic per file:
 - `docs/ux-ui.md` — UX direction (courier-first entry modeled on the paper
   form), the "idiot-proof, not just non-technical" framing, validation
   approach, and what's still undecided about the suggestion engine
-- `docs/roadmap.md` — version sequence (X+1 … X+3) and the open
-  direction-setting questions that would reshape it; read before planning
-  any multi-version work
+- `docs/roadmap.md` — version sequence (`0.1-alpha.3` … `0.1-alpha.6`) and
+  the open direction-setting questions that would reshape it; read before
+  planning any multi-version work
 - `docs/backlog.md` — full backlog, grouped by topic
 - `docs/normalization-v2.md` — proposed relational schema v2 and the two
   open risks it depends on (see also `schema_v2_draft.sql`)

@@ -1,7 +1,7 @@
 """
 Zrzuty .sql.gz: warstwa zimna (osobna od migawek binarnych w kopie.py -
 te są długotrwałym, przenośnym archiwum, nie przycinane) i format wymiany
-dla przyszłej synchronizacji między stacjami (X+3, patrz roadmap.md).
+dla przyszłej synchronizacji między stacjami (patrz roadmap.md).
 Zwykły tekstowy SQL (conn.iterdump), gzipowany - czytelny do inspekcji po
 rozpakowaniu, przenośny między maszynami niezależnie od wersji SQLite. TDD.
 """

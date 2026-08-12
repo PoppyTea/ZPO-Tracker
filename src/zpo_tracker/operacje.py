@@ -2,8 +2,8 @@
 Fasada łącząca migawki (kopie.py) z dziennikiem operacji (dziennik.py):
 każda mutująca operacja dostaje migawkę SPRZED wykonania i wpis w dzienniku,
 więc cofnięcie do dowolnego punktu w historii jest zawsze możliwe - cel
-X+1: żaden pojedynczy błąd (użytkownika, aplikacji, dysku) nie kosztuje
-więcej niż jedną operację pracy.
+`0.1-alpha.3`: żaden pojedynczy błąd (użytkownika, aplikacji, dysku) nie
+kosztuje więcej niż jedną operację pracy.
 
 GUI woła WYŁĄCZNIE `wykonaj`/`cofnij`, nigdy `repo.*` bezpośrednio dla
 operacji mutujących - inaczej mutacja ominęłaby migawkę i dziennik.

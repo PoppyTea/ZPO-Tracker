@@ -75,7 +75,7 @@ CREATE TABLE transakcje (
 
     -- Tożsamość wiersza NIEZALEŻNA od klucza naturalnego. Poprawka daty
     -- albo kuriera zmienia (data,kurier,punkt), więc przy synchronizacji
-    -- (X+3) wyglądałaby jak nowy wiersz i powstałby duplikat.
+    -- między stacjami wyglądałaby jak nowy wiersz i powstałby duplikat.
     uuid                    TEXT UNIQUE,
 
     -- Atrybucja: kto i kiedy. Znaczniki czasu służą do audytu i pokazania
@@ -96,7 +96,7 @@ CREATE TABLE transakcje (
 -- `id` to UUIDv5 wyliczone z "domena\login", a NIE losowy UUID nadawany
 -- przy pierwszym zetknięciu z nowym loginem: losowy rozjechałby się między
 -- stacjami (każda nadałaby tej samej osobie inny), a po synchronizacji
--- (X+3) ta sama osoba istniałaby wielokrotnie.
+-- między stacjami ta sama osoba istniałaby wielokrotnie.
 CREATE TABLE users (
     id          TEXT PRIMARY KEY,        -- UUIDv5(domena\login)
     login       TEXT NOT NULL UNIQUE,    -- "DOMENA\login" z systemu

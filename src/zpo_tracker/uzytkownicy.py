@@ -4,7 +4,7 @@ Tożsamość osoby wprowadzającej dane - kto zmienił który wiersz.
 Sedno: `users.id` to **UUIDv5 wyliczone deterministycznie z
 `domena\\login`**, a NIE losowy UUID nadawany przy pierwszym zetknięciu
 z nieznanym loginem. Losowy rozjechałby się między stacjami: każda nadałaby
-temu samemu człowiekowi inny identyfikator, a po synchronizacji (X+3) ta
+temu samemu człowiekowi inny identyfikator, a po ich zsynchronizowaniu ta
 sama osoba istniałaby wielokrotnie i atrybucja przestałaby cokolwiek
 znaczyć. UUIDv5 liczy się identycznie na każdej stacji, bez koordynacji
 i bez wyścigu przy pierwszym uruchomieniu.

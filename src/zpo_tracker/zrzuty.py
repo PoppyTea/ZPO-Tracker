@@ -3,7 +3,7 @@ Zrzuty .sql.gz: warstwa zimna, osobna od migawek binarnych w kopie.py.
 Migawki (kopie.py) chronią pojedynczą operację i są przycinane (retencja) -
 zrzuty to długotrwałe, przenośne archiwum, jeden na dzień, NIE przycinany
 (patrz `zrob_zrzut` niżej). Ten sam format jest planowanym formatem wymiany
-dla synchronizacji między stacjami (X+3, patrz roadmap.md) - stąd zwykły
+dla synchronizacji między stacjami (patrz roadmap.md) - stąd zwykły
 tekstowy SQL, nie binarny plik `.db`: czytelny do inspekcji po rozpakowaniu,
 przenośny niezależnie od wersji SQLite między maszynami.
 """
