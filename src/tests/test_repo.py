@@ -2,12 +2,14 @@
 Testy warstwy dostępu do danych: zapis bloku z formularza wprowadzania
 i odczyt do przeglądania. SQLite w pamięci, bez mocków. TDD.
 """
+import sqlite3
 from datetime import date
 
 import pytest
 
 from zpo_tracker import repo
 from zpo_tracker.models import BlankietBlok, WierszBlankietu
+from zpo_tracker.normalizacja import REJON_NIEZNANY
 
 
 @pytest.fixture
@@ -127,9 +129,13 @@ def test_dodaj_do_slownika_normalizuje_biale_znaki(conn):
 
 
 def test_zmien_nazwe_w_slowniku(conn):
+    # rejony mają od schema.sql zaseedowany kanoniczny wiersz "???"
+    # (patrz normalizacja.REJON_NIEZNANY) - stąd sprawdzenie PO id, nie
+    # zakładanie, że to jedyny wiersz w słowniku
     wpis_id = repo.dodaj_do_slownika(conn, "rejony", "WA87")
     repo.zmien_nazwe_w_slowniku(conn, "rejony", wpis_id, "WA88")
-    assert repo.pobierz_slownik(conn, "rejony") == [{"id": wpis_id, "nazwa": "WA88"}]
+    wpisy = {w["id"]: w["nazwa"] for w in repo.pobierz_slownik(conn, "rejony")}
+    assert wpisy[wpis_id] == "WA88"
 
 
 def test_zmiana_nazwy_firmy_zpo_propaguje_do_punktow(conn):
@@ -156,6 +162,49 @@ def test_zmiana_nazwy_zwyklego_slownika_nie_rusza_punktow(conn):
     repo.zmien_nazwe_w_slowniku(conn, "wykonawcy", wpis_id, "Koli sp. z o.o.")
 
     assert [r[0] for r in conn.execute("SELECT nadawca FROM punkty")] == ["Żabka"]
+
+
+def test_dodaj_do_slownika_rejon_smieciowy_trafia_w_kanoniczny_wiersz(conn):
+    # dodaj_do_slownika("rejony", ...) idzie przez get_or_create_rejon - baza
+    # ma zaseedowany kanoniczny wiersz od startu, więc "+ dodaj" ze śmieciową
+    # wartością musi trafić w NIEGO, nie próbować stworzyć drugi taki sam
+    kanoniczny_id = repo.pobierz_slownik(conn, "rejony")[0]["id"]
+    wpis_id = repo.dodaj_do_slownika(conn, "rejony", "-")
+    assert wpis_id == kanoniczny_id
+    assert repo.pobierz_slownik(conn, "rejony") == [
+        {"id": kanoniczny_id, "nazwa": REJON_NIEZNANY}]
+
+
+def test_zmien_nazwe_na_smiec_koliduje_z_kanonicznym_wierszem(conn):
+    # normalizuj_rejon() jest stosowane przy renamie, więc zmiana nazwy na
+    # śmieć trafia w ten sam klucz co zaseedowany "???" - kolizja UNIQUE,
+    # dokładnie tak samo jak rename na dowolną już istniejącą nazwę w
+    # jakimkolwiek innym słowniku. To NIE crashuje aplikacji (Tk łapie
+    # nieobsłużone wyjątki z callbacków - patrz dziennik.py), ale funkcja
+    # "scal" dla rejonów nie istnieje, więc na razie to twardy błąd, nie
+    # ciche scalenie.
+    wpis_id = repo.dodaj_do_slownika(conn, "rejony", "WA87")
+    with pytest.raises(sqlite3.IntegrityError):
+        repo.zmien_nazwe_w_slowniku(conn, "rejony", wpis_id, "n/a")
+
+
+def test_nie_mozna_zmienic_nazwy_kanonicznego_rejonu_nieznanego(conn):
+    wpis_id = repo.dodaj_do_slownika(conn, "rejony", "???")
+    with pytest.raises(ValueError, match="kanoniczn"):
+        repo.zmien_nazwe_w_slowniku(conn, "rejony", wpis_id, "WA87")
+
+
+def test_nie_mozna_usunac_kanonicznego_rejonu_nieznanego(conn):
+    wpis_id = repo.dodaj_do_slownika(conn, "rejony", "???")
+    with pytest.raises(ValueError, match="kanoniczn"):
+        repo.usun_z_slownika(conn, "rejony", wpis_id)
+
+
+def test_mozna_usunac_zwykly_nieuzywany_rejon(conn):
+    wpis_id = repo.dodaj_do_slownika(conn, "rejony", "WA87")
+    repo.usun_z_slownika(conn, "rejony", wpis_id)
+    nazwy = [w["nazwa"] for w in repo.pobierz_slownik(conn, "rejony")]
+    assert nazwy == [REJON_NIEZNANY]  # kanoniczny wiersz z seeda zostaje
 
 
 def test_usun_z_slownika_nieuzywany_wpis(conn):

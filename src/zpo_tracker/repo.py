@@ -18,7 +18,7 @@ from zpo_tracker.importer import (
     get_or_create_rejon,
     get_or_create_wykonawca,
 )
-from zpo_tracker.normalizacja import klucz_bialych_znakow
+from zpo_tracker.normalizacja import REJON_NIEZNANY, klucz_bialych_znakow, normalizuj_rejon
 
 
 def _resolve_schema_path(frozen=None, meipass=None):
@@ -278,7 +278,32 @@ def pobierz_slownik(conn, tabela):
     return [dict(w) for w in wiersze]
 
 
+def _znormalizuj_dla_tabeli(tabela, nazwa):
+    """`rejony` ma dodatkową regułę (pusty/śmieciowy kod -> REJON_NIEZNANY,
+    patrz normalizacja.py) - pozostałe słowniki tylko białe znaki."""
+    nazwa = klucz_bialych_znakow(nazwa)
+    if tabela == "rejony":
+        nazwa = normalizuj_rejon(nazwa)
+    return nazwa
+
+
+def _czy_kanoniczny_rejon(conn, tabela, wpis_id):
+    if tabela != "rejony":
+        return False
+    row = conn.execute("SELECT kod FROM rejony WHERE id = ?", (wpis_id,)).fetchone()
+    return row is not None and row[0] == REJON_NIEZNANY
+
+
 def dodaj_do_slownika(conn, tabela, nazwa):
+    """
+    `rejony`: get-or-create (przez `get_or_create_rejon`, ta sama ścieżka co
+    formularz/import), nie ślepy INSERT - baza ma zaseedowany kanoniczny
+    wiersz REJON_NIEZNANY, więc "+ dodaj" ze śmieciową wartością MUSI
+    trafić w istniejący wiersz, a nie próbować stworzyć drugi taki sam
+    (co i tak skończyłoby się `IntegrityError` na `UNIQUE`).
+    """
+    if tabela == "rejony":
+        return get_or_create_rejon(conn, nazwa)
     kolumna = _TABELE_PROSTE[tabela]
     cur = conn.execute(
         f"INSERT INTO {tabela} ({kolumna}) VALUES (?)", (klucz_bialych_znakow(nazwa),)
@@ -292,9 +317,16 @@ def zmien_nazwe_w_slowniku(conn, tabela, wpis_id, nowa_nazwa):
     słowników (referencowanych wyłącznie przez FK) nazwa sieci istnieje
     DRUGI raz jako tekst w `punkty.nadawca`. Bez tego rename w Słownikach
     rozjeżdżał obie kopie na stałe i nic tego nie naprawiało.
+
+    `rejony`: kanoniczny wpis REJON_NIEZNANY nie może zostać przemianowany -
+    to punkt zbiorczy dla wszystkich pustych/śmieciowych rejonów, zmiana
+    jego nazwy rozjechałaby tę zbieżność.
     """
+    if _czy_kanoniczny_rejon(conn, tabela, wpis_id):
+        raise ValueError(
+            f"„{REJON_NIEZNANY}” to kanoniczny rejon nieznany - nie można zmienić jego nazwy.")
     kolumna = _TABELE_PROSTE[tabela]
-    nowa_nazwa = klucz_bialych_znakow(nowa_nazwa)
+    nowa_nazwa = _znormalizuj_dla_tabeli(tabela, nowa_nazwa)
     with transakcja(conn):
         conn.execute(
             f"UPDATE {tabela} SET {kolumna} = ? WHERE id = ?",
@@ -309,9 +341,13 @@ def zmien_nazwe_w_slowniku(conn, tabela, wpis_id, nowa_nazwa):
 
 def usun_z_slownika(conn, tabela, wpis_id):
     """Usuwa wpis. Jeśli jest gdzieś użyty jako FK, sqlite3.IntegrityError
-    (PRAGMA foreign_keys=ON) - GUI wyświetla błąd, nie decyduje o nim."""
+    (PRAGMA foreign_keys=ON) - GUI wyświetla błąd, nie decyduje o nim.
+    Kanoniczny rejon nieznany (REJON_NIEZNANY) nie może zostać usunięty."""
     if tabela not in _TABELE_PROSTE:
         raise ValueError(f"nieznany słownik: {tabela}")
+    if _czy_kanoniczny_rejon(conn, tabela, wpis_id):
+        raise ValueError(
+            f"„{REJON_NIEZNANY}” to kanoniczny rejon nieznany - nie można go usunąć.")
     conn.execute(f"DELETE FROM {tabela} WHERE id = ?", (wpis_id,))
 
 

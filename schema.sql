@@ -22,6 +22,11 @@ CREATE TABLE rejony (
     kod             TEXT NOT NULL UNIQUE          -- np. WA87, ND1, Z2
 );
 
+-- Kanoniczny "rejon nieznany" - musi być zgodny z
+-- normalizacja.REJON_NIEZNANY. Zaseedowany tutaj, żeby świeża baza miała
+-- ten sam wiersz, który dla bazy migrowanej dokłada repo.napraw_dane.
+INSERT INTO rejony (kod) VALUES ('???');
+
 CREATE TABLE wykonawcy (
     id              INTEGER PRIMARY KEY,
     nazwa           TEXT NOT NULL UNIQUE          -- Koli, Poczta Polska, Translist, Rekus

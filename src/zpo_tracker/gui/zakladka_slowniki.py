@@ -68,12 +68,20 @@ class PodzakladkaProstegoSlownika(ttk.Frame):
         wpis = self._wpisy[zaznaczone[0]]
         nowa = _zapytaj_o_tekst("Zmień nazwę", wpis["nazwa"], self)
         if nowa and nowa.strip() and nowa.strip() != wpis["nazwa"]:
-            operacje.wykonaj(
-                self.conn, self.katalog_danych, rodzaj="zmien_slownik",
-                etykieta=f"{self.tabela}: „{wpis['nazwa']}” → „{nowa.strip()}”",
-                funkcja=repo.zmien_nazwe_w_slowniku,
-                args=(self.tabela, wpis["id"], nowa.strip()),
-            )
+            try:
+                operacje.wykonaj(
+                    self.conn, self.katalog_danych, rodzaj="zmien_slownik",
+                    etykieta=f"{self.tabela}: „{wpis['nazwa']}” → „{nowa.strip()}”",
+                    funkcja=repo.zmien_nazwe_w_slowniku,
+                    args=(self.tabela, wpis["id"], nowa.strip()),
+                )
+            except Exception as e:
+                # np. kanoniczny rejon "???" (repo._czy_kanoniczny_rejon)
+                # albo kolizja UNIQUE po normalizacji - bez tego callback
+                # Tk kończy się cicho (dziennik.py łapie i loguje, ale
+                # użytkownik nie widzi żadnej informacji)
+                messagebox.showerror("Błąd", str(e))
+                return
             self.odswiez()
 
     def scal_wybrane(self):
