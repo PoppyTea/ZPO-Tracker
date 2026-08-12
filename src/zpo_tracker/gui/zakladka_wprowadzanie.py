@@ -53,10 +53,11 @@ def _odepnij_scroll_kolkiem(canvas):
 
 def _ustaw_stan(widget, aktywne):
     stan = _AKTYWNY if aktywne else _NIEAKTYWNY
-    if hasattr(widget, "ustaw_stan"):
-        widget.ustaw_stan(stan)  # EntryZPodpowiedzia - patrz widget_autocomplete.py
+    takefocus = 1 if aktywne else 0
+    if hasattr(widget, "ustaw_stan_pola"):
+        widget.ustaw_stan_pola(stan, takefocus)  # EntryZPodpowiedzia
     else:
-        widget.configure(state=stan)
+        widget.configure(state=stan, takefocus=takefocus)
 
 
 class WierszWidget(ttk.Frame):

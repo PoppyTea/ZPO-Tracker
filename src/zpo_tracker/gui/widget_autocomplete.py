@@ -1,22 +1,18 @@
 """
 Pole tekstowe z podpowiedziami: dropdown pod polem + nawigacja klawiaturą.
 Logika dopasowania jest w podpowiedzi.py (testowana, bez GUI) - ten widget
-tylko wyświetla wyniki i obsługuje klawiaturę.
-
-NIEZWERYFIKOWANE WIZUALNIE. Awaria środowiska X11 w tej sesji (patrz plan
-MVP, sekcja "Aktualizacja w trakcie realizacji") uniemożliwiła nawet
-stworzenie zwykłego tk.Entry, więc ten plik nie został odpalony ani razu -
-tylko sprawdzony pod względem składni/importu. Celowo NIE wpięty do
-zakladka_wprowadzanie.py, żeby nie ryzykować już działającego formularza
-niesprawdzonym kodem. Do zweryfikowania i wpięcia jako pierwszy krok, gdy
-środowisko graficzne wróci do działania.
+tylko wyświetla wyniki i obsługuje klawiaturę. Wpięty do
+zakladka_wprowadzanie.py (kurier/nadawca/adres), zweryfikowany zarówno
+zrzutem ekranu jak i test_widget_autocomplete.py.
 
 Ghost text (nakładka z podpowiedzią przed kursorem) świadomie NIE
 zaimplementowany - to najbardziej wrażliwy na pozycjonowanie element,
-zdecydowanie wymaga wizualnej pętli sprzężenia, której nie miałem.
+zdecydowanie wymaga wizualnej pętli sprzężenia.
 
-Klawiatura (docelowa, patrz plan MVP):
-  Tab / Return  -> zatwierdź podświetloną podpowiedź, przejdź do następnego pola
+Klawiatura:
+  Tab / Return  -> zatwierdź podświetloną podpowiedź; przejdź do
+                   następnego pola przez on_dalej, jeśli podany, inaczej
+                   domyślnym mechanizmem Tk (<<NextWindow>>)
   Down / Up     -> przesuń podświetlenie na liście, NIE zatwierdza
   Escape        -> schowaj listę, zostaw wpisany tekst bez zmian
   inne znaki    -> przelicz podpowiedzi na nowo
@@ -28,14 +24,31 @@ from zpo_tracker.podpowiedzi import podpowiedz
 
 
 class EntryZPodpowiedzia(ttk.Frame):
-    def __init__(self, parent, pobierz_kandydatow, textvariable=None, **kwargs_entry):
+    def __init__(self, parent, pobierz_kandydatow, textvariable=None,
+                 on_dalej=None, rozwijaj_na_pusty_fokus=False, **kwargs_entry):
         """
         pobierz_kandydatow: funkcja bezargumentowa zwracająca AKTUALNĄ listę
         kandydatów (wymienne źródło danych - docs/ux-ui.md wymaga, żeby
         dało się później dołożyć dane referencyjne bez przeprojektowania).
+        Podmienna w locie przez `ustaw_zrodlo_kandydatow` - pole
+        dedukowane niejednoznacznie (dedukcja.StanPola.kandydaci) dostaje
+        w ten sposób WŁASNĄ, zawężoną listę zamiast pełnego słownika.
+
+        on_dalej: wywoływane po Tab/Return zamiast domyślnego przejścia
+        Tk (patrz `_zatwierdz_i_dalej`) - potrzebne do wspólnej kolejności
+        nawigacji z dedukcja.kolejnosc_pol (0.1-alpha.3.1).
+
+        rozwijaj_na_pusty_fokus: pokaż `pobierz_kandydatow()` od razu po
+        wejściu fokusem do PUSTEGO pola, bez czekania na pierwszy znak.
+        Domyślnie wyłączone - dla pól z pełnym słownikiem (kurier/nadawca/
+        adres) wyskakująca lista setek pozycji na każdy fokus byłaby
+        regresją UX, nie pomocą. Włączane tylko tam, gdzie źródło jest już
+        zawężone (pole pomarańczowe z konkretnymi kandydatami).
         """
         super().__init__(parent)
         self.pobierz_kandydatow = pobierz_kandydatow
+        self.on_dalej = on_dalej
+        self.rozwijaj_na_pusty_fokus = rozwijaj_na_pusty_fokus
         self.var = textvariable or tk.StringVar()
         self.entry = ttk.Entry(self, textvariable=self.var, **kwargs_entry)
         self.entry.pack(fill="both", expand=True)
@@ -51,6 +64,7 @@ class EntryZPodpowiedzia(ttk.Frame):
         self.entry.bind("<Down>", self._przesun(1))
         self.entry.bind("<Up>", self._przesun(-1))
         self.entry.bind("<Escape>", self._schowaj)
+        self.entry.bind("<FocusIn>", self._na_focus_in)
         self.entry.bind("<FocusOut>", self._na_focus_out)
 
     def get(self):
@@ -59,15 +73,19 @@ class EntryZPodpowiedzia(ttk.Frame):
     def set(self, wartosc):
         self.var.set(wartosc)
 
-    def ustaw_stan(self, stan):
+    def ustaw_zrodlo_kandydatow(self, pobierz_kandydatow):
+        """Podmienia źródło kandydatów w locie - patrz docstring `__init__`."""
+        self.pobierz_kandydatow = pobierz_kandydatow
+
+    def ustaw_stan_pola(self, stan, takefocus):
         """
         Proxy do wewnętrznego Entry - Frame-owy wrapper nie przepuszcza
-        `configure(state=...)` automatycznie. `stan`: "normal"/"readonly"
-        (0.1-alpha.3.1: pola dedukowane jednoznacznie stają się readonly -
-        zaznaczalne, ale nieedytowalne i pomijane Tabem po dołożeniu
-        `takefocus=0` w kolejnym kroku, patrz widget_pole.py).
+        `configure(...)` automatycznie. `stan`: "normal"/"readonly".
+        `takefocus`: 0/1 - dopiero RAZEM z readonly wypada z nawigacji Tab
+        (zweryfikowane empirycznie: samo readonly nie wystarczy). Wołane
+        przez widget_pole.PoleZeWskaznikiem.ustaw_aktywnosc.
         """
-        self.entry.configure(state=stan)
+        self.entry.configure(state=stan, takefocus=takefocus)
 
     def _na_klawisz_release(self, event):
         if event.keysym in ("Tab", "Return", "Up", "Down", "Escape"):
@@ -125,13 +143,26 @@ class EntryZPodpowiedzia(ttk.Frame):
         if self._aktywne_podpowiedzi and self._podswietlony >= 0:
             self.var.set(self._aktywne_podpowiedzi[self._podswietlony])
         self._schowaj()
-        return None  # brak "break": Tab/Return mają normalnie przejść do następnego pola
+        if self.on_dalej is not None:
+            self.on_dalej()
+            return "break"
+        return None  # brak on_dalej: Tab/Return mają normalnie przejść do następnego pola
 
     def _klik_na_liste(self, _event):
         wybor = self._lista.curselection()
         if wybor:
             self.var.set(self._aktywne_podpowiedzi[wybor[0]])
         self._schowaj()
+
+    def _na_focus_in(self, _event=None):
+        if not self.rozwijaj_na_pusty_fokus or self.var.get():
+            return
+        kandydaci = self.pobierz_kandydatow()
+        if not kandydaci:
+            return
+        self._aktywne_podpowiedzi = list(kandydaci)
+        self._podswietlony = 0
+        self._pokaz()
 
     def _na_focus_out(self, _event):
         self.after(150, self._schowaj)
