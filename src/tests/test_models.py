@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 from pydantic import ValidationError
 
-from zpo_tracker.models import WierszImportu, BlankietBlok, WierszBlankietu
+from zpo_tracker.models import WierszImportu, Blankiet, WierszBlankietu
 
 
 # --- WierszImportu: walidacja wiersza z .xlsx ---
@@ -69,34 +69,38 @@ def test_wiersz_importu_pusty_pni_to_none():
     assert w.pni_zpo is None
 
 
-# --- WierszBlankietu / BlankietBlok: dane z formularza wprowadzania ---
+# --- WierszBlankietu / Blankiet: dane z formularza wprowadzania ---
 
 def test_wiersz_blankietu_normalizuje_biale_znaki():
     w = WierszBlankietu(nadawca="Żabka", adres="  Odkryta   24 ", ilosc_total=3)
     assert w.adres == "Odkryta 24"
 
 
-def test_blok_z_nieznanym_rejonem_i_komentarzem():
-    blok = BlankietBlok(
-        kurier="Kowalski Jan",
-        data=date(2026, 8, 10),
-        rejon=None,
-        komentarz="rejon nieznany, kurier mówił że to okolice Legionowa",
-        wiersze=[WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=3)],
-    )
-    assert blok.rejon is None
-    assert "Legionowa" in blok.komentarz
+def test_wiersz_blankietu_rejon_nieznany_to_none():
+    # rejon per wiersz od 0.1-alpha.3.1 (dedukowany z adresu) - normalizacja
+    # do kanonicznego "???" dzieje się dopiero w repo.get_or_create_rejon,
+    # nie tutaj
+    w = WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", rejon=None, ilosc_total=3)
+    assert w.rejon is None
 
 
-def test_blok_normalizuje_kuriera():
-    blok = BlankietBlok(
+def test_blankiet_normalizuje_kuriera():
+    blankiet = Blankiet(
         kurier="  Kowalski   Jan ",
         data=date(2026, 8, 10),
         wiersze=[WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=3)],
     )
-    assert blok.kurier == "Kowalski Jan"
+    assert blankiet.kurier == "Kowalski Jan"
 
 
-def test_blok_wymaga_co_najmniej_jednego_wiersza():
+def test_blankiet_wymaga_co_najmniej_jednego_wiersza():
     with pytest.raises(ValidationError):
-        BlankietBlok(kurier="Kowalski Jan", data=date(2026, 8, 10), wiersze=[])
+        Blankiet(kurier="Kowalski Jan", data=date(2026, 8, 10), wiersze=[])
+
+
+def test_blankiet_wykonawca_opcjonalny():
+    blankiet = Blankiet(
+        kurier="Kowalski Jan", data=date(2026, 8, 10),
+        wiersze=[WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=3)],
+    )
+    assert blankiet.wykonawca is None

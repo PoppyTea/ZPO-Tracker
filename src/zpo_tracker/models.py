@@ -72,11 +72,17 @@ class WierszImportu(BaseModel):
 
 
 class WierszBlankietu(BaseModel):
-    """Pojedynczy wiersz formularza wprowadzania: punkt + ilość."""
+    """
+    Pojedynczy wiersz formularza wprowadzania: punkt + rejon + ilość.
+    Rejon per wiersz od 0.1-alpha.3.1 (dedukowany z adresu, patrz
+    dedukcja.py) - `transakcje.rejon_id` był per wiersz w bazie/imporcie/
+    eksporcie od zawsze, formularz (bloki REJON+DATA) tylko dogonił.
+    """
 
     nadawca: str = Field(min_length=1)
     adres: str = Field(min_length=1)
     pni_zpo: Optional[str] = None
+    rejon: Optional[str] = None
     ilosc_total: int = Field(ge=0)
     ilosc_zpo: Optional[int] = Field(default=None, ge=0)
 
@@ -87,28 +93,29 @@ class WierszBlankietu(BaseModel):
             return klucz_bialych_znakow(v)
         return v
 
-    @field_validator("pni_zpo", mode="before")
+    @field_validator("pni_zpo", "rejon", mode="before")
     @classmethod
-    def _pusty_pni_na_none(cls, v):
+    def _pusty_string_na_none(cls, v):
         if v is None:
             return None
         v = str(v).strip()
         return v or None
 
 
-class BlankietBlok(BaseModel):
+class Blankiet(BaseModel):
     """
-    Blok REJON+DATA z formularza wprowadzania - jeden blankiet (kurier+dzień)
-    może mieć kilka takich bloków, gdy obsługuje więcej niż jeden rejon.
-    Rejon opcjonalny (nieznany w momencie wpisywania); komentarz dotyczy
-    całego bloku, nie pojedynczego wiersza (docs/ux-ui.md).
+    Jeden papierowy blankiet = jeden kurier na jeden dzień (0.1-alpha.3.1 -
+    bloki REJON+DATA zniknęły, rejon jest teraz per wiersz, patrz
+    WierszBlankietu; komentarz per blok zniknął z formularza, kolumna w
+    bazie zostaje dla danych historycznych). `wykonawca` dedukowany na
+    poziomie nagłówka (dedukcja.dedukuj_naglowek - jeden kurier, jeden
+    wykonawca na dzień, nie osobno per punkt), ale to wciąż atrybut wiersza
+    w bazie - ta sama wartość aplikowana do każdego wiersza przy zapisie.
     """
 
     kurier: str = Field(min_length=1)
     data: date
-    rejon: Optional[str] = None
     wykonawca: Optional[str] = None
-    komentarz: Optional[str] = None
     wiersze: list[WierszBlankietu]
 
     @field_validator("kurier", mode="before")
@@ -118,7 +125,7 @@ class BlankietBlok(BaseModel):
             return klucz_bialych_znakow(v)
         return v
 
-    @field_validator("rejon", "wykonawca", "komentarz", mode="before")
+    @field_validator("wykonawca", mode="before")
     @classmethod
     def _pusty_string_na_none(cls, v):
         if v is None:
@@ -129,5 +136,5 @@ class BlankietBlok(BaseModel):
     @model_validator(mode="after")
     def _wymaga_co_najmniej_jednego_wiersza(self):
         if not self.wiersze:
-            raise ValueError("blok musi mieć co najmniej jeden wiersz punkt+ilość")
+            raise ValueError("blankiet musi mieć co najmniej jeden wiersz punkt+ilość")
         return self

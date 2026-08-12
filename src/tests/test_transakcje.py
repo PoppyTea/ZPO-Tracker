@@ -231,19 +231,19 @@ def test_zapisz_blok_jest_atomowy(conn):
     się" i wpisywał wszystko od nowa - powstawały duplikaty.
     """
     from datetime import date
-    from zpo_tracker.models import BlankietBlok, WierszBlankietu
+    from zpo_tracker.models import Blankiet, WierszBlankietu
 
-    blok = BlankietBlok(
-        kurier="Kowalski Jan", data=date(2026, 8, 10), rejon="WA87",
+    blok = Blankiet(
+        kurier="Kowalski Jan", data=date(2026, 8, 10),
         wiersze=[
-            WierszBlankietu(nadawca="Żabka", adres=f"Ulica {i}", ilosc_total=1)
+            WierszBlankietu(nadawca="Żabka", adres=f"Ulica {i}", rejon="WA87", ilosc_total=1)
             for i in range(5)
         ],
     )
     # awaria na 3. z 5 wierszy - dwa pierwsze są już zapisane i MUSZĄ
     # zostać wycofane (psucie pierwszego wiersza nie dowiodłoby niczego)
     with pytest.raises(sqlite3.OperationalError):
-        repo.zapisz_blok(
+        repo.zapisz_blankiet(
             _PolaczenieZAwaria(conn, "INSERT INTO TRANSAKCJE", po_ilu=2), blok)
 
     assert conn.execute("SELECT count(*) FROM transakcje").fetchone()[0] == 0

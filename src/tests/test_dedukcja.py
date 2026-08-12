@@ -18,7 +18,7 @@ import pytest
 
 from zpo_tracker import dedukcja, repo
 from zpo_tracker.dedukcja import StanPola, sprawdz_niezmienniki
-from zpo_tracker.models import BlankietBlok, WierszBlankietu
+from zpo_tracker.models import Blankiet, WierszBlankietu
 
 
 @pytest.fixture
@@ -29,14 +29,15 @@ def conn():
     conn.close()
 
 
-def _blok(**nadpisz):
-    dane = dict(
-        kurier="Kowalski Jan", data=date(2026, 8, 10), rejon="WA87", wykonawca="Koli",
-        wiersze=[WierszBlankietu(nadawca="Żabka", adres="Odkryta 24",
-                                  pni_zpo="228648", ilosc_total=3, ilosc_zpo=3)],
-    )
+def _blok(rejon="WA87", **nadpisz):
+    wiersze = nadpisz.pop("wiersze", None)
+    if wiersze is None:
+        wiersze = [WierszBlankietu(
+            nadawca="Żabka", adres="Odkryta 24", rejon=rejon,
+            pni_zpo="228648", ilosc_total=3, ilosc_zpo=3)]
+    dane = dict(kurier="Kowalski Jan", data=date(2026, 8, 10), wykonawca="Koli", wiersze=wiersze)
     dane.update(nadpisz)
-    return BlankietBlok(**dane)
+    return Blankiet(**dane)
 
 
 # --- dedukuj_wiersz: adres pusty ---
@@ -52,7 +53,7 @@ def test_adres_pusty_wszystko_szare_nieaktywne(conn):
 # --- dedukuj_wiersz: adres -> dokładnie 1 punkt ---
 
 def test_jeden_punkt_deukuje_nadawce_pni_i_rejon(conn):
-    repo.zapisz_blok(conn, _blok())
+    repo.zapisz_blankiet(conn, _blok())
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Odkryta 24")
     assert wynik.punkt_id is not None
     assert wynik.pola["nadawca"] == StanPola(wartosc="Żabka", stan="zielony", aktywne=False)
@@ -62,7 +63,7 @@ def test_jeden_punkt_deukuje_nadawce_pni_i_rejon(conn):
 
 
 def test_jeden_punkt_bez_pni_zwyklego_nadawcy_jest_zielony(conn):
-    repo.zapisz_blok(conn, _blok(wiersze=[
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="ZUS", adres="Senatorska 6/8", ilosc_total=1)]))
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Senatorska 6/8")
     assert wynik.pola["pni_zpo"].stan == "zielony"
@@ -72,8 +73,8 @@ def test_jeden_punkt_bez_pni_zwyklego_nadawcy_jest_zielony(conn):
 def test_jeden_punkt_bez_pni_ale_nadawca_to_znana_siec_zpo_daje_pomaranczowy(conn):
     # ten sam nadawca MA PNI w innej lokalizacji - ten konkretny punkt
     # najwyraźniej go nie ma zarejestrowanego, warto sprawdzić
-    repo.zapisz_blok(conn, _blok())  # Żabka, Odkryta 24, PNI=228648
-    repo.zapisz_blok(conn, _blok(wiersze=[
+    repo.zapisz_blankiet(conn, _blok())  # Żabka, Odkryta 24, PNI=228648
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Żabka", adres="Inna 5", ilosc_total=1)]))  # bez PNI
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Inna 5")
     assert wynik.pola["pni_zpo"].stan == "pomaranczowy"
@@ -83,8 +84,8 @@ def test_jeden_punkt_bez_pni_ale_nadawca_to_znana_siec_zpo_daje_pomaranczowy(con
 # --- dedukuj_wiersz: adres -> wiele punktów (niejednoznaczność) ---
 
 def test_wiele_nadawcow_pod_adresem_nie_wypelnia_i_aktywuje(conn):
-    repo.zapisz_blok(conn, _blok())  # Żabka, Odkryta 24
-    repo.zapisz_blok(conn, _blok(wiersze=[
+    repo.zapisz_blankiet(conn, _blok())  # Żabka, Odkryta 24
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Gemartis", adres="Odkryta 24", ilosc_total=1)]))
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Odkryta 24")
     assert wynik.punkt_id is None
@@ -99,8 +100,8 @@ def test_pni_nie_dedukowane_niezaleznie_gdy_nadawca_niejednoznaczny(conn):
     # SEDNO POPRAWKI Z PRZEGLĄDU: mimo że jeden z dwóch punktów pod tym
     # adresem MA jednoznaczne PNI, nie wolno go użyć - to właśnie
     # powodowało ciche podpięcie transakcji pod zły punkt
-    repo.zapisz_blok(conn, _blok())  # Żabka, PNI=228648 - jednoznaczne PNI
-    repo.zapisz_blok(conn, _blok(wiersze=[
+    repo.zapisz_blankiet(conn, _blok())  # Żabka, PNI=228648 - jednoznaczne PNI
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Gemartis", adres="Odkryta 24", ilosc_total=1)]))
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Odkryta 24")
     assert wynik.pola["pni_zpo"].wartosc is None
@@ -108,8 +109,8 @@ def test_pni_nie_dedukowane_niezaleznie_gdy_nadawca_niejednoznaczny(conn):
 
 
 def test_nadawca_podany_recznie_zawęża_niejednoznaczny_adres(conn):
-    repo.zapisz_blok(conn, _blok())  # Żabka, Odkryta 24
-    repo.zapisz_blok(conn, _blok(wiersze=[
+    repo.zapisz_blankiet(conn, _blok())  # Żabka, Odkryta 24
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Gemartis", adres="Odkryta 24", ilosc_total=1)]))
     wynik = dedukcja.dedukuj_wiersz(
         conn, kurier="Kowalski Jan", adres="Odkryta 24", nadawca="Gemartis")
@@ -135,8 +136,8 @@ def test_nowy_adres_nadawca_czerwony_i_w_nawigacji(conn):
 # --- dedukuj_wiersz: rejon - historia punktu ---
 
 def test_rejon_wiele_w_historii_nie_wypelnia(conn):
-    repo.zapisz_blok(conn, _blok(rejon="WA87", data=date(2026, 8, 1)))
-    repo.zapisz_blok(conn, _blok(rejon="WA88", data=date(2026, 8, 2)))
+    repo.zapisz_blankiet(conn, _blok(rejon="WA87", data=date(2026, 8, 1)))
+    repo.zapisz_blankiet(conn, _blok(rejon="WA88", data=date(2026, 8, 2)))
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Odkryta 24")
     assert wynik.pola["rejon"].stan == "pomaranczowy"
     assert wynik.pola["rejon"].wartosc is None
@@ -157,7 +158,7 @@ def test_rejon_punkt_bez_historii_transakcji(conn):
 # --- dedukuj_wiersz: adres dopasowany rozmyto (repo.znajdz_punkty_po_adresie) ---
 
 def test_adres_wpisany_niedokladnie_wciaz_deukuje(conn):
-    repo.zapisz_blok(conn, _blok())
+    repo.zapisz_blankiet(conn, _blok())
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="odkryta  24")
     assert wynik.punkt_id is not None
     assert wynik.pola["nadawca"].wartosc == "Żabka"
@@ -166,7 +167,7 @@ def test_adres_wpisany_niedokladnie_wciaz_deukuje(conn):
 # --- dedukuj_wiersz: ilosc_zpo - NIGDY bramowane przez ilość, tylko przez PNI nadawcy ---
 
 def test_ilosc_zpo_aktywne_gdy_nadawca_ma_pni_gdziekolwiek(conn):
-    repo.zapisz_blok(conn, _blok())  # Żabka ma PNI
+    repo.zapisz_blankiet(conn, _blok())  # Żabka ma PNI
     wynik = dedukcja.dedukuj_wiersz(
         conn, kurier="Kowalski Jan", adres="Odkryta 24", ilosc_total=5)
     assert wynik.pola["ilosc_zpo"].aktywne is True
@@ -174,7 +175,7 @@ def test_ilosc_zpo_aktywne_gdy_nadawca_ma_pni_gdziekolwiek(conn):
 
 
 def test_ilosc_zpo_nieaktywne_dla_zwyklego_nadawcy(conn):
-    repo.zapisz_blok(conn, _blok(wiersze=[
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="ZUS", adres="Senatorska 6/8", ilosc_total=1)]))
     wynik = dedukcja.dedukuj_wiersz(
         conn, kurier="Kowalski Jan", adres="Senatorska 6/8", ilosc_total=5)
@@ -185,7 +186,7 @@ def test_ilosc_zpo_nieaktywne_dla_zwyklego_nadawcy(conn):
 def test_ilosc_pusta_nie_blokuje_dedukcji_pozostalych_pol(conn):
     # POPRAWKA PAPAVERA 2026-08-12: dedukcja rusza z kuriera/adresu,
     # NIGDY nie czeka na wypełnienie Ilości
-    repo.zapisz_blok(conn, _blok())
+    repo.zapisz_blankiet(conn, _blok())
     wynik = dedukcja.dedukuj_wiersz(
         conn, kurier="Kowalski Jan", adres="Odkryta 24", ilosc_total=None)
     assert wynik.pola["nadawca"].stan == "zielony"
@@ -197,7 +198,7 @@ def test_ilosc_pusta_nie_blokuje_dedukcji_pozostalych_pol(conn):
 
 
 def test_ilosc_zpo_juz_wpisana_recznie_nie_jest_nadpisywana(conn):
-    repo.zapisz_blok(conn, _blok())
+    repo.zapisz_blankiet(conn, _blok())
     wynik = dedukcja.dedukuj_wiersz(
         conn, kurier="Kowalski Jan", adres="Odkryta 24", ilosc_total=5, ilosc_zpo=2)
     assert wynik.pola["ilosc_zpo"].wartosc == 2
@@ -206,15 +207,15 @@ def test_ilosc_zpo_juz_wpisana_recznie_nie_jest_nadpisywana(conn):
 # --- dedukuj_naglowek: wykonawca z historii kuriera ---
 
 def test_naglowek_jeden_wykonawca_w_historii(conn):
-    repo.zapisz_blok(conn, _blok(wykonawca="Koli"))
+    repo.zapisz_blankiet(conn, _blok(wykonawca="Koli"))
     pola = dedukcja.dedukuj_naglowek(conn, kurier="Kowalski Jan", data=date(2026, 8, 11))
     assert pola["wykonawca"] == StanPola(wartosc="Koli", stan="zielony", aktywne=False)
 
 
 def test_naglowek_wielu_wykonawcow_posortowani_po_swiezosci(conn):
-    repo.zapisz_blok(conn, _blok(wykonawca="Koli", data=date(2026, 8, 1)))
-    repo.zapisz_blok(conn, _blok(wykonawca="Koli", data=date(2026, 8, 2)))
-    repo.zapisz_blok(conn, _blok(wykonawca="Translist", data=date(2026, 8, 5)))
+    repo.zapisz_blankiet(conn, _blok(wykonawca="Koli", data=date(2026, 8, 1)))
+    repo.zapisz_blankiet(conn, _blok(wykonawca="Koli", data=date(2026, 8, 2)))
+    repo.zapisz_blankiet(conn, _blok(wykonawca="Translist", data=date(2026, 8, 5)))
     pola = dedukcja.dedukuj_naglowek(conn, kurier="Kowalski Jan", data=date(2026, 8, 11))
     assert pola["wykonawca"].stan == "pomaranczowy"
     assert pola["wykonawca"].wartosc is None
@@ -273,8 +274,8 @@ def test_kolejnosc_auto_zawiera_pola_glowne(conn):
 
 
 def test_kolejnosc_auto_wlacza_niejednoznaczne_pole_drugorzedne(conn):
-    repo.zapisz_blok(conn, _blok())
-    repo.zapisz_blok(conn, _blok(wiersze=[
+    repo.zapisz_blankiet(conn, _blok())
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Gemartis", adres="Odkryta 24", ilosc_total=1)]))
     naglowek = dedukcja.dedukuj_naglowek(conn, kurier="Kowalski Jan", data=date(2026, 8, 11))
     wiersz = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Odkryta 24")
@@ -285,7 +286,7 @@ def test_kolejnosc_auto_wlacza_niejednoznaczne_pole_drugorzedne(conn):
 
 
 def test_kolejnosc_auto_pomija_dedukowane_jednoznacznie(conn):
-    repo.zapisz_blok(conn, _blok())
+    repo.zapisz_blankiet(conn, _blok())
     naglowek = dedukcja.dedukuj_naglowek(conn, kurier="Kowalski Jan", data=date(2026, 8, 11))
     wiersz = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Odkryta 24")
     kolejnosc = dedukcja.kolejnosc_pol("auto", naglowek, [wiersz])

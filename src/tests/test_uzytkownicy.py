@@ -17,7 +17,7 @@ from datetime import date
 import pytest
 
 from zpo_tracker import repo, uzytkownicy
-from zpo_tracker.models import BlankietBlok, WierszBlankietu
+from zpo_tracker.models import Blankiet, WierszBlankietu
 
 
 @pytest.fixture
@@ -173,17 +173,17 @@ def test_ostrzezenia_sa_miekkie_nie_blokuja_zapisu(conn):
 # --- stemplowanie transakcji ---
 
 def _blok(**nadpisz):
-    dane = dict(
-        kurier="Kowalski Jan", data=date(2026, 8, 10), rejon="WA87",
-        wiersze=[WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=3)],
-    )
+    wiersze = nadpisz.pop("wiersze", None)
+    if wiersze is None:
+        wiersze = [WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", rejon="WA87", ilosc_total=3)]
+    dane = dict(kurier="Kowalski Jan", data=date(2026, 8, 10), wiersze=wiersze)
     dane.update(nadpisz)
-    return BlankietBlok(**dane)
+    return Blankiet(**dane)
 
 
 def test_zapisz_blok_stempluje_autora_i_czas(conn):
     uid = uzytkownicy.zapewnij_uzytkownika(conn, login="dom\\a", alias="A")
-    repo.zapisz_blok(conn, _blok(), autor_id=uid, teraz="2026-08-11T10:00:00")
+    repo.zapisz_blankiet(conn, _blok(), autor_id=uid, teraz="2026-08-11T10:00:00")
     wiersz = conn.execute(
         "SELECT autor_id, utworzono, zmodyfikowano FROM transakcje").fetchone()
     assert wiersz["autor_id"] == uid
@@ -195,7 +195,7 @@ def test_zapisz_blok_nadaje_uuid_kazdemu_wierszowi(conn):
     # tożsamość wiersza niezależna od klucza naturalnego: poprawka daty
     # albo kuriera zmienia klucz, a przy synchronizacji między stacjami wyglądałoby
     # to jak nowy wiersz i powstałby duplikat
-    repo.zapisz_blok(conn, _blok(wiersze=[
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Żabka", adres=f"Ulica {i}", ilosc_total=1)
         for i in range(3)
     ]))
@@ -206,5 +206,5 @@ def test_zapisz_blok_nadaje_uuid_kazdemu_wierszowi(conn):
 
 def test_zapisz_blok_dziala_bez_podanego_autora(conn):
     # atrybucja nie może być warunkiem zapisania danych
-    wyniki = repo.zapisz_blok(conn, _blok())
+    wyniki = repo.zapisz_blankiet(conn, _blok())
     assert wyniki[0]["id"] is not None

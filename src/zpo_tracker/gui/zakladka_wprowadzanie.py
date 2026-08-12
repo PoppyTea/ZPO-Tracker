@@ -1,12 +1,14 @@
 """
 Zakładka wprowadzania - formularz wzorowany na papierowym blankiecie
-(docs/ux-ui.md): KURIER na górze, potem jeden lub więcej bloków REJON+DATA
-(rejon opcjonalny - 35% blankietów ma więcej niż jeden rejon, patrz plan
-MVP), pod każdym powtarzalne wiersze punkt+ilość. Nad formularzem panel
-podglądu bazy (scroll + Ctrl+scroll zoom, patrz widget_tabela.Tabela).
+(docs/ux-ui.md): KURIER + DATA + WYKONAWCA (dedukowany) w nagłówku, pod
+spodem płaska lista wierszy punkt+ilość (0.1-alpha.3.1: bloki REJON+DATA
+zniknęły - jeden blankiet to jeden kurier na jeden dzień, rejon zszedł do
+wiersza i jest dedukowany z adresu). Nad formularzem panel podglądu bazy
+(scroll + Ctrl+scroll zoom, patrz widget_tabela.Tabela).
 
 Cała logika walidacji/budowania modeli jest w formularz_logika.py i
-models.py - tu tylko zbieranie wartości z pól i wyświetlanie wyniku.
+models.py, dedukcja pól w dedukcja.py - tu tylko zbieranie wartości z pól,
+wywołanie dedukcji i wyświetlenie wyniku.
 """
 from datetime import date
 import tkinter as tk
@@ -14,8 +16,8 @@ from tkinter import ttk
 
 from pydantic import ValidationError
 
-from zpo_tracker import operacje, repo
-from zpo_tracker.gui.formularz_logika import zbuduj_bloki
+from zpo_tracker import dedukcja, operacje, repo
+from zpo_tracker.gui.formularz_logika import zbuduj_blankiet
 from zpo_tracker.gui.widget_autocomplete import EntryZPodpowiedzia
 from zpo_tracker.gui.widget_tabela import Tabela
 
@@ -25,13 +27,17 @@ KOLUMNY_PODGLADU = [
     ("nadawca", "Nadawca", 110),
     ("adres", "Adres", 200),
     ("rejon", "Rejon", 60),
+    ("wykonawca", "Wykonawca", 90),
     ("ilosc_total", "Ilość", 55),
     ("ilosc_zpo", "w tym ZPO", 75),
 ]
 
+_AKTYWNY = "normal"
+_NIEAKTYWNY = "readonly"
+
 
 def _podepnij_scroll_kolkiem(canvas):
-    """Kółko myszy przewija obszar bloków tylko, gdy kursor jest nad nim -
+    """Kółko myszy przewija obszar wierszy tylko, gdy kursor jest nad nim -
     Windows/Mac (<MouseWheel>) i Linux (<Button-4>/<Button-5>) osobno,
     bo wysyłają zupełnie inne zdarzenia."""
     canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
@@ -45,106 +51,101 @@ def _odepnij_scroll_kolkiem(canvas):
     canvas.unbind_all("<Button-5>")
 
 
-class WierszWidget(ttk.Frame):
-    """Jeden wiersz bloku: punkt (nadawca + adres, opcjonalnie PNI) + ilość."""
+def _ustaw_stan(widget, aktywne):
+    stan = _AKTYWNY if aktywne else _NIEAKTYWNY
+    if hasattr(widget, "ustaw_stan"):
+        widget.ustaw_stan(stan)  # EntryZPodpowiedzia - patrz widget_autocomplete.py
+    else:
+        widget.configure(state=stan)
 
-    def __init__(self, parent, on_usun, pobierz_nadawcow, pobierz_adresy):
+
+class WierszWidget(ttk.Frame):
+    """
+    Jeden wiersz: rejon + punkt (nadawca + adres, opcjonalnie PNI) + ilość.
+    Rejon/nadawca/PNI dedukowane z adresu (0.1-alpha.3.1, patrz dedukcja.py)
+    - ta klasa tylko zbiera wartości i aplikuje wynik dedukcji, nie decyduje.
+    """
+
+    def __init__(self, parent, on_usun, pobierz_nadawcow, pobierz_adresy, on_adres_lub_nadawca):
         super().__init__(parent)
+        self.on_adres_lub_nadawca = on_adres_lub_nadawca
+        self._ustawiam_programowo = False
+        self._ilosc_zpo_aktywne = False
+
+        self.var_rejon = tk.StringVar()
         self.var_nadawca = tk.StringVar()
         self.var_adres = tk.StringVar()
         self.var_pni = tk.StringVar()
         self.var_ilosc_total = tk.StringVar()
         self.var_ilosc_zpo = tk.StringVar()
 
-        EntryZPodpowiedzia(
-            self, pobierz_nadawcow, textvariable=self.var_nadawca, width=16
-        ).grid(row=0, column=0, padx=2)
-        EntryZPodpowiedzia(
-            self, pobierz_adresy, textvariable=self.var_adres, width=26
-        ).grid(row=0, column=1, padx=2)
-        ttk.Entry(self, textvariable=self.var_pni, width=10).grid(row=0, column=2, padx=2)
-        ttk.Entry(self, textvariable=self.var_ilosc_total, width=6).grid(row=0, column=3, padx=2)
-        ttk.Entry(self, textvariable=self.var_ilosc_zpo, width=6).grid(row=0, column=4, padx=2)
-        ttk.Button(self, text="✕", width=2, command=lambda: on_usun(self)).grid(row=0, column=5, padx=2)
+        self.entry_rejon = ttk.Entry(self, textvariable=self.var_rejon, width=8)
+        self.entry_rejon.grid(row=0, column=0, padx=2)
+        self.entry_nadawca = EntryZPodpowiedzia(
+            self, pobierz_nadawcow, textvariable=self.var_nadawca, width=16)
+        self.entry_nadawca.grid(row=0, column=1, padx=2)
+        self.entry_adres = EntryZPodpowiedzia(
+            self, pobierz_adresy, textvariable=self.var_adres, width=26)
+        self.entry_adres.grid(row=0, column=2, padx=2)
+        self.entry_pni = ttk.Entry(self, textvariable=self.var_pni, width=10)
+        self.entry_pni.grid(row=0, column=3, padx=2)
+        self.entry_ilosc_total = ttk.Entry(self, textvariable=self.var_ilosc_total, width=6)
+        self.entry_ilosc_total.grid(row=0, column=4, padx=2)
+        self.entry_ilosc_zpo = ttk.Entry(self, textvariable=self.var_ilosc_zpo, width=6)
+        self.entry_ilosc_zpo.grid(row=0, column=5, padx=2)
+        ttk.Button(self, text="✕", width=2, command=lambda: on_usun(self)).grid(row=0, column=6, padx=2)
 
-        # domyślnie ilosc_zpo == ilosc_total dla punktów z PNI, ale pole
-        # zostaje niezależnie edytowalne (docs/domain-model.md)
+        self.var_adres.trace_add("write", self._na_zmiane)
+        self.var_nadawca.trace_add("write", self._na_zmiane)
+        # autouzupełnienie "w tym ZPO" z "Ilość" - JEDNOKIERUNKOWE, osobne
+        # od dedukcji (Ilość nigdy nie jest źródłem ani bramą dedukcji
+        # innych pól, patrz dedukcja.py); bramowane wynikiem OSTATNIEJ
+        # dedukcji (_ilosc_zpo_aktywne), nie ręcznie wpisanym PNI
         self.var_ilosc_total.trace_add("write", self._uzupelnij_ilosc_zpo)
 
+    def _na_zmiane(self, *_):
+        if self._ustawiam_programowo:
+            return
+        self.on_adres_lub_nadawca(self)
+
     def _uzupelnij_ilosc_zpo(self, *_):
-        if self.var_pni.get().strip() and not self.var_ilosc_zpo.get().strip():
+        if self._ustawiam_programowo:
+            return
+        if self._ilosc_zpo_aktywne and not self.var_ilosc_zpo.get().strip():
             self.var_ilosc_zpo.set(self.var_ilosc_total.get())
+
+    def zastosuj_dedukcje(self, wynik):
+        """wynik: dedukcja.WynikWiersza. Wypełnia pola dedukowane
+        jednoznacznie, przełącza aktywność pozostałych (kolor wskaźnika
+        dochodzi w kolejnym kroku - widget_pole.py, 0.1-alpha.3.1 c.d.)."""
+        self._ustawiam_programowo = True
+        try:
+            for klucz, var, widget in (
+                ("rejon", self.var_rejon, self.entry_rejon),
+                ("nadawca", self.var_nadawca, self.entry_nadawca),
+                ("pni_zpo", self.var_pni, self.entry_pni),
+            ):
+                stan = wynik.pola[klucz]
+                if stan.wartosc is not None:
+                    var.set(stan.wartosc)
+                _ustaw_stan(widget, stan.aktywne)
+
+            stan_zpo = wynik.pola["ilosc_zpo"]
+            self._ilosc_zpo_aktywne = stan_zpo.aktywne
+            _ustaw_stan(self.entry_ilosc_zpo, stan_zpo.aktywne)
+            if stan_zpo.wartosc is not None and not self.var_ilosc_zpo.get().strip():
+                self.var_ilosc_zpo.set(str(stan_zpo.wartosc))
+        finally:
+            self._ustawiam_programowo = False
 
     def pobierz_surowe(self):
         return {
             "nadawca": self.var_nadawca.get(),
             "adres": self.var_adres.get(),
             "pni_zpo": self.var_pni.get().strip() or None,
+            "rejon": self.var_rejon.get().strip() or None,
             "ilosc_total": self.var_ilosc_total.get().strip() or None,
             "ilosc_zpo": self.var_ilosc_zpo.get().strip() or None,
-        }
-
-
-class BlokRejonuWidget(ttk.LabelFrame):
-    """Blok REJON + DATA + KOMENTARZ, z listą wierszy punkt+ilość."""
-
-    def __init__(self, parent, data_domyslna, on_usun_blok, pobierz_nadawcow, pobierz_adresy):
-        super().__init__(parent, text="Rejon", padding=6)
-        self.on_usun_blok = on_usun_blok
-        self.pobierz_nadawcow = pobierz_nadawcow
-        self.pobierz_adresy = pobierz_adresy
-        self.wiersze = []
-
-        naglowek = ttk.Frame(self)
-        naglowek.pack(fill="x")
-        ttk.Label(naglowek, text="Rejon (puste = nieznany):").pack(side="left")
-        self.var_rejon = tk.StringVar()
-        ttk.Entry(naglowek, textvariable=self.var_rejon, width=10).pack(side="left", padx=(4, 14))
-        ttk.Label(naglowek, text="Data:").pack(side="left")
-        self.var_data = tk.StringVar(value=data_domyslna)
-        ttk.Entry(naglowek, textvariable=self.var_data, width=12).pack(side="left", padx=4)
-        ttk.Button(naglowek, text="usuń rejon", command=lambda: on_usun_blok(self)).pack(side="right")
-
-        komentarz_ramka = ttk.Frame(self)
-        komentarz_ramka.pack(fill="x", pady=(4, 6))
-        ttk.Label(komentarz_ramka, text="Komentarz (np. gdy rejon nieznany):").pack(side="left")
-        self.var_komentarz = tk.StringVar()
-        ttk.Entry(komentarz_ramka, textvariable=self.var_komentarz, width=50).pack(
-            side="left", padx=4, fill="x", expand=True
-        )
-
-        naglowek_kolumn = ttk.Frame(self)
-        naglowek_kolumn.pack(fill="x")
-        for tekst, w in [("Nadawca", 16), ("Adres", 26), ("PNI ZPO", 10), ("Ilość", 6), ("w tym ZPO", 6)]:
-            ttk.Label(naglowek_kolumn, text=tekst, width=w, anchor="w").pack(side="left", padx=2)
-
-        self.ramka_wierszy = ttk.Frame(self)
-        self.ramka_wierszy.pack(fill="x")
-
-        ttk.Button(self, text="+ wiersz", command=self.dodaj_wiersz).pack(anchor="w", pady=(4, 0))
-
-        self.dodaj_wiersz()
-        self.dodaj_wiersz()
-
-    def dodaj_wiersz(self):
-        wiersz = WierszWidget(
-            self.ramka_wierszy, self._usun_wiersz, self.pobierz_nadawcow, self.pobierz_adresy
-        )
-        wiersz.pack(fill="x", pady=1)
-        self.wiersze.append(wiersz)
-
-    def _usun_wiersz(self, wiersz):
-        if len(self.wiersze) <= 1:
-            return  # zawsze zostaje co najmniej jeden wiersz do wypełnienia
-        wiersz.destroy()
-        self.wiersze.remove(wiersz)
-
-    def pobierz_surowe(self):
-        return {
-            "rejon": self.var_rejon.get().strip() or None,
-            "data": self.var_data.get().strip(),
-            "komentarz": self.var_komentarz.get().strip() or None,
-            "wiersze": [w.pobierz_surowe() for w in self.wiersze],
         }
 
 
@@ -154,7 +155,8 @@ class ZakladkaWprowadzanie(ttk.Frame):
         self.conn = conn
         self.katalog_danych = katalog_danych
         self.on_zapisano = on_zapisano
-        self.bloki = []
+        self.wiersze = []
+        self._ustawiam_programowo = False
 
         panel = ttk.PanedWindow(self, orient="vertical")
         panel.pack(fill="both", expand=True)
@@ -170,49 +172,62 @@ class ZakladkaWprowadzanie(ttk.Frame):
         dol = ttk.Frame(panel)
         panel.add(dol, weight=2)
 
-        pasek_kuriera = ttk.Frame(dol)
-        pasek_kuriera.pack(fill="x", padx=6, pady=6)
-        ttk.Label(pasek_kuriera, text="KURIER:", font=("TkDefaultFont", 12, "bold")).pack(side="left")
+        naglowek = ttk.Frame(dol)
+        naglowek.pack(fill="x", padx=6, pady=6)
+        ttk.Label(naglowek, text="KURIER:", font=("TkDefaultFont", 12, "bold")).pack(side="left")
         self.var_kurier = tk.StringVar()
         EntryZPodpowiedzia(
-            pasek_kuriera, self._pobierz_kurierow, textvariable=self.var_kurier,
+            naglowek, self._pobierz_kurierow, textvariable=self.var_kurier,
             width=30, font=("TkDefaultFont", 12),
         ).pack(side="left", padx=8)
-        ttk.Label(pasek_kuriera, text="Wykonawca:").pack(side="left", padx=(16, 0))
+        ttk.Label(naglowek, text="Data:").pack(side="left", padx=(16, 0))
+        self.var_data = tk.StringVar(value=date.today().isoformat())
+        ttk.Entry(naglowek, textvariable=self.var_data, width=12).pack(side="left", padx=4)
+        ttk.Label(naglowek, text="Wykonawca:").pack(side="left", padx=(16, 0))
         self.var_wykonawca = tk.StringVar()
-        ttk.Entry(pasek_kuriera, textvariable=self.var_wykonawca, width=16).pack(side="left", padx=4)
+        self.entry_wykonawca = ttk.Entry(naglowek, textvariable=self.var_wykonawca, width=16)
+        self.entry_wykonawca.pack(side="left", padx=4)
 
-        # bloki rejonów mogą urosnąć poza widoczny obszar okna (GH #3) -
-        # bez tego użytkownik nie miał jak dodać kolejnego rejonu/wiersza,
-        # gdy poprzednie już wypełniły ekran
-        obszar_blokow = ttk.Frame(dol)
-        obszar_blokow.pack(fill="both", expand=True, padx=6)
-        canvas_blokow = tk.Canvas(obszar_blokow, highlightthickness=0)
-        pasek_scroll = ttk.Scrollbar(obszar_blokow, orient="vertical", command=canvas_blokow.yview)
-        canvas_blokow.configure(yscrollcommand=pasek_scroll.set)
-        canvas_blokow.pack(side="left", fill="both", expand=True)
+        naglowek_kolumn = ttk.Frame(dol)
+        naglowek_kolumn.pack(fill="x", padx=6)
+        for tekst, w in [("Rejon", 8), ("Nadawca", 16), ("Adres", 26), ("PNI ZPO", 10),
+                          ("Ilość", 6), ("w tym ZPO", 6)]:
+            ttk.Label(naglowek_kolumn, text=tekst, width=w, anchor="w").pack(side="left", padx=2)
+
+        # wiersze mogą urosnąć poza widoczny obszar okna (GH #3) - bez tego
+        # użytkownik nie miał jak dodać kolejnego wiersza, gdy poprzednie
+        # już wypełniły ekran
+        obszar_wierszy = ttk.Frame(dol)
+        obszar_wierszy.pack(fill="both", expand=True, padx=6)
+        canvas_wierszy = tk.Canvas(obszar_wierszy, highlightthickness=0)
+        pasek_scroll = ttk.Scrollbar(obszar_wierszy, orient="vertical", command=canvas_wierszy.yview)
+        canvas_wierszy.configure(yscrollcommand=pasek_scroll.set)
+        canvas_wierszy.pack(side="left", fill="both", expand=True)
         pasek_scroll.pack(side="right", fill="y")
 
-        self.ramka_blokow = ttk.Frame(canvas_blokow)
-        okno_id = canvas_blokow.create_window((0, 0), window=self.ramka_blokow, anchor="nw")
-        self.ramka_blokow.bind(
-            "<Configure>", lambda e: canvas_blokow.configure(scrollregion=canvas_blokow.bbox("all"))
+        self.ramka_wierszy = ttk.Frame(canvas_wierszy)
+        okno_id = canvas_wierszy.create_window((0, 0), window=self.ramka_wierszy, anchor="nw")
+        self.ramka_wierszy.bind(
+            "<Configure>", lambda e: canvas_wierszy.configure(scrollregion=canvas_wierszy.bbox("all"))
         )
-        canvas_blokow.bind(
-            "<Configure>", lambda e: canvas_blokow.itemconfig(okno_id, width=e.width)
+        canvas_wierszy.bind(
+            "<Configure>", lambda e: canvas_wierszy.itemconfig(okno_id, width=e.width)
         )
-        canvas_blokow.bind("<Enter>", lambda e: _podepnij_scroll_kolkiem(canvas_blokow))
-        canvas_blokow.bind("<Leave>", lambda e: _odepnij_scroll_kolkiem(canvas_blokow))
+        canvas_wierszy.bind("<Enter>", lambda e: _podepnij_scroll_kolkiem(canvas_wierszy))
+        canvas_wierszy.bind("<Leave>", lambda e: _odepnij_scroll_kolkiem(canvas_wierszy))
 
         pasek_akcji = ttk.Frame(dol)
         pasek_akcji.pack(fill="x", padx=6, pady=6)
-        ttk.Button(pasek_akcji, text="+ dodaj rejon", command=self.dodaj_blok).pack(side="left")
+        ttk.Button(pasek_akcji, text="+ wiersz", command=self.dodaj_wiersz).pack(side="left")
         ttk.Button(pasek_akcji, text="ZAPISZ", command=self.zapisz).pack(side="left", padx=8)
         self.etykieta_status = ttk.Label(pasek_akcji, text="")
         self.etykieta_status.pack(side="left", padx=8)
 
-        self._data_domyslna = date.today().isoformat()
-        self.dodaj_blok()
+        self.var_kurier.trace_add("write", self._na_zmiane_naglowka)
+        self.var_data.trace_add("write", self._na_zmiane_naglowka)
+
+        self.dodaj_wiersz()
+        self.dodaj_wiersz()
         self.odswiez_podglad()
 
     def _pobierz_kurierow(self):
@@ -224,41 +239,66 @@ class ZakladkaWprowadzanie(ttk.Frame):
     def _pobierz_adresy(self):
         return repo.pobierz_unikalne_adresy(self.conn)
 
-    def dodaj_blok(self):
-        data_domyslna = self.bloki[-1].var_data.get() if self.bloki else self._data_domyslna
-        blok = BlokRejonuWidget(
-            self.ramka_blokow, data_domyslna, self._usun_blok,
-            self._pobierz_nadawcow, self._pobierz_adresy,
+    def dodaj_wiersz(self):
+        wiersz = WierszWidget(
+            self.ramka_wierszy, self._usun_wiersz, self._pobierz_nadawcow,
+            self._pobierz_adresy, self._na_zmiane_wiersza,
         )
-        blok.pack(fill="x", pady=4)
-        self.bloki.append(blok)
+        wiersz.pack(fill="x", pady=1)
+        self.wiersze.append(wiersz)
 
-    def _usun_blok(self, blok):
-        if len(self.bloki) <= 1:
+    def _usun_wiersz(self, wiersz):
+        if len(self.wiersze) <= 1:
+            return  # zawsze zostaje co najmniej jeden wiersz do wypełnienia
+        wiersz.destroy()
+        self.wiersze.remove(wiersz)
+
+    def _na_zmiane_naglowka(self, *_):
+        if self._ustawiam_programowo:
             return
-        blok.destroy()
-        self.bloki.remove(blok)
+        kurier = self.var_kurier.get().strip()
+        if not kurier:
+            return
+        pola = dedukcja.dedukuj_naglowek(self.conn, kurier=kurier, data=self.var_data.get().strip())
+        stan = pola["wykonawca"]
+        self._ustawiam_programowo = True
+        try:
+            if stan.wartosc is not None:
+                self.var_wykonawca.set(stan.wartosc)
+            _ustaw_stan(self.entry_wykonawca, stan.aktywne)
+        finally:
+            self._ustawiam_programowo = False
+
+    def _na_zmiane_wiersza(self, wiersz):
+        kurier = self.var_kurier.get().strip()
+        adres = wiersz.var_adres.get().strip()
+        nadawca = wiersz.var_nadawca.get().strip() or None
+        wynik = dedukcja.dedukuj_wiersz(self.conn, kurier=kurier, adres=adres, nadawca=nadawca)
+        wiersz.zastosuj_dedukcje(wynik)
 
     def odswiez_podglad(self):
         self.podglad.ustaw_dane(repo.pobierz_transakcje(self.conn, limit=500))
 
     def zapisz(self):
-        dane_blokow = [b.pobierz_surowe() for b in self.bloki]
+        dane_wierszy = [w.pobierz_surowe() for w in self.wiersze]
         try:
-            bloki = zbuduj_bloki(self.var_kurier.get(), self.var_wykonawca.get().strip() or None, dane_blokow)
+            blankiet = zbuduj_blankiet(
+                self.var_kurier.get(), self.var_data.get().strip(),
+                self.var_wykonawca.get().strip() or None, dane_wierszy,
+            )
         except ValidationError as e:
             self.etykieta_status.configure(text=f"Błąd: {_pierwszy_blad(e)}", foreground="red")
             return
 
-        if not bloki:
+        if blankiet is None:
             self.etykieta_status.configure(text="Brak wypełnionych wierszy do zapisania.", foreground="red")
             return
 
         wyniki = operacje.wykonaj(
             self.conn, self.katalog_danych, rodzaj="zapis_blankietu",
-            etykieta=f"{self.var_kurier.get().strip()}, {len(bloki)} blok(ów)",
-            funkcja=repo.zapisz_bloki,
-            args=(bloki,), kwargs={"autor_id": getattr(self, "autor_id", None)},
+            etykieta=f"{self.var_kurier.get().strip()}, {len(blankiet.wiersze)} wiersz(y)",
+            funkcja=repo.zapisz_blankiet,
+            args=(blankiet,), kwargs={"autor_id": getattr(self, "autor_id", None)},
             licz_wiersze=operacje.licz_zapisane_wiersze,
         )
         ostrzezenia, pominiete = [], 0
@@ -267,16 +307,17 @@ class ZakladkaWprowadzanie(ttk.Frame):
                 pominiete += 1
             ostrzezenia.extend(wynik["ostrzezenia"])
 
-        data_zachowana = self.bloki[0].var_data.get()
-        for blok_widget in list(self.bloki):
-            blok_widget.destroy()
-        self.bloki.clear()
+        data_zachowana = self.var_data.get()
+        for wiersz_widget in list(self.wiersze):
+            wiersz_widget.destroy()
+        self.wiersze.clear()
         self.var_kurier.set("")
         self.var_wykonawca.set("")
-        self._data_domyslna = data_zachowana
-        self.dodaj_blok()
+        self.var_data.set(data_zachowana)
+        self.dodaj_wiersz()
+        self.dodaj_wiersz()
 
-        tekst = f"Zapisano {sum(len(b.wiersze) for b in bloki) - pominiete} wierszy."
+        tekst = f"Zapisano {len(blankiet.wiersze) - pominiete} wierszy."
         if pominiete:
             tekst += f" Pominięto {pominiete} (duplikat)."
         if ostrzezenia:

@@ -314,10 +314,13 @@ def transakcja(conn):
     conn.execute(f"RELEASE {nazwa}")
 
 
-def zapisz_blok(conn, blok, autor_id=None, teraz=None, operacja_id=None):
+def zapisz_blankiet(conn, blankiet, autor_id=None, teraz=None):
     """
-    Zapisuje BlankietBlok jako jedną transakcję na WierszBlankietu, z tym
-    samym komentarzem dla całego bloku. Zwraca listę dictów:
+    Zapisuje Blankiet (jeden kurier, jeden dzień) jako jedną transakcję na
+    WierszBlankietu. Rejon i wykonawca liczone PER WIERSZ (0.1-alpha.3.1):
+    rejon bo zszedł do wiersza (dedukowany z adresu), wykonawca bo mimo
+    dedukcji na poziomie nagłówka wciąż jest atrybutem wiersza w bazie -
+    patrz `models.Blankiet`. Zwraca listę dictów:
     {"id", "pominieto", "ostrzezenia", "powod"} - jeden na wiersz, w
     kolejności wejściowej.
 
@@ -331,32 +334,31 @@ def zapisz_blok(conn, blok, autor_id=None, teraz=None, operacja_id=None):
     zapisania danych.
     """
     with transakcja(conn):
-        return _zapisz_blok_bez_transakcji(
-            conn, blok, autor_id=autor_id, teraz=teraz)
+        return _zapisz_blankiet_bez_transakcji(
+            conn, blankiet, autor_id=autor_id, teraz=teraz)
 
 
-def _zapisz_blok_bez_transakcji(conn, blok, autor_id=None, teraz=None):
-    kurier_id = get_or_create_kurier(conn, blok.kurier)
-    rejon_id = get_or_create_rejon(conn, blok.rejon)
-    wykonawca_id = get_or_create_wykonawca(conn, blok.wykonawca)
+def _zapisz_blankiet_bez_transakcji(conn, blankiet, autor_id=None, teraz=None):
+    kurier_id = get_or_create_kurier(conn, blankiet.kurier)
+    wykonawca_id = get_or_create_wykonawca(conn, blankiet.wykonawca)
     teraz = teraz or datetime.now().isoformat(timespec="seconds")
 
     wyniki = []
-    for wiersz in blok.wiersze:
+    for wiersz in blankiet.wiersze:
         punkt_id, ostrzezenia = get_or_create_punkt(
             conn, wiersz.nadawca, wiersz.adres, wiersz.pni_zpo
         )
+        rejon_id = get_or_create_rejon(conn, wiersz.rejon)
         try:
             cur = conn.execute(
                 """INSERT INTO transakcje
                    (data, kurier_id, punkt_id, rejon_id, wykonawca_id,
-                    ilosc_total, ilosc_zpo, komentarz,
+                    ilosc_total, ilosc_zpo,
                     uuid, autor_id, utworzono, zmodyfikowano)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    blok.data.isoformat(), kurier_id, punkt_id, rejon_id,
+                    blankiet.data.isoformat(), kurier_id, punkt_id, rejon_id,
                     wykonawca_id, wiersz.ilosc_total, wiersz.ilosc_zpo,
-                    blok.komentarz,
                     str(uuid.uuid4()), autor_id, teraz, teraz,
                 ),
             )
@@ -369,19 +371,6 @@ def _zapisz_blok_bez_transakcji(conn, blok, autor_id=None, teraz=None):
                 "id": None, "pominieto": True, "ostrzezenia": ostrzezenia,
                 "powod": "duplikat (ta sama data+kurier+punkt już istnieje)",
             })
-    return wyniki
-
-
-def zapisz_bloki(conn, bloki, autor_id=None):
-    """
-    Zapisuje kilka BlankietBlok (jeden formularz może mieć kilka bloków
-    rejonu) jako jedną operację dla dziennika/migawek (operacje.wykonaj) -
-    "ZAPISZ" w formularzu to dla użytkownika jedna czynność, niezależnie od
-    liczby bloków, więc cofnięcie też powinno cofać ją w całości.
-    """
-    wyniki = []
-    for blok in bloki:
-        wyniki.extend(zapisz_blok(conn, blok, autor_id=autor_id))
     return wyniki
 
 

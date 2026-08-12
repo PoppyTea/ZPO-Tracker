@@ -117,6 +117,6 @@ def znajdz_najblizsze_migawki(katalog_danych, seq_docelowy):
     return poprzednia, nastepna
 
 
-def licz_zapisane_wiersze(wyniki_zapisz_blok):
-    """Helper dla `licz_wiersze` przy `repo.zapisz_blok` - pomija duplikaty."""
-    return sum(1 for w in wyniki_zapisz_blok if not w["pominieto"])
+def licz_zapisane_wiersze(wyniki_zapisz_blankiet):
+    """Helper dla `licz_wiersze` przy `repo.zapisz_blankiet` - pomija duplikaty."""
+    return sum(1 for w in wyniki_zapisz_blankiet if not w["pominieto"])

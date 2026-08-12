@@ -11,7 +11,7 @@ from datetime import date
 import pytest
 
 from zpo_tracker import repo
-from zpo_tracker.models import BlankietBlok, WierszBlankietu
+from zpo_tracker.models import Blankiet, WierszBlankietu
 
 
 def _ma_display():
@@ -104,11 +104,11 @@ def test_zapis_z_formularza_stempluje_autora(tmp_path, monkeypatch):
         uzytkownicy.zapewnij_uzytkownika(
             app.conn, login="POCZTA-POLSKA\\jkowalski",
             alias="Jan Kowalski", nr_kadrowy="ab12X")
-        blok = BlankietBlok(
-            kurier="Testowy Kurier", data=date(2026, 8, 10), rejon="WA1",
-            wiersze=[WierszBlankietu(nadawca="Żabka", adres="Testowa 1", ilosc_total=2)],
+        blok = Blankiet(
+            kurier="Testowy Kurier", data=date(2026, 8, 10),
+            wiersze=[WierszBlankietu(nadawca="Żabka", adres="Testowa 1", rejon="WA1", ilosc_total=2)],
         )
-        repo.zapisz_blok(app.conn, blok, autor_id=app.autor_id)
+        repo.zapisz_blankiet(app.conn, blok, autor_id=app.autor_id)
 
         wiersz = app.conn.execute(
             "SELECT u.alias, t.utworzono FROM transakcje t"
@@ -126,13 +126,12 @@ def test_zakladka_przeglad_pokazuje_wpisana_transakcje(tmp_path):
 
     app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
     try:
-        blok = BlankietBlok(
+        blok = Blankiet(
             kurier="Testowy Kurier",
             data=date(2026, 8, 10),
-            rejon="WA1",
-            wiersze=[WierszBlankietu(nadawca="Żabka", adres="Testowa 1", ilosc_total=2)],
+            wiersze=[WierszBlankietu(nadawca="Żabka", adres="Testowa 1", rejon="WA1", ilosc_total=2)],
         )
-        repo.zapisz_blok(app.conn, blok)
+        repo.zapisz_blankiet(app.conn, blok)
         app.zakladka_przeglad.odswiez()
         app.update()
         assert "1 transakcji" in app.zakladka_przeglad.etykieta_liczby.cget("text")
@@ -166,9 +165,8 @@ def test_zapisz_z_formularza_tworzy_wpis_w_dzienniku_z_migawka(tmp_path):
     try:
         wprowadzanie = app.zakladka_wprowadzanie
         wprowadzanie.var_kurier.set("Testowy Kurier")
-        blok = wprowadzanie.bloki[0]
-        blok.var_rejon.set("WA1")
-        wiersz = blok.wiersze[0]
+        wiersz = wprowadzanie.wiersze[0]
+        wiersz.var_rejon.set("WA1")
         wiersz.var_nadawca.set("Żabka")
         wiersz.var_adres.set("Testowa 1")
         wiersz.var_ilosc_total.set("2")
@@ -607,13 +605,13 @@ def test_cofnij_do_przywraca_stan_i_zamyka_aplikacje(tmp_path):
     sciezka = str(tmp_path / "test.db")
     app = Aplikacja(sciezka_bazy=sciezka)
     try:
-        blok = BlankietBlok(
-            kurier="Testowy Kurier", data=date(2026, 8, 10), rejon="WA1",
-            wiersze=[WierszBlankietu(nadawca="Żabka", adres="Testowa 1", ilosc_total=2)],
+        blok = Blankiet(
+            kurier="Testowy Kurier", data=date(2026, 8, 10),
+            wiersze=[WierszBlankietu(nadawca="Żabka", adres="Testowa 1", rejon="WA1", ilosc_total=2)],
         )
         operacje.wykonaj(
             app.conn, app.katalog_danych, rodzaj="zapis_blankietu", etykieta="test",
-            funkcja=repo_modul.zapisz_blok, args=(blok,),
+            funkcja=repo_modul.zapisz_blankiet, args=(blok,),
         )
         seq = dziennik.wczytaj_operacje(app.katalog_danych)[-1]["seq"]
 

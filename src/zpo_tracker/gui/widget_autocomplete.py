@@ -59,6 +59,16 @@ class EntryZPodpowiedzia(ttk.Frame):
     def set(self, wartosc):
         self.var.set(wartosc)
 
+    def ustaw_stan(self, stan):
+        """
+        Proxy do wewnętrznego Entry - Frame-owy wrapper nie przepuszcza
+        `configure(state=...)` automatycznie. `stan`: "normal"/"readonly"
+        (0.1-alpha.3.1: pola dedukowane jednoznacznie stają się readonly -
+        zaznaczalne, ale nieedytowalne i pomijane Tabem po dołożeniu
+        `takefocus=0` w kolejnym kroku, patrz widget_pole.py).
+        """
+        self.entry.configure(state=stan)
+
     def _na_klawisz_release(self, event):
         if event.keysym in ("Tab", "Return", "Up", "Down", "Escape"):
             return
