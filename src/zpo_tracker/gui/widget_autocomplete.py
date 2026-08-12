@@ -57,6 +57,7 @@ class EntryZPodpowiedzia(ttk.Frame):
         self._lista = None
         self._podswietlony = -1
         self._aktywne_podpowiedzi = []
+        self._ukryj_po_id = None
 
         self.entry.bind("<KeyRelease>", self._na_klawisz_release)
         self.entry.bind("<Tab>", self._zatwierdz_i_dalej)
@@ -155,6 +156,14 @@ class EntryZPodpowiedzia(ttk.Frame):
         self._schowaj()
 
     def _na_focus_in(self, _event=None):
+        # wyścig zweryfikowany empirycznie: fokus bywa "z powrotem" w tym
+        # samym polu w <150ms (typowe przy Enter=TAB z klawiatury) - bez
+        # anulowania stary timer z _na_focus_out gasiłby świeżo pokazaną
+        # listę. Niszczenie widgetu z zaplanowanym `after` jest bezpieczne,
+        # więc nie trzeba tego odwoływać nigdzie indziej.
+        if self._ukryj_po_id is not None:
+            self.after_cancel(self._ukryj_po_id)
+            self._ukryj_po_id = None
         if not self.rozwijaj_na_pusty_fokus or self.var.get():
             return
         kandydaci = self.pobierz_kandydatow()
@@ -165,4 +174,4 @@ class EntryZPodpowiedzia(ttk.Frame):
         self._pokaz()
 
     def _na_focus_out(self, _event):
-        self.after(150, self._schowaj)
+        self._ukryj_po_id = self.after(150, self._schowaj)

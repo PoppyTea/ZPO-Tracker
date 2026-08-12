@@ -98,6 +98,28 @@ def test_bez_flagi_pusty_fokus_nic_nie_pokazuje(root):
     assert w._aktywne_podpowiedzi == []
 
 
+def test_szybki_powrot_fokusu_nie_gasi_swiezej_listy(root):
+    # wyścig zweryfikowany empirycznie wcześniej w tej sesji: FocusOut planuje
+    # ukrycie za 150ms; jeśli fokus wraca szybciej (typowe przy Enter=TAB
+    # z klawiatury), stary timer gasił świeżo pokazaną listę. Fix:
+    # after_cancel w _na_focus_in.
+    import time
+
+    w = EntryZPodpowiedzia(root, lambda: ["Żabka", "Gemartis"], rozwijaj_na_pusty_fokus=True)
+    w.pack()
+    root.update()
+    w.entry.focus_set()
+    root.update()
+    assert w._aktywne_podpowiedzi == ["Żabka", "Gemartis"]
+
+    w._na_focus_out(None)  # planuje ukrycie za 150ms
+    w._na_focus_in(None)   # fokus "wraca" w tym samym takcie - musi anulować timer
+
+    time.sleep(0.25)
+    root.update()
+    assert w._aktywne_podpowiedzi == ["Żabka", "Gemartis"]
+
+
 def test_rozwijanie_na_fokus_pomija_gdy_pole_ma_juz_tekst(root):
     w = EntryZPodpowiedzia(root, lambda: ["Żabka", "Gemartis"], rozwijaj_na_pusty_fokus=True)
     w.set("Żabka")
