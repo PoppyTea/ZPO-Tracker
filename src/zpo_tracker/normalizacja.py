@@ -19,6 +19,32 @@ _DIAKRYTYKI = str.maketrans("ąćęłńóśźż", "acelnoszz")
 
 PROG_LITEROWKI = 1  # maks. dystans edycyjny uznawany za literówkę, nie inną wartość
 
+REJON_NIEZNANY = "???"
+_REJON_SMIECI = {"-", "n/a", "null"}
+
+
+def normalizuj_rejon(kod: str | None) -> str:
+    """
+    Kanoniczny "rejon nieznany". Pusty kod oraz każdy zawierający "?",
+    zawierający spację, albo równy (bez uwzględniania wielkości liter)
+    "-"/"n/a"/"null" -> REJON_NIEZNANY. Idempotentna: normalizuj_rejon(
+    REJON_NIEZNANY) == REJON_NIEZNANY, bo "???" sam zawiera "?".
+
+    Obowiązuje we WSZYSTKICH ścieżkach zapisu (formularz, import, scalanie
+    baz) - inaczej ten sam śmieciowy rejon istniałby w bazie pod różnymi
+    postaciami zależnie od tego, którędy trafił.
+    """
+    if kod is None:
+        return REJON_NIEZNANY
+    kod = kod.strip()
+    if not kod:
+        return REJON_NIEZNANY
+    if "?" in kod or " " in kod:
+        return REJON_NIEZNANY
+    if kod.lower() in _REJON_SMIECI:
+        return REJON_NIEZNANY
+    return kod
+
 
 def klucz_bialych_znakow(s: str) -> str:
     """Trim + collapse wielokrotnych białych znaków (spacje/taby/nowe linie)."""

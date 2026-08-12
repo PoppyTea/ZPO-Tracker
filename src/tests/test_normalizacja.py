@@ -4,8 +4,10 @@ Wzorzec kluczy (klucz_bialych_znakow/klucz_rozmyty) przeniesiony
 z demo/przeglad-kurierow-prototyp.html (wsKey/fuzzyKey).
 """
 from zpo_tracker.normalizacja import (
+    REJON_NIEZNANY,
     klucz_bialych_znakow,
     klucz_rozmyty,
+    normalizuj_rejon,
     odleglosc_edycyjna,
     czy_literowka,
     grupuj_bezpiecznie,
@@ -98,3 +100,34 @@ def test_znajdz_podobne_wykrywa_roznice_diakrytykow():
 def test_znajdz_podobne_nie_zglasza_realnie_roznych_nazwisk():
     grupy = grupuj_bezpiecznie(["Kowalski Jan", "Nowak Jan"])
     assert znajdz_podobne(grupy) == []
+
+
+# --- normalizuj_rejon: kanoniczny "rejon nieznany" (??? ) ---
+
+def test_normalizuj_rejon_prawidlowy_kod_zostaje_bez_zmian():
+    assert normalizuj_rejon("WA87") == "WA87"
+
+
+def test_normalizuj_rejon_puste_i_none_daja_nieznany():
+    assert normalizuj_rejon(None) == REJON_NIEZNANY
+    assert normalizuj_rejon("") == REJON_NIEZNANY
+    assert normalizuj_rejon("   ") == REJON_NIEZNANY
+
+
+def test_normalizuj_rejon_znak_zapytania_daje_nieznany():
+    assert normalizuj_rejon("?") == REJON_NIEZNANY
+    assert normalizuj_rejon("WA?7") == REJON_NIEZNANY
+
+
+def test_normalizuj_rejon_spacja_w_srodku_daje_nieznany():
+    # spacja w kodzie rejonu to zawsze artefakt wpisywania, nie prawdziwy kod
+    assert normalizuj_rejon("WA 87") == REJON_NIEZNANY
+
+
+def test_normalizuj_rejon_smieciowe_wartosci_daja_nieznany():
+    for smiec in ("-", "n/a", "N/A", "null", "NULL"):
+        assert normalizuj_rejon(smiec) == REJON_NIEZNANY
+
+
+def test_normalizuj_rejon_jest_idempotentny():
+    assert normalizuj_rejon(REJON_NIEZNANY) == REJON_NIEZNANY
