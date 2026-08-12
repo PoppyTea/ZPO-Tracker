@@ -10,8 +10,10 @@ from zpo_tracker.importer import (
     get_or_create_kurier,
     get_or_create_punkt,
     get_or_create_firma_zpo,
+    get_or_create_rejon,
     import_row,
 )
+from zpo_tracker.normalizacja import REJON_NIEZNANY
 
 
 @pytest.fixture
@@ -56,6 +58,36 @@ def test_get_or_create_kurier_reuses_existing(conn):
     kid1 = get_or_create_kurier(conn, "Jan Kowalski")
     kid2 = get_or_create_kurier(conn, "Jan Kowalski")
     assert kid1 == kid2
+
+
+# --- get_or_create_rejon: normalizuj_rejon na wejściu, nigdy nie zwraca None ---
+
+def test_get_or_create_rejon_tworzy_nowy(conn):
+    rid = get_or_create_rejon(conn, "WA87")
+    row = conn.execute("SELECT kod FROM rejony WHERE id=?", (rid,)).fetchone()
+    assert row[0] == "WA87"
+
+
+def test_get_or_create_rejon_reuzywa_istniejacego(conn):
+    rid1 = get_or_create_rejon(conn, "WA87")
+    rid2 = get_or_create_rejon(conn, "WA87")
+    assert rid1 == rid2
+
+
+def test_get_or_create_rejon_puste_daje_wpis_nieznany_nie_none(conn):
+    # dawniej: None, brak wpisu w rejony, rejon_id transakcji = NULL.
+    # teraz: kanoniczny wpis "???" - zawsze jest CO pokazać w podglądzie/eksporcie
+    rid = get_or_create_rejon(conn, None)
+    assert rid is not None
+    row = conn.execute("SELECT kod FROM rejony WHERE id=?", (rid,)).fetchone()
+    assert row[0] == REJON_NIEZNANY
+
+
+def test_get_or_create_rejon_smieciowe_wartosci_dzielą_ten_sam_wpis(conn):
+    rid1 = get_or_create_rejon(conn, "-")
+    rid2 = get_or_create_rejon(conn, "n/a")
+    rid3 = get_or_create_rejon(conn, "  ")
+    assert rid1 == rid2 == rid3
 
 
 # --- get_or_create_punkt: sedno logiki, z realnym przypadkiem z danych ---

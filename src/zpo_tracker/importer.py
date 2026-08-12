@@ -9,6 +9,8 @@ Zasady wynikające z analizy realnego pliku (2026-08-07-snapshot-ZPO):
 """
 from datetime import date
 
+from zpo_tracker.normalizacja import normalizuj_rejon
+
 
 def parse_quantity(value):
     """Zamienia wartość komórki na int albo None. Obsługuje spację jako pusty wpis."""
@@ -35,8 +37,12 @@ def get_or_create_kurier(conn, imie_nazwisko):
 
 
 def get_or_create_rejon(conn, kod):
-    if not kod:
-        return None
+    """
+    Nigdy nie zwraca None - pusty/śmieciowy kod normalizuje się do
+    kanonicznego wpisu REJON_NIEZNANY ("???"), więc podgląd i eksport
+    zawsze mają CO pokazać zamiast pustej komórki (normalizacja.py).
+    """
+    kod = normalizuj_rejon(kod)
     row = conn.execute("SELECT id FROM rejony WHERE kod = ?", (kod,)).fetchone()
     if row:
         return row[0]

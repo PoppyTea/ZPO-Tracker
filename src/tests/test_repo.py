@@ -56,13 +56,17 @@ def test_zapisz_bloki_laczy_wyniki_z_kilku_blokow(conn):
     assert conn.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0] == 3
 
 
-def test_zapisz_blok_z_nieznanym_rejonem_zapisuje_null(conn):
+def test_zapisz_blok_z_nieznanym_rejonem_zapisuje_wpis_kanoniczny(conn):
+    # get_or_create_rejon nie zwraca już None dla pustego kodu - dostaje
+    # wpis "???" (normalizuj_rejon), więc rejon_id NIE jest NULL
+    from zpo_tracker.normalizacja import REJON_NIEZNANY
     blok = _blok(rejon=None, komentarz="rejon nieznany, okolice Legionowa")
     repo.zapisz_blok(conn, blok)
     row = conn.execute(
-        "SELECT rejon_id, komentarz FROM transakcje LIMIT 1"
+        "SELECT r.kod, t.komentarz FROM transakcje t"
+        " JOIN rejony r ON r.id = t.rejon_id LIMIT 1"
     ).fetchone()
-    assert row[0] is None
+    assert row[0] == REJON_NIEZNANY
     assert row[1] == "rejon nieznany, okolice Legionowa"
 
 
