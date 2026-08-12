@@ -9,7 +9,9 @@ import openpyxl
 import pytest
 
 from zpo_tracker import repo, eksport
+from zpo_tracker.eksport import nazwa_arkusza
 from zpo_tracker.importer import import_row
+from zpo_tracker.normalizacja import REJON_NIEZNANY
 
 REALNA_PROBKA = (
     Path(__file__).resolve().parent.parent.parent
@@ -121,3 +123,27 @@ def test_round_trip_import_export_na_realnych_danych(conn, tmp_path):
         assert isinstance(row[5].value, int)            # ilosc_total
         if row[7].value is not None:                    # PNI ZPO
             assert isinstance(row[7].value, int)
+
+
+def test_round_trip_rejon_smieciowy_eksportuje_sie_jako_kanoniczny(conn, tmp_path):
+    # realna próbka ma 0 śmieciowych rejonów (patrz plan 0.1-alpha.3.1,
+    # sekcja Weryfikacja) - dowodzi tylko braku regresji, nie samej
+    # normalizacji. Fiksturka syntetyczna dowodzi, że "???" faktycznie
+    # przechodzi przez cały łańcuch import -> zapis -> export.
+    wiersz = {
+        "data": date(2026, 8, 10), "Kurier": "Kowalski Jan",
+        " Pełna Nazwa Nadawcy": "Żabka", "Adres odbioru dla wszystkich nadawców": "Odkryta 24",
+        "Rejon": "-", "Wykonawca": "Koli", "PNI ZPO": "228648",
+        " Wpisujemy łączną liczbę odebranych Pocztexów": 3,
+        " Wpisujemy   w tym liczbę z Zewnetrznych Punktów Odbiorów ": 3,
+    }
+    wynik = import_row(conn, wiersz)
+    assert not wynik["skipped"]
+
+    sciezka = tmp_path / "export.xlsx"
+    eksport.eksportuj_miesiac(conn, 2026, 8, sciezka)
+
+    ws = openpyxl.load_workbook(sciezka)[nazwa_arkusza(2026, 8)]
+    wiersz_eksportu = next(ws.iter_rows(min_row=2, max_row=2))
+    indeks_rejonu = eksport.NAGLOWKI.index("Rejon")
+    assert wiersz_eksportu[indeks_rejonu].value == REJON_NIEZNANY
