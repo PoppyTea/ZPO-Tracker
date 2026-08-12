@@ -175,11 +175,14 @@ def test_zapisz_z_formularza_tworzy_wpis_w_dzienniku_z_migawka(tmp_path):
 
         wprowadzanie.zapisz()
 
+        # start aplikacji sam robi jeden wpis (naprawa_danych, patrz
+        # test_start_aplikacji_naprawia_dane_i_loguje_operacje) - stąd
+        # szukamy KONKRETNEGO wpisu, nie zakładamy, że jest jedyny
         wpisy = dziennik.wczytaj_operacje(app.katalog_danych)
-        assert len(wpisy) == 1
-        assert wpisy[0]["rodzaj"] == "zapis_blankietu"
-        assert wpisy[0]["liczba_wierszy"] == 1
-        assert len(kopie.lista_migawek(app.katalog_danych)) == 1
+        wpis_zapisu = wpisy[-1]
+        assert wpis_zapisu["rodzaj"] == "zapis_blankietu"
+        assert wpis_zapisu["liczba_wierszy"] == 1
+        assert len(kopie.lista_migawek(app.katalog_danych)) == len(wpisy)
     finally:
         app.destroy()
         dziennik.odepnij()
@@ -195,9 +198,55 @@ def test_dodanie_do_slownika_tworzy_wpis_w_dzienniku(tmp_path):
         podzakladka_kurierzy.var_nowy.set("Nowak Piotr")
         podzakladka_kurierzy.dodaj()
 
+        # start aplikacji sam robi jeden wpis (naprawa_danych) - szukamy
+        # ostatniego, nie zakładamy że jest jedyny
         wpisy = dziennik.wczytaj_operacje(app.katalog_danych)
-        assert len(wpisy) == 1
-        assert wpisy[0]["rodzaj"] == "dodaj_slownik"
+        assert wpisy[-1]["rodzaj"] == "dodaj_slownik"
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_start_aplikacji_naprawia_dane_i_loguje_operacje(tmp_path):
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik
+    from zpo_tracker.normalizacja import REJON_NIEZNANY
+
+    # baza sprzed tej wersji: rejon "-" zamiast kanonicznego "???"
+    sciezka = tmp_path / "test.db"
+    przygotowanie = repo.polacz(str(sciezka))
+    repo.utworz_schemat(przygotowanie)
+    przygotowanie.execute("DELETE FROM rejony")
+    przygotowanie.execute("INSERT INTO rejony (kod) VALUES ('-')")
+    przygotowanie.close()
+
+    app = Aplikacja(sciezka_bazy=str(sciezka))
+    try:
+        kody = [r[0] for r in app.conn.execute("SELECT kod FROM rejony")]
+        assert kody == [REJON_NIEZNANY]
+
+        wpisy = dziennik.wczytaj_operacje(app.katalog_danych)
+        assert any(w["rodzaj"] == "naprawa_danych" for w in wpisy)
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_start_aplikacji_przezywa_awarie_naprawy_danych(tmp_path, monkeypatch):
+    # naprawa danych NIE może zablokować startu aplikacji na stałe -
+    # użytkownik bez uprawnień administratora i bez konsoli nie ma jak
+    # tego obejść, gdyby awaria wystąpiła przy KAŻDYM uruchomieniu
+    from zpo_tracker.gui import app as app_modul
+    from zpo_tracker import dziennik, repo as repo_modul
+
+    def _wybuchnij(conn):
+        raise RuntimeError("awaria symulowana w naprawie danych")
+
+    monkeypatch.setattr(repo_modul, "napraw_dane", _wybuchnij)
+
+    app = app_modul.Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        assert app.zakladka_przeglad is not None  # okno jednak powstało
     finally:
         app.destroy()
         dziennik.odepnij()
@@ -227,7 +276,10 @@ def test_start_aplikacji_przycina_stare_migawki(tmp_path):
 
     app = Aplikacja(sciezka_bazy=sciezka)
     try:
-        assert len(kopie.lista_migawek(katalog)) == 1
+        # 1 z dwóch starych (przycięte do kubełka "1-3 dni") + 1 świeża
+        # migawka z naprawy_danych, która sama biegnie PRZED przycinaniem
+        # (patrz app.py) - wiek ~0 dni, więc nigdy nie jest przycinana
+        assert len(kopie.lista_migawek(katalog)) == 2
     finally:
         app.destroy()
         dziennik.odepnij()

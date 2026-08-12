@@ -5,6 +5,7 @@ w importer.py (reużywana też przy imporcie .xlsx) - repo.py dokłada to,
 czego sam import nie potrzebuje: komentarz per blok i odczyt z nazwami.
 """
 import itertools
+import logging
 import sqlite3
 import sys
 import uuid
@@ -13,12 +14,15 @@ from datetime import datetime
 from pathlib import Path
 
 from zpo_tracker.importer import (
+    get_or_create_firma_zpo,
     get_or_create_kurier,
     get_or_create_punkt,
     get_or_create_rejon,
     get_or_create_wykonawca,
 )
-from zpo_tracker.normalizacja import REJON_NIEZNANY, klucz_bialych_znakow, normalizuj_rejon
+from zpo_tracker.normalizacja import (
+    REJON_NIEZNANY, klucz_bialych_znakow, klucz_rozmyty, normalizuj_rejon,
+)
 
 
 def _resolve_schema_path(frozen=None, meipass=None):
@@ -149,6 +153,111 @@ def migruj(conn):
             " ON transakcje(uuid)")
 
         conn.execute(f"PRAGMA user_version = {WERSJA_SCHEMATU}")
+
+
+def napraw_dane(conn):
+    """
+    Naprawa rozjazdów danych sprzed reguły "???" (rejony) i sprzed poprawki
+    firmy_zpo/punkty.nadawca (patrz importer.py, zmien_nazwe_w_slowniku) -
+    BEZWARUNKOWA i idempotentna jak `migruj`, ale CELOWO POZA `migruj`:
+
+    - `migruj` biegnie w konstruktorze `Aplikacja.__init__`, a `main()`
+      łapie wyłącznie `NiezgodnaWersjaSchematu` - każdy inny wyjątek w
+      `migruj` uniemożliwiałby start aplikacji PRZY KAŻDYM kolejnym
+      uruchomieniu, u użytkownika bez uprawnień administratora i bez
+      konsoli. Naprawa danych ma więcej sposobów, żeby pójść nie tak, niż
+      dodanie kolumny - nie może dzielić z migracją struktury tego samego,
+      nieprzepuszczającego błędów miejsca w kodzie.
+    - `migruj` deklaruje wprost "Nie rusza danych - wyłącznie struktura"
+      (patrz wyżej) - to nie jest miejsce na naprawę danych.
+    - Naprawa w `migruj` odpaliłaby się raz (bramkowana numerem wersji) -
+      po scaleniu (`scalanie.py`) z bazą, która sama tej naprawy jeszcze
+      nie przeszła, rozjazd wróciłby i nic by go już nie naprawiło.
+
+    Wołający (app.py) jest odpowiedzialny za migawkę PRZED wywołaniem
+    (przez `operacje.wykonaj` - to największa jednorazowa mutacja danych
+    w tym wydaniu) i za degradację "nie naprawiono, pracuj dalej" przy
+    wyjątku - nie za przerwanie startu aplikacji.
+    """
+    with transakcja(conn):
+        _napraw_rejony(conn)
+        _napraw_firmy_zpo(conn)
+
+
+def _napraw_rejony(conn):
+    kanoniczny_id = get_or_create_rejon(conn, None)
+    for row in conn.execute("SELECT id, kod FROM rejony").fetchall():
+        if row["id"] == kanoniczny_id:
+            continue
+        if normalizuj_rejon(row["kod"]) == REJON_NIEZNANY:
+            conn.execute(
+                "UPDATE transakcje SET rejon_id = ? WHERE rejon_id = ?",
+                (kanoniczny_id, row["id"]),
+            )
+            conn.execute("DELETE FROM rejony WHERE id = ?", (row["id"],))
+    conn.execute(
+        "UPDATE transakcje SET rejon_id = ? WHERE rejon_id IS NULL", (kanoniczny_id,))
+
+
+def _napraw_firmy_zpo(conn):
+    # 1. punkty z PNI bez firma_zpo_id - prawdopodobnie no-op już dziś
+    # (get_or_create_punkt zawsze go ustawia, gdy PNI jest niepuste), ale
+    # tania i bezpieczna gwarancja na wypadek stanu z innej ścieżki zapisu
+    for p in conn.execute(
+        "SELECT id, nadawca FROM punkty WHERE pni_zpo IS NOT NULL AND firma_zpo_id IS NULL"
+    ).fetchall():
+        firma_id = get_or_create_firma_zpo(conn, p["nadawca"])
+        conn.execute("UPDATE punkty SET firma_zpo_id = ? WHERE id = ?", (firma_id, p["id"]))
+
+    # 2. rozjazd nazwa firmy <-> nadawca jej punktów (bug naprawiony w
+    # importer.py/repo.zmien_nazwe_w_slowniku - to naprawa STARYCH danych)
+    for firma in conn.execute("SELECT id, nazwa FROM firmy_zpo").fetchall():
+        nadawcy = [r[0] for r in conn.execute(
+            "SELECT DISTINCT nadawca FROM punkty WHERE firma_zpo_id = ?", (firma["id"],)
+        ).fetchall()]
+        if len(nadawcy) == 1 and nadawcy[0] != firma["nazwa"]:
+            _przemianuj_lub_scal_firme(conn, firma["id"], nadawcy[0])
+        elif len(nadawcy) > 1:
+            logging.getLogger("zpo_tracker").warning(
+                "napraw_dane: firma_zpo id=%s (%r) ma punkty z %d różnymi "
+                "nadawcami %r - nie rozstrzygnięto automatycznie, wymaga człowieka",
+                firma["id"], firma["nazwa"], len(nadawcy), nadawcy,
+            )
+
+    # 3. osierocone firmy (żaden punkt) - kasujemy TYLKO gdy nazwa po
+    # klucz_rozmyty pokrywa się z inną, UŻYWANĄ firmą (artefakt literówki
+    # z importu); o unikalnej nazwie mogła zostać dodana ręcznie w
+    # Słownikach zanim powstał pierwszy punkt - tej nie ruszamy
+    wszystkie = conn.execute("SELECT id, nazwa FROM firmy_zpo").fetchall()
+    uzywane_id = {
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT firma_zpo_id FROM punkty WHERE firma_zpo_id IS NOT NULL"
+        ).fetchall()
+    }
+    uzywane_klucze = {
+        klucz_rozmyty(nazwa) for id_, nazwa in wszystkie if id_ in uzywane_id
+    }
+    for id_, nazwa in wszystkie:
+        if id_ not in uzywane_id and klucz_rozmyty(nazwa) in uzywane_klucze:
+            conn.execute("DELETE FROM firmy_zpo WHERE id = ?", (id_,))
+
+
+def _przemianuj_lub_scal_firme(conn, firma_id, nowa_nazwa):
+    kolizja = conn.execute(
+        "SELECT id FROM firmy_zpo WHERE nazwa = ? AND id != ?", (nowa_nazwa, firma_id)
+    ).fetchone()
+    if kolizja is None:
+        conn.execute("UPDATE firmy_zpo SET nazwa = ? WHERE id = ?", (nowa_nazwa, firma_id))
+        return
+    # kolizja UNIQUE: NAJPIERW przepnij FK punktów na wygrywający wiersz,
+    # DOPIERO POTEM usuń przegrywający - odwrotna kolejność łamie FK
+    # (PRAGMA foreign_keys = ON)
+    wygrywajacy_id = kolizja[0]
+    conn.execute(
+        "UPDATE punkty SET firma_zpo_id = ? WHERE firma_zpo_id = ?",
+        (wygrywajacy_id, firma_id),
+    )
+    conn.execute("DELETE FROM firmy_zpo WHERE id = ?", (firma_id,))
 
 
 def sprawdz_zgodnosc_wersji(conn):
