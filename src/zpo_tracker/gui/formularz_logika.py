@@ -7,7 +7,7 @@ nie decyduje o nich.
 from zpo_tracker.models import Blankiet, WierszBlankietu
 
 
-def _wiersz_pusty(surowy):
+def wiersz_pusty(surowy):
     """Pusty wiersz-placeholder (np. niewypełniony dodatkowy wiersz)."""
     return not (surowy.get("nadawca") or "").strip() and not (surowy.get("adres") or "").strip()
 
@@ -19,7 +19,7 @@ def zbuduj_blankiet(kurier, data, wykonawca, dane_wierszy):
     albo None, jeśli żaden wiersz nie został wypełniony (może rzucić
     pydantic.ValidationError - to jedyne źródło komunikatów o błędach).
     """
-    wiersze_surowe = [w for w in dane_wierszy if not _wiersz_pusty(w)]
+    wiersze_surowe = [w for w in dane_wierszy if not wiersz_pusty(w)]
     if not wiersze_surowe:
         return None
     wiersze = [WierszBlankietu(**w) for w in wiersze_surowe]

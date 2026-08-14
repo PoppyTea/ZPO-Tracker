@@ -15,11 +15,16 @@ from zpo_tracker import dziennik, kopie, repo
 
 
 def wykonaj(conn, katalog_danych, rodzaj, etykieta, funkcja,
-            args=(), kwargs=None, licz_wiersze=None):
+            args=(), kwargs=None, licz_wiersze=None, licz_pominiete=None):
     """
     Migawka PRZED wywołaniem `funkcja(conn, *args, **kwargs)`, potem wpis
     w dzienniku. Migawka poprzedza wykonanie, nie następuje po nim -
     inaczej cofnięcie przywracałoby stan już zepsuty przez tę samą operację.
+
+    `licz_pominiete` (0.1-alpha.3.2): jak `licz_wiersze`, ale dla liczby
+    wierszy POMINIĘTYCH (np. `licz_pominiete_wiersze` dla wyniku
+    `repo.zapisz_blankiet`) - bez tego wpis "wszystkie wiersze pominięte
+    jako duplikaty" wygląda w dzienniku identycznie jak pełny sukces.
 
     Wyjątek z `funkcja` jest logowany (wynik="blad") i podniesiony dalej -
     migawka sprzed operacji zostaje, żeby dziennik pozostał kompletnym
@@ -43,6 +48,7 @@ def wykonaj(conn, katalog_danych, rodzaj, etykieta, funkcja,
     dziennik.zapisz_operacje(
         katalog_danych, seq=seq, rodzaj=rodzaj, etykieta=etykieta,
         liczba_wierszy=licz_wiersze(wynik) if licz_wiersze else None,
+        liczba_pominietych=licz_pominiete(wynik) if licz_pominiete else None,
         wersja_schematu=repo.wersja_schematu(conn),
         plik_migawki=str(plik_migawki), wynik="ok", czas=teraz,
     )
@@ -120,3 +126,8 @@ def znajdz_najblizsze_migawki(katalog_danych, seq_docelowy):
 def licz_zapisane_wiersze(wyniki_zapisz_blankiet):
     """Helper dla `licz_wiersze` przy `repo.zapisz_blankiet` - pomija duplikaty."""
     return sum(1 for w in wyniki_zapisz_blankiet if not w["pominieto"])
+
+
+def licz_pominiete_wiersze(wyniki_zapisz_blankiet):
+    """Helper dla `licz_pominiete` przy `repo.zapisz_blankiet` (0.1-alpha.3.2)."""
+    return sum(1 for w in wyniki_zapisz_blankiet if w["pominieto"])

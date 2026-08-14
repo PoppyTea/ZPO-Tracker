@@ -136,23 +136,27 @@ def test_nowy_adres_nadawca_czerwony_i_w_nawigacji(conn):
 # --- dedukuj_wiersz: rejon - historia punktu ---
 
 def test_rejon_wiele_w_historii_nie_wypelnia(conn):
+    # 0.1-alpha.3.2: rejon nie jest już ręcznie wpisywalne - historia
+    # sprzeczna zostaje po prostu pusta/readonly, bez listy kandydatów do
+    # ręcznego wyboru (patrz docstring dedukuj_wiersz)
     repo.zapisz_blankiet(conn, _blok(rejon="WA87", data=date(2026, 8, 1)))
     repo.zapisz_blankiet(conn, _blok(rejon="WA88", data=date(2026, 8, 2)))
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Odkryta 24")
-    assert wynik.pola["rejon"].stan == "pomaranczowy"
+    assert wynik.pola["rejon"].stan == "szary"
+    assert wynik.pola["rejon"].aktywne is False
     assert wynik.pola["rejon"].wartosc is None
-    assert set(wynik.pola["rejon"].kandydaci) == {"WA87", "WA88"}
 
 
 def test_rejon_punkt_bez_historii_transakcji(conn):
-    # punkt istnieje (przez get_or_create_punkt), ale nigdy nie było
-    # transakcji - nic do zdedukowania, ale pole aktywne, żeby dało się uzupełnić
+    # 0.1-alpha.3.2: punkt istnieje (przez get_or_create_punkt), ale nigdy
+    # nie było transakcji - brak historii zostaje szare/readonly (zapis
+    # rozstrzygnie na kanoniczne "???"), NIE aktywuje się do ręcznego wpisu
     from zpo_tracker.importer import get_or_create_punkt
     get_or_create_punkt(conn, "Żabka", "Świeży Adres 1", "999999")
     wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Świeży Adres 1")
     assert wynik.punkt_id is not None
-    assert wynik.pola["rejon"].stan == "pomaranczowy"
-    assert wynik.pola["rejon"].aktywne is True
+    assert wynik.pola["rejon"].stan == "szary"
+    assert wynik.pola["rejon"].aktywne is False
 
 
 # --- dedukuj_wiersz: adres dopasowany rozmyto (repo.znajdz_punkty_po_adresie) ---
@@ -298,6 +302,34 @@ def test_kolejnosc_nieznany_tryb_rzuca(conn):
     naglowek = dedukcja.dedukuj_naglowek(conn, kurier="Kowalski Jan", data=date(2026, 8, 11))
     with pytest.raises(NotImplementedError):
         dedukcja.kolejnosc_pol("polauto", naglowek, [])
+
+
+# --- czy_koniec_ostatniego_wiersza (0.1-alpha.3.2: auto-dodawanie wiersza) ---
+
+def test_czy_koniec_ostatniego_wiersza_dla_ostatniego_klucza():
+    kolejnosc = [("naglowek", "kurier"), ("wiersz", 0, "adres"), ("wiersz", 0, "ilosc_total")]
+    assert dedukcja.czy_koniec_ostatniego_wiersza(
+        kolejnosc, ("wiersz", 0, "ilosc_total")) is True
+
+
+def test_czy_koniec_ostatniego_wiersza_falsz_dla_srodka():
+    kolejnosc = [("naglowek", "kurier"), ("wiersz", 0, "adres"), ("wiersz", 0, "ilosc_total")]
+    assert dedukcja.czy_koniec_ostatniego_wiersza(
+        kolejnosc, ("wiersz", 0, "adres")) is False
+
+
+def test_czy_koniec_ostatniego_wiersza_falsz_dla_wczesniejszego_wiersza():
+    # dwa wiersze - koniec PIERWSZEGO nie jest końcem CAŁEJ sekwencji
+    kolejnosc = [("wiersz", 0, "adres"), ("wiersz", 0, "ilosc_total"),
+                 ("wiersz", 1, "adres"), ("wiersz", 1, "ilosc_total")]
+    assert dedukcja.czy_koniec_ostatniego_wiersza(
+        kolejnosc, ("wiersz", 0, "ilosc_total")) is False
+    assert dedukcja.czy_koniec_ostatniego_wiersza(
+        kolejnosc, ("wiersz", 1, "ilosc_total")) is True
+
+
+def test_czy_koniec_ostatniego_wiersza_pusta_kolejnosc():
+    assert dedukcja.czy_koniec_ostatniego_wiersza([], ("wiersz", 0, "adres")) is False
 
 
 # --- przesun_w_kolejnosci: Tab/Enter (+1) i Shift-Tab/ISO_Left_Tab (-1) ---

@@ -155,3 +155,45 @@ def test_event_generate_return_rowna_sie_tab(zakladka, root):
     zakladka.pole_data.widget_pola.event_generate("<Return>")
     root.update()
     assert root.focus_get() is zakladka.wiersze[0].widget_pola("adres")
+
+
+# --- 0.1-alpha.3.2: auto-dodawanie wiersza z ostatniego NIEPUSTEGO wiersza ---
+
+def test_tab_z_konca_niepustego_ostatniego_wiersza_tworzy_nowy(zakladka, root):
+    zakladka.wiersze[1].var_adres.set("Odkryta 24")
+    zakladka.wiersze[1].var_ilosc_total.set("3")
+    root.update()
+    liczba_przed = len(zakladka.wiersze)
+
+    zakladka._idz_dalej_wiersz(zakladka.wiersze[1], "ilosc_total")
+    root.update()
+
+    assert len(zakladka.wiersze) == liczba_przed + 1
+    assert root.focus_get() is zakladka.wiersze[-1].widget_pola("adres")
+
+
+def test_tab_z_konca_pustego_ostatniego_wiersza_wciaz_zawija(zakladka, root):
+    # oba wiersze puste (fixture domyślny) - zachowanie sprzed 3.2 zostaje,
+    # patrz test_kolejnosc_poczatkowa_pomija_puste_pola_dedukowane
+    liczba_przed = len(zakladka.wiersze)
+
+    zakladka._idz_dalej_wiersz(zakladka.wiersze[1], "ilosc_total")
+    root.update()
+
+    assert len(zakladka.wiersze) == liczba_przed
+    assert root.focus_get() is zakladka.pole_kurier.widget_pola.entry
+
+
+def test_tab_ze_srodka_niepustego_wiersza_nie_tworzy_nowego(zakladka, root):
+    # wypełniony PIERWSZY (nie ostatni) wiersz - koniec JEGO pól to nie
+    # koniec całej sekwencji, więc auto-dodawanie nie ma tu zastosowania
+    zakladka.wiersze[0].var_adres.set("Odkryta 24")
+    zakladka.wiersze[0].var_ilosc_total.set("3")
+    root.update()
+    liczba_przed = len(zakladka.wiersze)
+
+    zakladka._idz_dalej_wiersz(zakladka.wiersze[0], "ilosc_total")
+    root.update()
+
+    assert len(zakladka.wiersze) == liczba_przed
+    assert root.focus_get() is zakladka.wiersze[1].widget_pola("adres")

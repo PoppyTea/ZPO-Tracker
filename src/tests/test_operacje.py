@@ -92,6 +92,24 @@ def test_wykonaj_bez_licz_wiersze_zostawia_liczbe_wierszy_none(conn, tmp_path):
     assert wpisy[0]["liczba_wierszy"] is None
 
 
+def test_wykonaj_uzywa_licz_pominiete_do_liczby_pominietych_w_dzienniku(conn, tmp_path):
+    operacje.wykonaj(
+        conn, tmp_path, rodzaj="test", etykieta="e",
+        funkcja=lambda conn: [1, 2, 3], licz_pominiete=len,
+    )
+    wpisy = dziennik.wczytaj_operacje(tmp_path)
+    assert wpisy[0]["liczba_pominietych"] == 3
+
+
+def test_wykonaj_bez_licz_pominiete_zostawia_none(conn, tmp_path):
+    operacje.wykonaj(
+        conn, tmp_path, rodzaj="test", etykieta="e",
+        funkcja=_wstaw_kuriera, args=("Kowalski Jan",),
+    )
+    wpisy = dziennik.wczytaj_operacje(tmp_path)
+    assert wpisy[0]["liczba_pominietych"] is None
+
+
 def test_wykonaj_przy_wyjatku_podnosi_go_dalej(conn, tmp_path):
     def _wybuchnij(conn):
         raise ValueError("awaria testowa")
@@ -270,3 +288,12 @@ def test_licz_zapisane_wiersze_pomija_pominiete():
         {"id": 3, "pominieto": False},
     ]
     assert operacje.licz_zapisane_wiersze(wyniki) == 2
+
+
+def test_licz_pominiete_wiersze_liczy_wylacznie_pominiete():
+    wyniki = [
+        {"id": 1, "pominieto": False},
+        {"id": None, "pominieto": True},
+        {"id": None, "pominieto": True},
+    ]
+    assert operacje.licz_pominiete_wiersze(wyniki) == 2

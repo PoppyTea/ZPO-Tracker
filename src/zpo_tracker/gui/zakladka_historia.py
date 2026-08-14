@@ -20,6 +20,7 @@ KOLUMNY = [
     ("rodzaj", "Rodzaj", 140),
     ("etykieta", "Opis", 280),
     ("liczba_wierszy", "Wierszy", 70),
+    ("liczba_pominietych", "Pominięto", 80),
     ("wynik", "Wynik", 70),
 ]
 

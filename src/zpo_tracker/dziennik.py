@@ -34,9 +34,12 @@ NAZWA_LOGU = "zpo.log"
 NAZWA_DZIENNIKA = "operacje.jsonl"
 NAZWA_AWARII = "awaria.log"
 
-# Zamknięty zestaw pól wpisu - patrz docstring modułu.
+# Zamknięty zestaw pól wpisu - patrz docstring modułu. `liczba_pominietych`
+# (0.1-alpha.3.2): licznik, nie narusza kontraktu no-PII - bez niego zapis
+# wszystkich-duplikatów formularza (zakladka_wprowadzanie.py) wyglądał w
+# dzienniku identycznie jak pełny sukces ("N wierszy, wynik=ok").
 POLA_WPISU = ("seq", "czas", "rodzaj", "etykieta", "liczba_wierszy",
-              "wersja_schematu", "plik_migawki", "wynik")
+              "liczba_pominietych", "wersja_schematu", "plik_migawki", "wynik")
 
 _NAZWA_LOGGERA = "zpo_tracker"
 _MAX_BAJTOW = 1_000_000
@@ -142,8 +145,8 @@ def _wlacz_faulthandler(sciezka):
 # --- dziennik operacji (JSONL) ---
 
 def zapisz_operacje(katalog, *, seq, rodzaj, etykieta, liczba_wierszy=None,
-                    wersja_schematu=None, plik_migawki=None, wynik="ok",
-                    czas=None):
+                    liczba_pominietych=None, wersja_schematu=None,
+                    plik_migawki=None, wynik="ok", czas=None):
     """
     Dopisuje jeden wpis do dziennika. Parametry są **nazwane i jawne**, nie
     `**kwargs` - dzięki temu strukturalnie nie da się wpisać tu nazwiska
@@ -157,6 +160,7 @@ def zapisz_operacje(katalog, *, seq, rodzaj, etykieta, liczba_wierszy=None,
         "rodzaj": rodzaj,
         "etykieta": etykieta,
         "liczba_wierszy": liczba_wierszy,
+        "liczba_pominietych": liczba_pominietych,
         "wersja_schematu": wersja_schematu,
         "plik_migawki": plik_migawki,
         "wynik": wynik,

@@ -146,6 +146,24 @@ def test_wpis_operacji_ma_tylko_zadeklarowane_pola(katalog):
     assert set(wpis) == set(dziennik.POLA_WPISU)
 
 
+def test_wpis_operacji_przyjmuje_liczbe_pominietych(katalog):
+    # 0.1-alpha.3.2: wpis wszystkich-duplikatów przestaje wyglądać jak
+    # sukces - patrz zakladka_wprowadzanie.py
+    dziennik.skonfiguruj(katalog)
+    wpis = dziennik.zapisz_operacje(
+        katalog, seq=1, rodzaj="zapis_blankietu", etykieta="blok 2026-08",
+        liczba_wierszy=3, liczba_pominietych=2, wersja_schematu=1,
+    )
+    assert wpis["liczba_pominietych"] == 2
+
+
+def test_wpis_operacji_bez_liczby_pominietych_jest_none(katalog):
+    dziennik.skonfiguruj(katalog)
+    wpis = dziennik.zapisz_operacje(
+        katalog, seq=1, rodzaj="import", etykieta="x", wersja_schematu=1)
+    assert wpis["liczba_pominietych"] is None
+
+
 def test_odczyt_zwraca_wpisy_w_kolejnosci_seq(katalog):
     dziennik.skonfiguruj(katalog)
     for s in (3, 1, 2):
