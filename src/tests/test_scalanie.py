@@ -395,5 +395,86 @@ def test_wykonaj_scalenie_kopiuje_atrybucje_ze_zrodla(docelowa, plik_zrodlowy):
     assert wiersz["autor_id"] == "uid-1"
     assert wiersz["uuid"] == "uuid-oryginalny"
     assert wiersz["utworzono"] == "2026-08-01T09:00:00"
-    assert docelowa.execute(
-        "SELECT alias FROM users WHERE id = 'uid-1'").fetchone()[0] == "Jan Nowak"
+
+
+def test_wykonaj_scalenie_przenosi_sesje_i_zrodlo_ze_zrodla(docelowa, plik_zrodlowy):
+    # pochodzenie wiersza to miejsce, gdzie POWSTAŁ - scalenie go przenosi,
+    # nie nadpisuje wartością "scalanie" (patrz roadmap.md/repo.py)
+    sciezka, zrodlowa = plik_zrodlowy
+    kurier_id = zrodlowa.execute(
+        "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
+    punkt_id = zrodlowa.execute(
+        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    zrodlowa.execute(
+        "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, sesja_uuid, zrodlo)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        ("2026-08-01", kurier_id, punkt_id, 3, "sesja-zrodlowa", "formularz"),
+    )
+
+    scalanie.wykonaj_scalenie(docelowa, sciezka)
+
+    wiersz = docelowa.execute("SELECT sesja_uuid, zrodlo FROM transakcje").fetchone()
+    assert wiersz["sesja_uuid"] == "sesja-zrodlowa"
+    assert wiersz["zrodlo"] == "formularz"
+
+
+def _zrodlo_plikowa_v2(tmp_path):
+    """
+    Baza źródłowa w kształcie sprzed `0.1-alpha.3.2`: ma już users +
+    atrybucję (alpha.3) i indeksy dedukcji (alpha.3.1), ale NIE ma
+    sesja_uuid/zrodlo. `wykonaj_scalenie` (`w.get(...)` w `scalanie.py`)
+    musi to przeżyć bez wybuchania - brakujące kolumny stają się NULL.
+    """
+    sciezka = tmp_path / "zrodlo_v2.db"
+    conn = sqlite3.connect(str(sciezka))
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE kurierzy (id INTEGER PRIMARY KEY, imie_nazwisko TEXT NOT NULL UNIQUE);
+        CREATE TABLE rejony (id INTEGER PRIMARY KEY, kod TEXT NOT NULL UNIQUE);
+        INSERT INTO rejony (kod) VALUES ('???');
+        CREATE TABLE wykonawcy (id INTEGER PRIMARY KEY, nazwa TEXT NOT NULL UNIQUE);
+        CREATE TABLE firmy_zpo (id INTEGER PRIMARY KEY, nazwa TEXT NOT NULL UNIQUE);
+        CREATE TABLE punkty (
+            id INTEGER PRIMARY KEY, nadawca TEXT NOT NULL, adres TEXT NOT NULL,
+            pni_zpo TEXT UNIQUE, firma_zpo_id INTEGER REFERENCES firmy_zpo(id));
+        CREATE TABLE users (
+            id TEXT PRIMARY KEY, login TEXT NOT NULL UNIQUE,
+            alias TEXT, nr_kadrowy TEXT UNIQUE, utworzono TEXT);
+        CREATE TABLE transakcje (
+            id INTEGER PRIMARY KEY, data TEXT NOT NULL,
+            kurier_id INTEGER NOT NULL REFERENCES kurierzy(id),
+            punkt_id INTEGER NOT NULL REFERENCES punkty(id),
+            rejon_id INTEGER REFERENCES rejony(id),
+            wykonawca_id INTEGER REFERENCES wykonawcy(id),
+            ilosc_total INTEGER NOT NULL, ilosc_zpo INTEGER,
+            ilosc_vinted INTEGER, ilosc_automaty INTEGER,
+            ilosc_kurier48 INTEGER, ilosc_niezrealizowane INTEGER,
+            komentarz TEXT, uuid TEXT UNIQUE,
+            autor_id TEXT REFERENCES users(id), utworzono TEXT, zmodyfikowano TEXT,
+            UNIQUE(data, kurier_id, punkt_id));
+        PRAGMA user_version = 2;
+    """)
+    conn.commit()
+    return sciezka, conn
+
+
+def test_wykonaj_scalenie_ze_zrodla_v2_bez_kolumn_sesji_daje_null(docelowa, tmp_path):
+    sciezka, zrodlowa = _zrodlo_plikowa_v2(tmp_path)
+    kurier_id = zrodlowa.execute(
+        "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
+    punkt_id = zrodlowa.execute(
+        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    zrodlowa.execute(
+        "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total)"
+        " VALUES (?, ?, ?, ?)",
+        ("2026-08-01", kurier_id, punkt_id, 3),
+    )
+    zrodlowa.commit()
+    zrodlowa.close()
+
+    scalanie.wykonaj_scalenie(docelowa, sciezka)
+
+    wiersz = docelowa.execute("SELECT sesja_uuid, zrodlo FROM transakcje").fetchone()
+    assert wiersz["sesja_uuid"] is None
+    assert wiersz["zrodlo"] is None

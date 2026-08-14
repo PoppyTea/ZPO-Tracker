@@ -42,7 +42,7 @@ def _resolve_schema_path(frozen=None, meipass=None):
 SCHEMA_PATH = _resolve_schema_path()
 
 # Musi być zgodna z `PRAGMA user_version` na końcu schema.sql - patrz tam.
-WERSJA_SCHEMATU = 2
+WERSJA_SCHEMATU = 3
 
 _licznik_savepointow = itertools.count()
 
@@ -113,6 +113,13 @@ _KOLUMNY_ATRYBUCJI = {
     "zmodyfikowano": "TEXT",
 }
 
+# Kolumny dołożone do `transakcje` w `0.1-alpha.3.2` (sesja + pochodzenie
+# wiersza) - patrz komentarz przy tych samych kolumnach w schema.sql.
+_KOLUMNY_SESJI = {
+    "sesja_uuid": "TEXT",
+    "zrodlo": "TEXT",
+}
+
 _DDL_USERS = """
 CREATE TABLE users (
     id          TEXT PRIMARY KEY,
@@ -158,6 +165,16 @@ def migruj(conn):
             "CREATE INDEX IF NOT EXISTS idx_transakcje_kurier ON transakcje(kurier_id)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_punkty_adres ON punkty(adres)")
+
+        # 0.1-alpha.3.2: sesja_uuid + zrodlo (dołożone niezależnie od
+        # _KOLUMNY_ATRYBUCJI, żeby baza w stanie pośrednim - np. tylko
+        # jedna z dwóch kolumn ręcznie dołożona - przeżyła, patrz test)
+        obecne = _kolumny(conn, "transakcje")
+        for nazwa, typ in _KOLUMNY_SESJI.items():
+            if nazwa not in obecne:
+                conn.execute(f"ALTER TABLE transakcje ADD COLUMN {nazwa} {typ}")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_transakcje_sesja ON transakcje(sesja_uuid)")
 
         conn.execute(f"PRAGMA user_version = {WERSJA_SCHEMATU}")
 
@@ -314,7 +331,7 @@ def transakcja(conn):
     conn.execute(f"RELEASE {nazwa}")
 
 
-def zapisz_blankiet(conn, blankiet, autor_id=None, teraz=None):
+def zapisz_blankiet(conn, blankiet, autor_id=None, teraz=None, sesja_uuid=None):
     """
     Zapisuje Blankiet (jeden kurier, jeden dzień) jako jedną transakcję na
     WierszBlankietu. Rejon i wykonawca liczone PER WIERSZ (0.1-alpha.3.1):
@@ -331,14 +348,17 @@ def zapisz_blankiet(conn, blankiet, autor_id=None, teraz=None):
     wewnątrz transakcji bez zmian - patrz `transakcja`.
 
     `autor_id` jest opcjonalny: atrybucja nie może być warunkiem
-    zapisania danych.
+    zapisania danych. `sesja_uuid` (0.1-alpha.3.2) grupuje wiersze
+    wpisane w tym samym uruchomieniu aplikacji - podgląd formularza
+    filtruje po niej domyślnie, patrz gui/zakladka_wprowadzanie.py.
     """
     with transakcja(conn):
         return _zapisz_blankiet_bez_transakcji(
-            conn, blankiet, autor_id=autor_id, teraz=teraz)
+            conn, blankiet, autor_id=autor_id, teraz=teraz, sesja_uuid=sesja_uuid)
 
 
-def _zapisz_blankiet_bez_transakcji(conn, blankiet, autor_id=None, teraz=None):
+def _zapisz_blankiet_bez_transakcji(conn, blankiet, autor_id=None, teraz=None,
+                                     sesja_uuid=None):
     kurier_id = get_or_create_kurier(conn, blankiet.kurier)
     wykonawca_id = get_or_create_wykonawca(conn, blankiet.wykonawca)
     teraz = teraz or datetime.now().isoformat(timespec="seconds")
@@ -354,12 +374,14 @@ def _zapisz_blankiet_bez_transakcji(conn, blankiet, autor_id=None, teraz=None):
                 """INSERT INTO transakcje
                    (data, kurier_id, punkt_id, rejon_id, wykonawca_id,
                     ilosc_total, ilosc_zpo,
-                    uuid, autor_id, utworzono, zmodyfikowano)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    uuid, autor_id, utworzono, zmodyfikowano,
+                    sesja_uuid, zrodlo)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     blankiet.data.isoformat(), kurier_id, punkt_id, rejon_id,
                     wykonawca_id, wiersz.ilosc_total, wiersz.ilosc_zpo,
                     str(uuid.uuid4()), autor_id, teraz, teraz,
+                    sesja_uuid, "formularz",
                 ),
             )
             wyniki.append({
