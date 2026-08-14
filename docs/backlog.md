@@ -31,6 +31,16 @@ jednostki pracy do wzięcia; tam co i kiedy.
       graficznego w trakcie budowy MVP (patrz `../src/AGENTS.md`)
 - [ ] Doprecyzowanie dokładnej hierarchii przynależności encji (kurier/
       rejon/wykonawca/punkt) na wypadek pełnej normalizacji v2
+- [ ] **Ujednolicona edycja wiersza z przepięciem punktu** — dziś dialog
+      edycji (`0.1-alpha.3.2`) nie pozwala zmienić nadawcy/adresu/PNI,
+      bo to inna klasa ryzyka niż poprawka daty/ilości. Docelowo ta
+      mechanika ma być niewidoczna dla użytkownika (usunięcie + ponowne
+      dodanie pod maską), ale wymaga sprzężenia z dedukcją i blokad przy
+      sprzecznościach — czyli powielenia logiki formularza, patrz `ux-ui.md`
+- [ ] **Przywrócenie wymagalności numeru kadrowego** — zdjęte w
+      `0.1-alpha.3.2`, bo pracownicy jeszcze go nie mają; pole zostało
+      w dialogu jako opcjonalne, wystarczy przywrócić sprawdzenie
+      w `uzytkownicy.wymaga_uzupelnienia`
 
 ## Infrastruktura
 
@@ -65,3 +75,20 @@ jednostki pracy do wzięcia; tam co i kiedy.
       z `kolejnosc_pol` + podświetleniem następnego pola; naprawa
       `firmy_zpo`↔`punkty.nadawca` i kanoniczny `???` dla rejonu na
       wszystkich ścieżkach zapisu, patrz `ux-ui.md`
+- [x] `0.1-alpha.3.2` — schemat v3 (`sesja_uuid`/`zrodlo`), edycja
+      i usuwanie transakcji, Przegląd jako widok poprawek (filtry, dwuklik,
+      operacje zbiorcze), poprawki formularza (podgląd sesyjny, auto-wiersz,
+      kolorowy status z powodami pominięć, rejon tylko dedukowany), nadawcy
+      bez PNI naprawialni, model zaufania importu (znacznik + odcisk SHA-256,
+      naprawa koercji PNI), `ustawienia.py`; patrz `roadmap.md`/`ux-ui.md`
+
+## Po `0.1-alpha.3.2` (kolejne wydania)
+
+- [ ] **Rejonarz** — import eksportu `.xlsx` (>400 tys. rekordów), kompresja
+      do zakresów numerów, podpięcie pod `dedukcja.dedukuj_wiersz` (jedyne
+      miejsce rozstrzygające rejon) + backfill wszystkich `???`. Do
+      rozstrzygnięcia: rejonarz vs otwarte zbiory jako źródło ADRESÓW oraz
+      moment przejścia na strukturalny adres (`normalization-v2.md`)
+- [ ] **Narzędzie naprawy starych Exceli** — osobny, jednorazowy program
+      czyszczący zaległe miesiące PRZED importem. Zbiór wejściowy jest już
+      wyznaczony: `transakcje.zrodlo IS NULL OR 'import'` (patrz schemat v3)

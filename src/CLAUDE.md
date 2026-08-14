@@ -18,6 +18,18 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
 - `importer.py` — najniższy poziom: `parse_quantity`, `get_or_create_*`,
   `import_row` (jeden wiersz `.xlsx` → SQLite). Reużywane przez
   `repo.py` i `import_orchestrator.py`, nie duplikować.
+  **`znajdz_lub_utworz_punkt_niezaufany`** (`0.1-alpha.3.2`) — OSOBNA
+  funkcja od `get_or_create_punkt`, nie flaga w tamtej: tamta obsługuje
+  ścieżkę zaufaną ORAZ scalanie baz (gdzie źródłem jest nasza własna baza)
+  i jej semantyka nie może dryfować razem z regułami zaufania importu.
+  Trzy gałęzie: (1) dokładne `(nadawca, adres)` po DOWOLNYM punkcie —
+  także z PNI, co rozwiązuje pułapkę predykatu `AND pni_zpo IS NULL`
+  (bez tego adres znany już jako punkt ZPO dostawałby drugi punkt tej samej
+  lokalizacji); (2) jeden punkt pod adresem, inny nadawca → podpięcie
+  + ostrzeżenie; (3) wiele punktów, żaden nie pasuje → NOWY punkt bez PNI
+  + ostrzeżenie, **nigdy automatyczny wybór** (adres z wieloma nadawcami
+  nie rozstrzyga się sam — patrz `dedukcja.py`; duplikat punktu jest
+  naprawialny, ciche podpięcie pod zły punkt nie).
 - `models.py` — pydantic v2. `WierszImportu` (walidacja wiersza importu,
   konwersja `datetime`→`date`, normalizacja białych znaków na
   kurier/nadawca/adres — bez tego "Michalak Maciej " ląduje jako inny
@@ -70,14 +82,45 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   zszedł z bloku do wiersza, `zapisz_bloki` zniknęło), słowniki proste
   (`pobierz_slownik`/`dodaj_do_slownika`/`zmien_nazwe_w_slowniku`/
   `usun_z_slownika` — rename `firmy_zpo` propaguje do `punkty.nadawca`,
-  kanoniczny wiersz `???` nie da się zmienić/skasować), `scal_kurierow`
+  kanoniczny wiersz `???` nie da się zmienić/skasować),
+  **`pobierz_nadawcow_bez_pni`/`zmien_nadawce_bez_pni`** (`0.1-alpha.3.2` —
+  nadawcy bez PNI istnieją WYŁĄCZNIE jako `punkty.nadawca` z
+  `firma_zpo_id IS NULL`, bo `firmy_zpo` powstaje tylko w gałęzi z PNI
+  `get_or_create_punkt`; do 3.2 literówka w ZUS/PKO/Kruk była
+  nienaprawialna w aplikacji. Rename może zlepić punkty identyczne pod
+  `(nadawca, adres)` — schemat NIE ma na to UNIQUE — więc scalamy je:
+  wygrywa najniższe id, transakcje przegrywającego przepinamy, kolizja
+  `UNIQUE(data,kurier,punkt)` rzuca `KolizjaTransakcji` i wycofuje CAŁOŚĆ),
+  **`zaktualizuj_transakcje`/`usun_transakcje`/`ustaw_pole_transakcji`**
+  (`0.1-alpha.3.2` — pierwsze destrukcyjne prymitywy na `transakcje` poza
+  importem/formularzem. `KOLUMNY_EDYTOWALNE_TRANSAKCJI` świadomie BEZ
+  nadawcy/adresu/PNI: przepięcie na inny punkt to cicha zmiana historii
+  punktu, inna klasa ryzyka niż poprawka daty/ilości — korekta punktu to
+  usuń + wpisz ponownie. Kolizja klucza naturalnego sprawdzana jawnym
+  SELECT-em PRZED UPDATE i tylko gdy `data`/`kurier` faktycznie się
+  zmieniają; `KolizjaTransakcji` niesie OPIS kolidującego wiersza, nie gołe
+  „UNIQUE failed". Edycja zbiorcza w jednym SAVEPOINT — pierwsza kolizja
+  wycofuje wszystko, „zmień 5 wierszy ale nie ten jeden" byłoby ciche
+  i mylące), `scal_kurierow`
   (droga naprawy dla ostrzeżeń o podobieństwie, **atomowy**; przy kolizji
   `UNIQUE(data,kurier,punkt)` scalenie się nie uda — ale nie zostawi
   stanu połowicznego), `pobierz_transakcje`, `pobierz_punkty`. Zapytania
   dedukcyjne (`znajdz_punkty_po_adresie`/`czy_nadawca_ma_pni`/
   `historia_rejonow_punktu`/`historia_wykonawcow_kuriera`) — jedyny
-  konsument to `dedukcja.py` niżej. `_resolve_schema_path` rozróżnia dev
-  vs spakowany `.exe` (PyInstaller rozpakowuje dane do `sys._MEIPASS`).
+  konsument to `dedukcja.py` niżej. `pobierz_transakcje` ma od
+  `0.1-alpha.3.2` opcjonalne filtry (`kurier`/`data_od`/`data_do`/
+  `utworzono_od`/`utworzono_do`/`sesja_uuid`/`tekst`, łączone koniunkcją)
+  i zwraca też `id`/`uuid`/`utworzono`/`sesja_uuid`/`zrodlo` — widok
+  poprawek potrzebuje ich mimo że tabela ich nie pokazuje.
+  `_resolve_schema_path` rozróżnia dev vs spakowany `.exe` (PyInstaller
+  rozpakowuje dane do `sys._MEIPASS`).
+- `ustawienia.py` (`0.1-alpha.3.2`) — `settings.json` w katalogu danych.
+  Celowo POZA bazą: ustawienia typu „odsłoń przełącznik zaawansowany"
+  muszą być lokalne dla KONKRETNEJ stacji i nie mogą wędrować przy
+  scalaniu baz. `wczytaj` nigdy nie rzuca (brak pliku / uszkodzony JSON /
+  nie-obiekt → `{}`) — ustawienia nie mogą zablokować startu aplikacji.
+  `zapisz` atomowo (plik tymczasowy + `os.replace`) i zapisuje CAŁY dict,
+  więc klucze nieznane tej wersji przeżywają read-modify-write.
 - `dedukcja.py` — silnik dedukcji pól formularza (`0.1-alpha.3.1`), bez
   display. Rozstrzyga najpierw **punkt** (z adresu, przez
   `repo.znajdz_punkty_po_adresie`, opcjonalnie zawężony ręcznie wpisanym
@@ -101,15 +144,45 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   tego, czy jest polem głównym, inaczej nie da się go wypełnić
   z klawiatury. `przesun_w_kolejnosci` — czysty next/prev po tej liście
   (zawija na końcach), napędza Tab/Enter/Shift-Tab w
-  `gui/zakladka_wprowadzanie.py`.
+  `gui/zakladka_wprowadzanie.py`. `czy_koniec_ostatniego_wiersza`
+  (`0.1-alpha.3.2`) — predykat „to ostatni klucz CAŁEJ sekwencji", na
+  którym GUI opiera auto-dodawanie wiersza (decyzja tutaj, akcja w widoku).
+  **Rejon od `0.1-alpha.3.2` NIE jest już wpisywalny ręcznie**: jednoznaczna
+  historia punktu → zielone wypełnienie, brak historii ALBO historia
+  sprzeczna → szare/nieaktywne (zapis rozstrzyga na kanoniczne `???`).
+  Wcześniej pole aktywowało się do ręcznego zgadywania — czyli dokładnie
+  tego, co rejonarz (`0.1-alpha.3.3/3.4`) ma zastąpić źródłem prawdy.
 - `import_orchestrator.py` — cały import w partii: `zwaliduj_wiersze`,
   `znajdz_propozycje_scalenia_kurierow` (literówki, auto-merge PRZED
   zapisem, nie cofanie po fakcie), `znajdz_ostrzezenia_podobienstwa_kurierow`
   (diakrytyki, tylko sygnał), `zaimportuj`.
+  **`zaimportuj(..., zaufany=False)`** (`0.1-alpha.3.2`) — domyślnie
+  NIEZAUFANY, bo brak jawnego zaufania musi znaczyć brak zaufania. Plik
+  niezaufany NIE wnosi **PNI** (klucz tożsamości punktu — śmieć podpina
+  transakcję pod cudzy punkt, zamienia kolejne wiersze w „duplikaty" i
+  trwale otwiera pole „w tym ZPO" przez `czy_nadawca_ma_pni`) ani **rejonu**
+  (dane z papieru zakłamane; wiersze lądują na `???` i stają się
+  kandydatami dla rejonarza). Reszta wchodzi normalnie — odcinamy WYŁĄCZNIE
+  to, czego nie da się ani zweryfikować, ani poprawić ręcznie. `zrodlo`
+  **wyprowadza się z `zaufany`**, nie jest wolnym parametrem — nie da się
+  zapisać `'import_zaufany'` dla pliku, któremu nie ufamy.
 - `eksport.py` — transakcje → `.xlsx`. `NAGLOWKI` to stała z dokładnymi
   nagłówkami ze snapshotu źródłowego (białe znaki są częścią danych, nie
   literówką do poprawienia). Typy komórek eksportowane kanonicznie czysto
   (int/date), świadome odstępstwo od niespójności źródła — patrz plan MVP.
+  **PNI jest wyjątkiem i zostaje TEKSTEM** (`0.1-alpha.3.2`): to klucz
+  (`punkty.pni_zpo UNIQUE`), nie wielkość liczbowa — rzutowanie na int
+  zamieniało `"007"` w `7`, reimport czytał `"7"` i ten sam fizyczny punkt
+  dostawał dwa klucze (samo-zadana korupcja, bez obcego pliku).
+  **Znacznik pochodzenia + odcisk** (`NAZWA_ZNACZNIKA`/`NAZWA_ODCISKU`,
+  właściwości niestandardowe dokumentu): `odcisk_wierszy` liczy SHA-256
+  kanonicznej postaci komórek, `zweryfikuj_plik` zwraca `PLIK_ZAUFANY` /
+  `PLIK_OBCY` / `PLIK_ZMODYFIKOWANY`. Odcisk liczony z GOTOWEGO arkusza
+  (`ws.iter_rows`), nie z wierszy z bazy — import policzy hash z tych samych
+  komórek, więc obie strony muszą wyjść z tej samej reprezentacji.
+  Nieczytelny plik to `PLIK_OBCY`, nie wyjątek: „nie umiem zweryfikować"
+  znaczy dokładnie tyle co „nie ufam", a decyzja o zaufaniu nie może
+  wysadzić importu.
 - `podpowiedzi.py` — silnik podpowiedzi (`podpowiedz`,
   `najlepsza_podpowiedz`), źródło kandydatów wstrzykiwane, nie zaszyte.
 - `uzytkownicy.py` — tożsamość osoby wprowadzającej dane. `users.id` to
@@ -122,6 +195,17 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   miękkie ostrzeżenia). W SQLite pilnuje formatu `GLOB`, nie `LIKE`
   (`LIKE` jest niewrażliwy na wielkość liter). Numery kadrowe KURIERÓW to
   inny byt: inny format i relacja 1:N — patrz `../docs/roadmap.md`.
+  Od `0.1-alpha.3.2` `wymaga_uzupelnienia` NIE sprawdza już `nr_kadrowy`
+  (pracownicy jeszcze go nie mają — nie może blokować pierwszego
+  uruchomienia; pole zostało w dialogu jako opcjonalne, przywrócenie
+  wymagalności to jedna linia, patrz `../docs/backlog.md`).
+  **`login_rozszerzony`/`znajdz_konta_dla_loginu`** — konta Windows bywają
+  współdzielone przez kilka osób na jednej stacji; login
+  `DOMENA\login#Imię Nazwisko` daje im osobną tożsamość BEZ nowego
+  mechanizmu identyfikacji (to wciąż zwykły string wchodzący do
+  `uuid_uzytkownika`, więc pozostaje deterministyczny między stacjami —
+  kluczowe dla przyszłej synchronizacji). Który z nich jest aktywny,
+  trzyma `settings.json` (`aktywny_login`), nie baza.
 - `scalanie.py` — ręczne, JEDNOKIERUNKOWE scalanie dwóch baz: docelowa
   (żywa) WCHŁANIA źródłową (plik `.db`, otwierany WYŁĄCZNIE do odczytu
   przez URI SQLite `mode=ro` — twarda gwarancja silnika, nie tylko
@@ -156,6 +240,13 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   `operacje.py` niżej). Kształt wpisu JSONL jest **zamknięty**
   (`POLA_WPISU`, parametry nazwane zamiast `**kwargs`), bo ten plik jest
   kandydatem do wyniesienia na zewnątrz — żadnych nazwisk ani adresów.
+  `liczba_pominietych` dołożona w `0.1-alpha.3.2` (licznik, więc kontraktu
+  no-PII nie narusza): bez niej zapis blankietu, w którym WSZYSTKO odpadło
+  jako duplikat, wyglądał w Historii identycznie jak pełny sukces.
+  Uwaga na napięcie: istniejące `etykieta` przy zapisie blankietu/imporcie
+  zawierają nazwisko kuriera i nazwę pliku, nowe wpisy (`edycja_transakcji`,
+  `usuniecie_transakcji`, `edycja_zbiorcza`, `zmien_nadawce`) trzymają
+  kontrakt ostrzej — same identyfikatory i liczniki.
   Oba żyją POZA bazą, żeby przetrwać jej uszkodzenie i podmianę przy
   cofaniu. Numeracja operacji po jawnym `seq`, nigdy po zegarze.
 - `kopie.py` — migawki bazy: pełna kopia pliku `.db`. Dwie ścieżki
@@ -236,10 +327,28 @@ wartości z pól i wywołanie warstwy logiki:
   Tab/Enter/Shift-Tab/`ISO_Left_Tab` idzie przez `dedukcja.kolejnosc_pol`
   + `przesun_w_kolejnosci`, NIE przez naturalny porządek widgetów w
   gridzie — pole aktywowane niejednoznacznie (np. nadawca) może wylądować
-  "za" polem, na którym użytkownik już jest), `zakladka_import_export.py` (+ `DialogKorektyImportu` —
-  ekran korekty pokazuje WYŁĄCZNIE wiersze wymagające uwagi),
+  "za" polem, na którym użytkownik już jest.
+  **Zmiany `0.1-alpha.3.2`:** podgląd filtruje domyślnie po `sesja_uuid`
+  (checkbox odsłania całą bazę), dwuklik w podglądzie otwiera
+  `DialogEdycji`; Tab z ostatniego pola CAŁEJ kolejności dodaje nowy
+  wiersz, ale tylko gdy ostatni wiersz nie jest pusty (predykat
+  `dedukcja.czy_koniec_ostatniego_wiersza` — decyzja w logice, akcja w GUI);
+  po zapisie znikają WYŁĄCZNIE wiersze faktycznie zapisane, pominięte
+  zostają wypełnione do poprawki (`wyniki` z `zapisz_blankiet` są indeksowo
+  równoległe do wierszy niepustych, filtrowanych tym samym
+  `formularz_logika.wiersz_pusty` co `zbuduj_blankiet`), a status dostaje
+  kolor z `widget_pole.KOLORY` i wypisuje numery+powody pominięć),
+  `zakladka_import_export.py` (+ `DialogKorektyImportu` —
+  ekran korekty pokazuje WYŁĄCZNIE wiersze wymagające uwagi; od
+  `0.1-alpha.3.2` na górze panel zaufania: `czy_zaufany()` rozstrzyga, czy
+  import wniesie PNI/rejon, a checkbox wymuszenia renderuje się TYLKO gdy
+  `settings.json` ma wpis `zaawansowane.pokaz_wymuszenie_zaufania` I plik
+  jest `PLIK_OBCY` — dla `PLIK_ZMODYFIKOWANY` nie powstaje w ogóle, więc
+  sfałszowanego pliku nie da się odblokować żadną drogą),
   `zakladka_slowniki.py` (podzakładki kurierzy/punkty ZPO/wykonawcy/
-  rejony/firmy ZPO), `zakladka_scalanie.py` (`DialogKorektyScalania` -
+  rejony/firmy ZPO + **„Nadawcy (bez PNI)"** dołożona na KOŃCU listy, żeby
+  nie przesunąć istniejących indeksów `_podzakladki[...]`),
+  `zakladka_scalanie.py` (`DialogKorektyScalania` -
   ten sam wzorzec ekranu korekty co import: pokazuje WYŁĄCZNIE propozycje
   literówek/różnice w zapisie/konflikty ilości, reszta wchodzi/pomija się
   cicho; reużywa `gui.roznice.segmenty_roznicy` i
@@ -259,7 +368,27 @@ wartości z pól i wywołanie warstwy logiki:
   wyżej.
 - `formularz_logika.py` — jedyny most między formularzem a
   `models.py`/pydantic; GUI wyświetla błędy walidacji, nie decyduje o nich.
+  `wiersz_pusty` jest PUBLICZNE od `0.1-alpha.3.2` — `zbuduj_blankiet`
+  i selektywne czyszczenie siatki po zapisie MUSZĄ filtrować tym samym
+  predykatem, inaczej rozjeżdżają się indeksy wyników.
+- `zakladka_przeglad.py` jest od `0.1-alpha.3.2` **widokiem poprawek**, nie
+  listą tylko do odczytu: pasek filtrów (kurier/daty/tekst/bieżąca sesja),
+  dwuklik → `DialogEdycji`, operacje zbiorcze (`_DialogUstawPoleZbiorczo`)
+  i usuwanie z potwierdzeniem pokazującym PRÓBKĘ znikających wierszy
+  (idioto-odporność — patrz `../docs/ux-ui.md`). Świadomie przebudowa
+  istniejącej zakładki, nie nowa: „znajdź i popraw" ma być jednym miejscem.
+- `dialog_edycji.py` (`0.1-alpha.3.2`) — poprawka jednej transakcji.
+  ŚWIADOMIE zwykły modal, BEZ `dedukcja.py`/`PoleZeWskaznikiem`: korekta to
+  jawna decyzja człowieka nad już zapisanym wierszem, dedukcja walcząca
+  z ręczną poprawką byłaby antywzorcem. Współdzielony przez Przegląd
+  i podgląd w formularzu.
 - `widget_tabela.py` — wspólna tabela z sortowaniem i Ctrl+scroll zoom.
+  `wiersz_zaznaczony`/`wiersze_zaznaczone` zwracają PEŁNE dicty (nie tylko
+  kolumny wyświetlane — stąd dostępne `id`/`uuid`), mapa `iid → wiersz`
+  przebudowywana przy każdym odświeżeniu, więc przeżywa sortowanie (ta sama
+  lekcja co `seq` w `zakladka_historia.py`). `on_dwuklik` opcjonalny — bez
+  niego zdarzenie nie jest w ogóle bindowane, żeby nie ruszać istniejących
+  użytkowników tylko-do-odczytu.
 - `widget_autocomplete.py` — dropdown + klawiatura (bez ghost textu).
   Zweryfikowany w izolacji (zrzuty ekranu: dropdown renderuje się
   poprawnie, dopasowanie rozmyte działa, Tab/strzałki/zatwierdzanie
@@ -352,6 +481,21 @@ pokażą), patrz `../docs/environment.md`.
 (zrzut ekranu i testy w `test_gui_smoke.py`): zapis z formularza,
 dodanie do słownika i import tworzą wpis w dzienniku z migawką;
 `cofnij_do` przywraca stan pliku bazy i zamyka aplikację.
+
+`0.1-alpha.3.2` zweryfikowane bezgłowo pod Xvfb, nowe pliki testowe:
+`test_korekty.py` (edycja/usuwanie/kolizje — każda ścieżka błędu sprawdza,
+że baza zostaje NIETKNIĘTA), `test_zakladka_przeglad.py`,
+`test_dialog_edycji.py`, `test_zakladka_wprowadzanie_zapis.py` (status,
+selektywne czyszczenie siatki, podgląd sesyjny), `test_widget_tabela.py`
+(zaznaczenie odporne na sortowanie), `test_ustawienia.py`,
+`test_dialog_uzytkownika.py`, `test_zakladka_slowniki_nadawcy.py`,
+**`test_zaufanie_importu.py`** (trzy gałęzie podpinania punktu
+niezaufanego, w tym adres istniejący już jako punkt Z PNI → BEZ duplikatu)
+i `test_zakladka_import_zaufanie.py` (przełącznik wymuszenia niedostępny
+dla pliku ze złamanym odciskiem — test sprawdza to wprost).
+Znacznik i odcisk eksportu testowane przez REALNY round-trip plikowy
+(zapis → `load_workbook` → weryfikacja), łącznie z testem manipulacji:
+zmiana jednej komórki musi dać `PLIK_ZMODYFIKOWANY`.
 
 Build PyInstaller: proxy-build na Linuksie sprawdzony (pakuje się bez
 błędów importu `pydantic_core`, dochodzi do tworzenia okna Tk) — realny
