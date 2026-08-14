@@ -519,20 +519,59 @@ def pobierz_punkty(conn):
     return [dict(w) for w in wiersze]
 
 
-def pobierz_transakcje(conn, limit=200):
-    """Lista transakcji do przeglądania, najnowsze pierwsze, z nazwami zamiast ID."""
+def pobierz_transakcje(conn, limit=200, *, kurier=None, data_od=None, data_do=None,
+                        utworzono_od=None, utworzono_do=None, sesja_uuid=None, tekst=None):
+    """
+    Lista transakcji do przeglądania, najnowsze pierwsze, z nazwami zamiast
+    ID. Dokłada `id`/`uuid`/`utworzono`/`sesja_uuid`/`zrodlo` (0.1-alpha.3.2)
+    - potrzebne przez widok poprawek (edycja/usuwanie po `id`, filtr sesji)
+    mimo że część z nich nie jest wyświetlana w tabeli.
+
+    Filtry (wszystkie opcjonalne, łączone koniunkcją - "kurier ORAZ zakres
+    dat ORAZ ..."): `kurier` (dokładne dopasowanie nazwy), `data_od`/
+    `data_do` (zakres daty TRANSAKCJI, `date` albo string ISO), `utworzono_od`/
+    `utworzono_do` (zakres znacznika wprowadzenia), `sesja_uuid` (dokładne
+    dopasowanie), `tekst` (dopasowanie częściowe nadawcy LUB adresu).
+    """
+    warunki, parametry = [], []
+    if kurier is not None:
+        warunki.append("k.imie_nazwisko = ?")
+        parametry.append(kurier)
+    if data_od is not None:
+        warunki.append("t.data >= ?")
+        parametry.append(data_od.isoformat() if hasattr(data_od, "isoformat") else data_od)
+    if data_do is not None:
+        warunki.append("t.data <= ?")
+        parametry.append(data_do.isoformat() if hasattr(data_do, "isoformat") else data_do)
+    if utworzono_od is not None:
+        warunki.append("t.utworzono >= ?")
+        parametry.append(utworzono_od)
+    if utworzono_do is not None:
+        warunki.append("t.utworzono <= ?")
+        parametry.append(utworzono_do)
+    if sesja_uuid is not None:
+        warunki.append("t.sesja_uuid = ?")
+        parametry.append(sesja_uuid)
+    if tekst is not None:
+        warunki.append("(p.nadawca LIKE ? OR p.adres LIKE ?)")
+        wzorzec = f"%{tekst}%"
+        parametry.extend([wzorzec, wzorzec])
+
+    gdzie = f"WHERE {' AND '.join(warunki)}" if warunki else ""
     wiersze = conn.execute(
-        """SELECT t.id, t.data, k.imie_nazwisko AS kurier, p.nadawca,
-                  p.adres, r.kod AS rejon, w.nazwa AS wykonawca,
-                  t.ilosc_total, t.ilosc_zpo, t.komentarz
-           FROM transakcje t
-           JOIN kurierzy k ON k.id = t.kurier_id
-           JOIN punkty p ON p.id = t.punkt_id
-           LEFT JOIN rejony r ON r.id = t.rejon_id
-           LEFT JOIN wykonawcy w ON w.id = t.wykonawca_id
-           ORDER BY t.data DESC, t.id DESC
-           LIMIT ?""",
-        (limit,),
+        f"""SELECT t.id, t.data, k.imie_nazwisko AS kurier, p.nadawca,
+                   p.adres, r.kod AS rejon, w.nazwa AS wykonawca,
+                   t.ilosc_total, t.ilosc_zpo, t.komentarz,
+                   t.uuid, t.utworzono, t.sesja_uuid, t.zrodlo
+            FROM transakcje t
+            JOIN kurierzy k ON k.id = t.kurier_id
+            JOIN punkty p ON p.id = t.punkt_id
+            LEFT JOIN rejony r ON r.id = t.rejon_id
+            LEFT JOIN wykonawcy w ON w.id = t.wykonawca_id
+            {gdzie}
+            ORDER BY t.data DESC, t.id DESC
+            LIMIT ?""",
+        (*parametry, limit),
     ).fetchall()
     return [dict(w) for w in wiersze]
 
