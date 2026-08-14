@@ -132,6 +132,13 @@ def test_brak_aliasu_jest_wykrywalny(conn):
     assert uzytkownicy.wymaga_uzupelnienia(conn, login="dom\\a") is False
 
 
+def test_brak_nr_kadrowego_nie_jest_wykrywalny(conn):
+    # 0.1-alpha.3.2: nr kadrowy przestaje być wymagany - pracownicy jeszcze
+    # go nie mają w momencie wdrożenia; alias sam wystarcza
+    uzytkownicy.zapewnij_uzytkownika(conn, login="dom\\a", alias="Jan Kowalski")
+    assert uzytkownicy.wymaga_uzupelnienia(conn, login="dom\\a") is False
+
+
 # --- kontrola krzyżowa UUID <-> nr kadrowy ---
 
 def test_ten_sam_uuid_inny_nr_kadrowy_daje_ostrzezenie(conn):
@@ -208,3 +215,45 @@ def test_zapisz_blok_dziala_bez_podanego_autora(conn):
     # atrybucja nie może być warunkiem zapisania danych
     wyniki = repo.zapisz_blankiet(conn, _blok())
     assert wyniki[0]["id"] is not None
+
+
+# --- 0.1-alpha.3.2: współdzielone konta Windows - login rozszerzony ---
+
+def test_login_rozszerzony_laczy_login_bazowy_i_alias():
+    assert (uzytkownicy.login_rozszerzony("DOM\\a", "Jan Kowalski")
+            == "DOM\\a#Jan Kowalski")
+
+
+def test_login_rozszerzony_daje_deterministyczny_uuid_miedzy_stacjami():
+    # ta sama maszyneria co uuid_uzytkownika zwykłego loginu - kluczowe dla
+    # synchronizacji: dwie stacje muszą policzyć TEN SAM id dla tej samej osoby
+    login = uzytkownicy.login_rozszerzony("DOM\\a", "Jan Kowalski")
+    assert (uzytkownicy.uuid_uzytkownika(login)
+            == uzytkownicy.uuid_uzytkownika(login))
+    assert uzytkownicy.uuid_uzytkownika(login) != uzytkownicy.uuid_uzytkownika("DOM\\a")
+
+
+def test_znajdz_konta_dla_loginu_zwraca_baze_i_rozszerzone(conn):
+    uzytkownicy.zapewnij_uzytkownika(conn, login="DOM\\a", alias="Konto bazowe")
+    uzytkownicy.zapewnij_uzytkownika(
+        conn, login=uzytkownicy.login_rozszerzony("DOM\\a", "Jan Kowalski"),
+        alias="Jan Kowalski")
+    uzytkownicy.zapewnij_uzytkownika(
+        conn, login=uzytkownicy.login_rozszerzony("DOM\\a", "Anna Nowak"),
+        alias="Anna Nowak")
+
+    konta = uzytkownicy.znajdz_konta_dla_loginu(conn, "DOM\\a")
+
+    aliasy = {k["alias"] for k in konta}
+    assert aliasy == {"Konto bazowe", "Jan Kowalski", "Anna Nowak"}
+
+
+def test_znajdz_konta_dla_loginu_nie_zwraca_obcych_kont(conn):
+    uzytkownicy.zapewnij_uzytkownika(conn, login="DOM\\a", alias="A")
+    uzytkownicy.zapewnij_uzytkownika(conn, login="DOM\\b", alias="B")
+    uzytkownicy.zapewnij_uzytkownika(
+        conn, login=uzytkownicy.login_rozszerzony("DOM\\b", "C"), alias="C")
+
+    konta = uzytkownicy.znajdz_konta_dla_loginu(conn, "DOM\\a")
+
+    assert {k["alias"] for k in konta} == {"A"}
