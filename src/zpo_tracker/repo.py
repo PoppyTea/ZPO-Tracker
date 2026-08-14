@@ -508,6 +508,76 @@ def pobierz_unikalne_adresy(conn):
     ]
 
 
+def pobierz_nadawcow_bez_pni(conn):
+    """
+    Nadawcy BEZ PNI (ZUS, PKO, Kruk...) - istnieją WYŁĄCZNIE jako
+    `punkty.nadawca` (`firma_zpo_id IS NULL`), nigdy jako wiersz w
+    `firmy_zpo` (patrz `importer.get_or_create_punkt` - ten wpis powstaje
+    TYLKO w gałęzi z PNI). Do podzakładki „Nadawcy (bez PNI)" w Słownikach -
+    `firmy_zpo` sama w sobie pokazuje tylko sieci z PNI, nie pełny zbiór.
+    """
+    wiersze = conn.execute(
+        """SELECT nadawca AS nazwa, COUNT(*) AS liczba_punktow
+           FROM punkty WHERE firma_zpo_id IS NULL
+           GROUP BY nadawca ORDER BY nadawca"""
+    ).fetchall()
+    return [dict(w) for w in wiersze]
+
+
+def zmien_nadawce_bez_pni(conn, stara, nowa):
+    """
+    Zmienia nazwę nadawcy bez PNI wszędzie, gdzie występuje - naprawa
+    literówek (ZUS/PKO/Kruk...), dotąd nienaprawialnych w aplikacji (patrz
+    `pobierz_nadawcow_bez_pni`). Atomowe.
+
+    Po zmianie różne punkty mogą stać się identyczne pod (nadawca, adres) -
+    schemat NIE ma na to UNIQUE (tylko `get_or_create_punkt` sam dba o
+    deduplikację PRZY ZAPISIE, nie przy rename). Takie zlepienia scalamy:
+    wygrywa punkt o najniższym id (najstarszy), transakcje przegrywającego
+    przepinamy na niego i przegrywający usuwamy - wzorzec
+    `_przemianuj_lub_scal_firme`. Kolizja `UNIQUE(data,kurier_id,punkt_id)`
+    przy przepinaniu (oba punkty mają transakcję tego samego dnia/kuriera)
+    rzuca `KolizjaTransakcji` i wycofuje CAŁOŚĆ - konflikt nigdy nie jest
+    rozstrzygany po cichu (reguła projektu, patrz repo.KolizjaTransakcji).
+    """
+    with transakcja(conn):
+        conn.execute(
+            "UPDATE punkty SET nadawca = ? WHERE nadawca = ? AND firma_zpo_id IS NULL",
+            (nowa, stara),
+        )
+        punkty = conn.execute(
+            "SELECT id, adres FROM punkty WHERE nadawca = ? AND firma_zpo_id IS NULL"
+            " ORDER BY id", (nowa,),
+        ).fetchall()
+        po_adresie = {}
+        for p in punkty:
+            po_adresie.setdefault(p["adres"], []).append(p["id"])
+        for ids in po_adresie.values():
+            if len(ids) < 2:
+                continue
+            wygrywajacy, *przegrywajacy = ids
+            for id_przegrywajacy in przegrywajacy:
+                _scal_punkty(conn, id_przegrywajacy, wygrywajacy)
+
+
+def _scal_punkty(conn, punkt_zrodlowy, punkt_docelowy):
+    kolidujaca = conn.execute(
+        """SELECT z.id FROM transakcje z
+           JOIN transakcje d ON d.data = z.data AND d.kurier_id = z.kurier_id
+           WHERE z.punkt_id = ? AND d.punkt_id = ?""",
+        (punkt_zrodlowy, punkt_docelowy),
+    ).fetchone()
+    if kolidujaca:
+        raise KolizjaTransakcji(
+            "Nie można scalić punktów po zmianie nazwy nadawcy - " +
+            _opisz_transakcje(conn, kolidujaca["id"]) +
+            " koliduje z transakcją drugiego punktu tego samego dnia/kuriera.")
+    conn.execute(
+        "UPDATE transakcje SET punkt_id = ? WHERE punkt_id = ?",
+        (punkt_docelowy, punkt_zrodlowy))
+    conn.execute("DELETE FROM punkty WHERE id = ?", (punkt_zrodlowy,))
+
+
 def pobierz_punkty(conn):
     """Lista punktów z nazwą firmy ZPO (jeśli ma PNI), do zakładki słowników."""
     wiersze = conn.execute(

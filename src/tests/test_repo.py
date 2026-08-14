@@ -192,6 +192,97 @@ def test_nie_mozna_usunac_kanonicznego_rejonu_nieznanego(conn):
         repo.usun_z_slownika(conn, "rejony", wpis_id)
 
 
+# --- 0.1-alpha.3.2: nadawcy bez PNI (ZUS/PKO/Kruk...) - naprawialność ---
+# root cause: firmy_zpo powstaje TYLKO w gałęzi PNI importer.get_or_create_punkt,
+# więc literówki nadawców bez PNI dotąd nie dało się poprawić w aplikacji.
+
+def test_pobierz_nadawcow_bez_pni_pomija_nadawcow_z_pni(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")  # ma PNI
+    get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)     # bez PNI
+
+    nadawcy = repo.pobierz_nadawcow_bez_pni(conn)
+
+    assert [n["nazwa"] for n in nadawcy] == ["ZUS"]
+
+
+def test_pobierz_nadawcow_bez_pni_liczy_punkty(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    get_or_create_punkt(conn, "ZUS", "Inna 5", None)
+
+    nadawcy = repo.pobierz_nadawcow_bez_pni(conn)
+
+    assert nadawcy == [{"nazwa": "ZUS", "liczba_punktow": 2}]
+
+
+def test_zmien_nadawce_bez_pni_propaguje_do_wszystkich_punktow(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    get_or_create_punkt(conn, "ZUS", "Inna 5", None)
+
+    repo.zmien_nadawce_bez_pni(conn, "ZUS", "Zakład Ubezpieczeń Społecznych")
+
+    nadawcy = {r[0] for r in conn.execute("SELECT nadawca FROM punkty")}
+    assert nadawcy == {"Zakład Ubezpieczeń Społecznych"}
+
+
+def test_zmien_nadawce_bez_pni_nie_rusza_nadawcy_z_pni(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
+
+    repo.zmien_nadawce_bez_pni(conn, "Żabka", "Żabka Polska")
+
+    assert conn.execute("SELECT nadawca FROM punkty").fetchone()[0] == "Żabka"
+
+
+def test_zmien_nadawce_bez_pni_zlepienie_przepina_transakcje_i_usuwa_przegrywajacy(conn):
+    # dwa RÓŻNE punkty (różne pisownie), ten sam adres - po zmianie nazwy
+    # stają się identyczne pod (nadawca, adres); schemat nie ma na to UNIQUE,
+    # więc trzeba je scalić ręcznie (wzorzec _przemianuj_lub_scal_firme)
+    from zpo_tracker.importer import get_or_create_punkt
+    id_a, _ = get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    id_b, _ = get_or_create_punkt(conn, "Zaklad Ubezpieczen", "Senatorska 6/8", None)
+    kurier_id = conn.execute(
+        "INSERT INTO kurierzy(imie_nazwisko) VALUES ('Kowalski Jan')").lastrowid
+    conn.execute(
+        "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total) VALUES (?,?,?,?)",
+        ("2026-08-10", kurier_id, id_b, 3))
+
+    repo.zmien_nadawce_bez_pni(conn, "Zaklad Ubezpieczen", "ZUS")
+
+    punkty = conn.execute("SELECT id FROM punkty WHERE nadawca = 'ZUS'").fetchall()
+    assert len(punkty) == 1  # zlepione w jeden
+    transakcja = conn.execute("SELECT punkt_id FROM transakcje").fetchone()
+    assert transakcja["punkt_id"] == id_a  # przepięta na wygrywający (najniższe id)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM punkty WHERE id = ?", (id_b,)).fetchone()[0] == 0
+
+
+def test_zmien_nadawce_bez_pni_kolizja_transakcji_blokuje_calosc(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    id_a, _ = get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    id_b, _ = get_or_create_punkt(conn, "Zaklad Ubezpieczen", "Senatorska 6/8", None)
+    kurier_id = conn.execute(
+        "INSERT INTO kurierzy(imie_nazwisko) VALUES ('Kowalski Jan')").lastrowid
+    # OBA punkty mają transakcję tego samego kuriera+daty -> po zlepieniu
+    # kolidowałyby na UNIQUE(data, kurier_id, punkt_id)
+    conn.execute(
+        "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total) VALUES (?,?,?,?)",
+        ("2026-08-10", kurier_id, id_a, 1))
+    conn.execute(
+        "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total) VALUES (?,?,?,?)",
+        ("2026-08-10", kurier_id, id_b, 2))
+
+    with pytest.raises(repo.KolizjaTransakcji):
+        repo.zmien_nadawce_bez_pni(conn, "Zaklad Ubezpieczen", "ZUS")
+
+    # CAŁOŚĆ zablokowana - nawet sam rename się nie utrzymał
+    nadawcy = {r[0] for r in conn.execute("SELECT nadawca FROM punkty")}
+    assert nadawcy == {"ZUS", "Zaklad Ubezpieczen"}
+    assert conn.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0] == 2
+
+
 def test_mozna_usunac_zwykly_nieuzywany_rejon(conn):
     wpis_id = repo.dodaj_do_slownika(conn, "rejony", "WA87")
     repo.usun_z_slownika(conn, "rejony", wpis_id)
