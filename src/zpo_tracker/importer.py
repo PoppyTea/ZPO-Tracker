@@ -124,6 +124,63 @@ def get_or_create_punkt(conn, nadawca, adres, pni_zpo):
         return cur.lastrowid, warnings
 
 
+def znajdz_lub_utworz_punkt_niezaufany(conn, nadawca, adres):
+    """
+    Punkt dla wiersza z NIEZAUFANEGO pliku (0.1-alpha.3.2): kluczem jest
+    wyłącznie (nadawca, adres), bo PNI z takiego źródła jest odrzucane
+    w całości (patrz import_orchestrator.zaimportuj).
+
+    OSOBNA funkcja, nie flaga w `get_or_create_punkt`: tamta obsługuje
+    ścieżkę zaufaną ORAZ scalanie baz (scalanie.py, gdzie źródłem jest
+    nasza własna baza), a jej semantyka nie może dryfować razem z regułami
+    zaufania importu.
+
+    Trzy gałęzie, w tej kolejności:
+
+    1. dokładne (nadawca, adres) po DOWOLNYM punkcie - także takim, który
+       MA już PNI. To rozwiązuje pułapkę predykatu `AND pni_zpo IS NULL`
+       z `get_or_create_punkt`: bez tego wiersz o adresie znanym nam już
+       jako punkt ZPO tworzyłby drugi punkt tej samej fizycznej lokalizacji.
+    2. dokładnie JEDEN punkt pod tym adresem, choć nadawca się nie zgadza -
+       podpinamy się do niego, ale człowiek musi się dowiedzieć (najczęściej
+       to inna pisownia tej samej firmy).
+    3. wiele punktów pod adresem i żaden nie pasuje nadawcą - NOWY punkt bez
+       PNI + ostrzeżenie. Świadomie NIE wybieramy żadnego z istniejących:
+       reguła projektu mówi, że adres z wieloma nadawcami nigdy nie
+       rozstrzyga się sam (dedukcja.py), a duplikat punktu jest naprawialny
+       (Słowniki/scalanie), ciche podpięcie pod zły punkt - nie.
+    """
+    ostrzezenia = []
+    dokladny = conn.execute(
+        "SELECT id FROM punkty WHERE nadawca = ? AND adres = ?", (nadawca, adres)
+    ).fetchone()
+    if dokladny:
+        return dokladny[0], ostrzezenia
+
+    pod_adresem = conn.execute(
+        "SELECT id, nadawca FROM punkty WHERE adres = ?", (adres,)
+    ).fetchall()
+    if len(pod_adresem) == 1:
+        ostrzezenia.append(
+            f"Adres '{adres}' jest już zapisany dla nadawcy "
+            f"'{pod_adresem[0][1]}', a plik podaje '{nadawca}' - podpięto do "
+            f"istniejącego punktu, sprawdź, czy to ta sama firma."
+        )
+        return pod_adresem[0][0], ostrzezenia
+    if len(pod_adresem) > 1:
+        ostrzezenia.append(
+            f"Pod adresem '{adres}' istnieje już {len(pod_adresem)} punktów, "
+            f"żaden dla nadawcy '{nadawca}' - utworzono nowy punkt zamiast "
+            f"zgadywać, do którego podpiąć."
+        )
+
+    cur = conn.execute(
+        "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES (?, ?, NULL)",
+        (nadawca, adres),
+    )
+    return cur.lastrowid, ostrzezenia
+
+
 def import_row(conn, row):
     """
     Importuje pojedynczy wiersz (dict z kluczami = nazwy kolumn z xlsx).

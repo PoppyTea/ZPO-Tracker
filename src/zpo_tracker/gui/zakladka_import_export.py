@@ -15,7 +15,7 @@ from tkinter import filedialog, ttk
 
 import openpyxl
 
-from zpo_tracker import eksport, operacje
+from zpo_tracker import eksport, operacje, ustawienia
 from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
     zaimportuj,
@@ -52,10 +52,11 @@ class DialogKorektyImportu(tk.Toplevel):
     """Ekran korekty: tylko to, co wymaga uwagi. Reszta importuje się cicho."""
 
     def __init__(self, parent, conn, katalog_danych, nazwa_pliku, zwalidowane,
-                 odrzucone, propozycje, ostrzezenia, on_gotowe):
+                 odrzucone, propozycje, ostrzezenia, on_gotowe,
+                 autor_id=None, sesja_uuid=None, status_zaufania=eksport.PLIK_OBCY):
         super().__init__(parent)
         self.title("Korekta importu")
-        self.geometry("640x520")
+        self.geometry("640x560")
         self.conn = conn
         self.katalog_danych = katalog_danych
         self.nazwa_pliku = nazwa_pliku
@@ -63,6 +64,13 @@ class DialogKorektyImportu(tk.Toplevel):
         self.odrzucone = odrzucone
         self.ostrzezenia = ostrzezenia
         self.on_gotowe = on_gotowe
+        # 0.1-alpha.3.2: atrybucja i sesja dla wierszy z importu - dotąd
+        # import nie pisał żadnej z nich, patrz import_orchestrator.zaimportuj.
+        self.autor_id = autor_id
+        self.sesja_uuid = sesja_uuid
+        self.status_zaufania = status_zaufania
+        self.var_wymus_zaufanie = tk.BooleanVar(value=False)
+        self.checkbox_wymuszenia = None
         self.zmienne_propozycji = []
         self.mapowanie_z_ostrzezen = {}
 
@@ -72,6 +80,8 @@ class DialogKorektyImportu(tk.Toplevel):
                  f"Poniżej tylko to, co wymaga uwagi - reszta wejdzie cicho.",
             wraplength=600, justify="left",
         ).pack(anchor="w", padx=10, pady=(10, 6))
+
+        self._zbuduj_panel_zaufania()
 
         notebook = ttk.Notebook(self)
         notebook.pack(fill="both", expand=True, padx=10, pady=6)
@@ -115,6 +125,57 @@ class DialogKorektyImportu(tk.Toplevel):
         ttk.Button(pasek, text="Zatwierdź import", command=self._zatwierdz).pack(side="right")
         ttk.Button(pasek, text="Anuluj", command=self.destroy).pack(side="right", padx=6)
 
+    def _zbuduj_panel_zaufania(self):
+        """
+        Informacja o pochodzeniu pliku + (warunkowo) przełącznik wymuszenia.
+
+        Przełącznik pojawia się WYŁĄCZNIE gdy: (a) settings.json ma wpis
+        odsłaniający tryb zaawansowany ORAZ (b) plik jest po prostu obcy,
+        nie sfałszowany. Plik z NASZYM znacznikiem, ale niezgodnym odciskiem,
+        nie może zostać uznany za zaufany żadną drogą - to nie jest "obcy
+        plik, któremu ktoś świadomie ufa", tylko nasz plik zmodyfikowany po
+        wyjściu z programu (decyzja Papavera, patrz eksport.zweryfikuj_plik).
+        """
+        ramka = ttk.Frame(self)
+        ramka.pack(fill="x", padx=10, pady=(0, 6))
+
+        if self.status_zaufania == eksport.PLIK_ZAUFANY:
+            ttk.Label(
+                ramka, text="✔ To plik wyeksportowany z tego programu i niezmieniony "
+                            "- PNI i rejony zostaną zaimportowane.",
+                foreground="#1e7a3a", wraplength=600, justify="left",
+            ).pack(anchor="w")
+            return
+
+        if self.status_zaufania == eksport.PLIK_ZMODYFIKOWANY:
+            komunikat = ("⚠ Ten plik pochodzi z tego programu, ale jego zawartość "
+                          "została zmieniona poza nim. PNI i rejony NIE zostaną "
+                          "zaimportowane i nie da się tego pominąć.")
+        else:
+            komunikat = ("⚠ Plik spoza tego programu. PNI i rejony NIE zostaną "
+                          "zaimportowane - reszta danych wejdzie normalnie.")
+        ttk.Label(
+            ramka, text=komunikat, foreground="#c0392b",
+            wraplength=600, justify="left",
+        ).pack(anchor="w")
+
+        zaawansowane = ustawienia.wczytaj(self.katalog_danych).get("zaawansowane", {})
+        if (self.status_zaufania == eksport.PLIK_OBCY
+                and zaawansowane.get("pokaz_wymuszenie_zaufania")):
+            self.checkbox_wymuszenia = ttk.Checkbutton(
+                ramka, text="Mimo to potraktuj ten plik jako zaufany (zaawansowane)",
+                variable=self.var_wymus_zaufanie,
+            )
+            self.checkbox_wymuszenia.pack(anchor="w", pady=(4, 0))
+
+    def czy_zaufany(self):
+        """Czy import ma wnieść PNI i rejon - patrz `_zbuduj_panel_zaufania`."""
+        if self.status_zaufania == eksport.PLIK_ZAUFANY:
+            return True
+        if self.status_zaufania == eksport.PLIK_ZMODYFIKOWANY:
+            return False  # nigdy, niezależnie od przełącznika
+        return bool(self.var_wymus_zaufanie.get())
+
     def _dodaj_wiersz_ostrzezenia(self, parent, ostrzezenie):
         """Jeden wiersz konfliktu (GH #2 podświetlenie różnic + GH #1 wybór
         zwycięzcy kliknięciem, zamiast zmuszania do wyjścia do Słowników)."""
@@ -148,7 +209,8 @@ class DialogKorektyImportu(tk.Toplevel):
             self.conn, self.katalog_danych, rodzaj="import",
             etykieta=self.nazwa_pliku,
             funkcja=zaimportuj, args=(self.zwalidowane,),
-            kwargs={"mapowanie_scalen": mapowanie},
+            kwargs={"mapowanie_scalen": mapowanie, "zaufany": self.czy_zaufany(),
+                    "autor_id": self.autor_id, "sesja_uuid": self.sesja_uuid},
             licz_wiersze=lambda w: w["zaimportowano"],
         )
         self.destroy()
@@ -156,11 +218,14 @@ class DialogKorektyImportu(tk.Toplevel):
 
 
 class ZakladkaImportExport(ttk.Frame):
-    def __init__(self, parent, conn, katalog_danych, on_zaimportowano=None):
+    def __init__(self, parent, conn, katalog_danych, on_zaimportowano=None,
+                 autor_id=None, sesja_uuid=None):
         super().__init__(parent)
         self.conn = conn
         self.katalog_danych = katalog_danych
         self.on_zaimportowano = on_zaimportowano
+        self.autor_id = autor_id
+        self.sesja_uuid = sesja_uuid
 
         ramka_import = ttk.LabelFrame(self, text="Import z .xlsx", padding=10)
         ramka_import.pack(fill="x", padx=10, pady=10)
@@ -204,6 +269,8 @@ class ZakladkaImportExport(ttk.Frame):
             self, self.conn, self.katalog_danych, Path(sciezka).name,
             zwalidowane, odrzucone, propozycje, ostrzezenia,
             on_gotowe=self._po_imporcie,
+            autor_id=self.autor_id, sesja_uuid=self.sesja_uuid,
+            status_zaufania=eksport.zweryfikuj_plik(sciezka),
         )
 
     def _po_imporcie(self, wynik):

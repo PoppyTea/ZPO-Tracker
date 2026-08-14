@@ -120,6 +120,90 @@ def test_zapis_z_formularza_stempluje_autora(tmp_path, monkeypatch):
         dziennik.odepnij()
 
 
+# --- 0.1-alpha.3.2: menu Użytkownik (zmiana/wylogowanie na współdzielonym koncie) ---
+
+def test_menu_uzytkownika_ma_zmien_i_wyloguj(tmp_path):
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        etykiety = [
+            app._menu_uzytkownika.entrycget(i, "label")
+            for i in range(app._menu_uzytkownika.index("end") + 1)
+        ]
+        assert "Zmień użytkownika…" in etykiety
+        assert "Wyloguj" in etykiety
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_wyloguj_usuwa_aktywny_login_i_otwiera_wybor(tmp_path, monkeypatch):
+    monkeypatch.setenv("USERDOMAIN", "POCZTA-POLSKA")
+    monkeypatch.setenv("USERNAME", "jkowalski")
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, ustawienia
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        ustawienia.zapisz(app.katalog_danych, {"aktywny_login": "cokolwiek"})
+        wolania = []
+        monkeypatch.setattr(
+            "zpo_tracker.gui.app.DialogWyboruUzytkownika",
+            lambda *a, **k: wolania.append((a, k)),
+        )
+
+        app._wyloguj()
+
+        assert "aktywny_login" not in ustawienia.wczytaj(app.katalog_danych)
+        assert len(wolania) == 1
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_wybor_uzytkownika_aktualizuje_autora_we_wszystkich_zakladkach(tmp_path, monkeypatch):
+    monkeypatch.setenv("USERDOMAIN", "POCZTA-POLSKA")
+    monkeypatch.setenv("USERNAME", "jkowalski")
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, uzytkownicy
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        nowy_login = uzytkownicy.login_rozszerzony("POCZTA-POLSKA\\jkowalski", "Anna Nowak")
+        uzytkownicy.zapewnij_uzytkownika(app.conn, login=nowy_login, alias="Anna Nowak")
+
+        app._na_wybrano_uzytkownika(nowy_login)
+
+        oczekiwany_id = uzytkownicy.uuid_uzytkownika(nowy_login)
+        assert app.autor_id == oczekiwany_id
+        assert app.zakladka_wprowadzanie.autor_id == oczekiwany_id
+        assert app.zakladka_import_export.autor_id == oczekiwany_id
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_start_aplikacji_uzywa_aktywnego_loginu_z_ustawien(tmp_path, monkeypatch):
+    monkeypatch.setenv("USERDOMAIN", "POCZTA-POLSKA")
+    monkeypatch.setenv("USERNAME", "jkowalski")
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, ustawienia, uzytkownicy
+
+    katalog = tmp_path
+    login_rozszerzony = uzytkownicy.login_rozszerzony(
+        "POCZTA-POLSKA\\jkowalski", "Anna Nowak")
+    ustawienia.zapisz(katalog, {"aktywny_login": login_rozszerzony})
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        assert app.autor_id == uzytkownicy.uuid_uzytkownika(login_rozszerzony)
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
 def test_zakladka_przeglad_pokazuje_wpisana_transakcje(tmp_path):
     from zpo_tracker.gui.app import Aplikacja
     from zpo_tracker import dziennik

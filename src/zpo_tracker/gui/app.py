@@ -6,12 +6,13 @@ wprowadzanie, import/export, słowniki - dochodzą w kolejnych krokach).
 import logging
 import os
 import tkinter as tk
+import uuid
 from datetime import date
 from pathlib import Path
 from tkinter import messagebox, ttk
 
-from zpo_tracker import blokada, dziennik, kopie, operacje, repo, uzytkownicy, zrzuty
-from zpo_tracker.gui.dialog_uzytkownika import DialogUzytkownika
+from zpo_tracker import blokada, dziennik, kopie, operacje, repo, ustawienia, uzytkownicy, zrzuty
+from zpo_tracker.gui.dialog_uzytkownika import DialogUzytkownika, DialogWyboruUzytkownika
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
 from zpo_tracker.gui.zakladka_import_export import ZakladkaImportExport
@@ -118,6 +119,12 @@ class Aplikacja(tk.Tk):
         self.conn = repo.polacz(self.sciezka_bazy)
         _upewnij_schemat(self.conn)
 
+        # 0.1-alpha.3.2: losowy klucz grupujący "co wpisałem w TYM
+        # uruchomieniu" (podgląd formularza, widok poprawek) - NIE
+        # tożsamość jak UUIDv5 w uzytkownicy.py, więc losowy jest tu
+        # poprawny mimo że niedeterministyczny między stacjami.
+        self.sesja_uuid = str(uuid.uuid4())
+
         # haki muszą wisieć na instancji Tk: sys.excepthook NIE łapie
         # wyjątków z callbacków widgetów (patrz dziennik.py)
         self.katalog_danych = _katalog_logow(sciezka_bazy)
@@ -155,27 +162,37 @@ class Aplikacja(tk.Tk):
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True)
 
-        self.zakladka_przeglad = ZakladkaPrzeglad(self.notebook, self.conn)
-        self.notebook.add(self.zakladka_przeglad, text="Przeglądanie")
-
-        self.zakladka_slowniki = ZakladkaSlowniki(
-            self.notebook, self.conn, self.katalog_danych)
-
-        # dane wchodzą do bazy w kilku miejscach (formularz, import) i
-        # wpływają na wszystkie zakładki, które je pokazują - jeden wspólny
-        # callback zamiast osobno pamiętać, co trzeba odświeżyć gdzie
+        # dane wchodzą do bazy w kilku miejscach (formularz, import,
+        # poprawki w Przeglądzie) i wpływają na wszystkie zakładki, które
+        # je pokazują - jeden wspólny callback zamiast osobno pamiętać, co
+        # trzeba odświeżyć gdzie. Zdefiniowany PRZED zakładkami, bo
+        # ZakladkaPrzeglad (0.1-alpha.3.2, widok poprawek) potrzebuje go
+        # już przy konstrukcji - domknięcie odwołuje się do `self.*`
+        # rozstrzyganych dopiero przy WYWOŁANIU, więc kolejność jest
+        # bezpieczna mimo że część zakładek jeszcze nie istnieje.
         def odswiez_po_zmianie():
             self.zakladka_przeglad.odswiez()
             self.zakladka_slowniki.odswiez_wszystko()
             self.zakladka_historia.odswiez()
 
+        self.zakladka_przeglad = ZakladkaPrzeglad(
+            self.notebook, self.conn, katalog_danych=self.katalog_danych,
+            sesja_uuid=self.sesja_uuid, on_zmieniono=odswiez_po_zmianie,
+        )
+        self.notebook.add(self.zakladka_przeglad, text="Przeglądanie")
+
+        self.zakladka_slowniki = ZakladkaSlowniki(
+            self.notebook, self.conn, self.katalog_danych)
+
         self.zakladka_wprowadzanie = ZakladkaWprowadzanie(
-            self.notebook, self.conn, self.katalog_danych, on_zapisano=odswiez_po_zmianie
+            self.notebook, self.conn, self.katalog_danych, on_zapisano=odswiez_po_zmianie,
+            sesja_uuid=self.sesja_uuid,
         )
         self.notebook.add(self.zakladka_wprowadzanie, text="Wprowadzanie")
 
         self.zakladka_import_export = ZakladkaImportExport(
-            self.notebook, self.conn, self.katalog_danych, on_zaimportowano=odswiez_po_zmianie
+            self.notebook, self.conn, self.katalog_danych, on_zaimportowano=odswiez_po_zmianie,
+            sesja_uuid=self.sesja_uuid,
         )
         self.notebook.add(self.zakladka_import_export, text="Import / Export")
 
@@ -190,7 +207,22 @@ class Aplikacja(tk.Tk):
             self.notebook, self.katalog_danych, on_cofnij=self.cofnij_do)
         self.notebook.add(self.zakladka_historia, text="Historia")
 
+        self._zbuduj_menu_uzytkownika()
         self._ustal_uzytkownika()
+
+    def _zbuduj_menu_uzytkownika(self):
+        """
+        0.1-alpha.3.2: konta Windows bywają współdzielone przez kilka osób
+        na jednej stacji - to menu pozwala jawnie powiedzieć "teraz pracuję
+        ja", bez polegania wyłącznie na cichym wykryciu konta systemowego.
+        """
+        pasek = tk.Menu(self)
+        self.config(menu=pasek)
+        self._menu_uzytkownika = tk.Menu(pasek, tearoff=False)
+        self._menu_uzytkownika.add_command(
+            label="Zmień użytkownika…", command=self._zmien_uzytkownika)
+        self._menu_uzytkownika.add_command(label="Wyloguj", command=self._wyloguj)
+        pasek.add_cascade(label="Użytkownik", menu=self._menu_uzytkownika)
 
     def cofnij_do(self, seq_docelowy):
         """
@@ -208,27 +240,61 @@ class Aplikacja(tk.Tk):
     def _ustal_uzytkownika(self):
         """
         Kto siedzi przy tej stacji. Wykrycie konta Windows jest ciche;
-        popup pojawia się tylko wtedy, gdy brakuje imienia/nazwiska albo
-        numeru kadrowego. Brak atrybucji NIE blokuje pracy - `autor_id`
-        zostaje pusty i tyle.
+        popup pojawia się tylko wtedy, gdy brakuje imienia/nazwiska. Brak
+        atrybucji NIE blokuje pracy - `autor_id` zostaje pusty i tyle.
+
+        0.1-alpha.3.2: `self.login` to zawsze SUROWE konto Windows (baza do
+        listowania w oknie wyboru, `uzytkownicy.znajdz_konta_dla_loginu`).
+        Faktyczna tożsamość atrybucji to `self.login_aktywny` - domyślnie
+        taki sam jak `self.login`, ale może to być login rozszerzony
+        (`uzytkownicy.login_rozszerzony`) zapamiętany w `settings.json`,
+        gdy na koncie pracuje kilka osób (patrz _na_wybrano_uzytkownika).
         """
         self.login = uzytkownicy.biezacy_login()
+        self.login_aktywny = self.login
         self.autor_id = None
         if not self.login:
             return
-        self.autor_id = uzytkownicy.zapewnij_uzytkownika(self.conn, self.login)
-        if uzytkownicy.wymaga_uzupelnienia(self.conn, self.login):
+        dane_ustawien = ustawienia.wczytaj(self.katalog_danych)
+        self.login_aktywny = dane_ustawien.get("aktywny_login") or self.login
+        self.autor_id = uzytkownicy.zapewnij_uzytkownika(self.conn, self.login_aktywny)
+        if uzytkownicy.wymaga_uzupelnienia(self.conn, self.login_aktywny):
             # after_idle: okno główne musi być już narysowane, inaczej
             # modal wisi nad pustym prostokątem
             self.after_idle(self._popros_o_dane_uzytkownika)
 
     def _popros_o_dane_uzytkownika(self):
-        DialogUzytkownika(self, self.conn, self.login,
+        DialogUzytkownika(self, self.conn, self.login_aktywny,
                           on_gotowe=self._zapamietaj_autora)
 
     def _zapamietaj_autora(self, autor_id):
         self.autor_id = autor_id
         self.zakladka_wprowadzanie.autor_id = autor_id
+        self.zakladka_import_export.autor_id = autor_id
+
+    def _zmien_uzytkownika(self):
+        DialogWyboruUzytkownika(
+            self, self.conn, self.login, on_wybrano=self._na_wybrano_uzytkownika)
+
+    def _wyloguj(self):
+        """Usuwa zapamiętany wybór i od razu każe wybrać ponownie - inaczej
+        następne uruchomienie po prostu wróciłoby do tej samej osoby."""
+        dane_ustawien = ustawienia.wczytaj(self.katalog_danych)
+        dane_ustawien.pop("aktywny_login", None)
+        ustawienia.zapisz(self.katalog_danych, dane_ustawien)
+        self._zmien_uzytkownika()
+
+    def _na_wybrano_uzytkownika(self, login):
+        dane_ustawien = ustawienia.wczytaj(self.katalog_danych)
+        dane_ustawien["aktywny_login"] = login
+        ustawienia.zapisz(self.katalog_danych, dane_ustawien)
+
+        self.login_aktywny = login
+        self.autor_id = uzytkownicy.zapewnij_uzytkownika(self.conn, login)
+        self.zakladka_wprowadzanie.autor_id = self.autor_id
+        self.zakladka_import_export.autor_id = self.autor_id
+        if uzytkownicy.wymaga_uzupelnienia(self.conn, login):
+            self.after_idle(self._popros_o_dane_uzytkownika)
 
     def destroy(self):
         self.conn.close()

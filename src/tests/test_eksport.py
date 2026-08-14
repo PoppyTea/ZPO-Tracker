@@ -75,7 +75,9 @@ def test_eksportuj_miesiac_zapisuje_plik_z_poprawnym_arkuszem(conn, tmp_path):
     assert wiersz[0].date() == date(2026, 8, 3)  # openpyxl zawsze odczytuje jako datetime
     assert wiersz[3] == "Kowalski Jan"
     assert wiersz[5] == 3  # ilosc_total jako int
-    assert wiersz[7] == 228648  # PNI jako int, kanonicznie czyste
+    # PNI jako TEKST (0.1-alpha.3.2) - to klucz tożsamości punktu, a nie
+    # liczba: rzutowanie na int gubiło zera wiodące i rozdwajało punkt
+    assert wiersz[7] == "228648"
 
 
 def test_eksportuj_miesiac_pomija_inne_miesiace(conn, tmp_path):
@@ -117,12 +119,14 @@ def test_round_trip_import_export_na_realnych_danych(conn, tmp_path):
     naglowki_export = [c.value for c in next(ws_export.iter_rows(min_row=1, max_row=1))]
     assert naglowki_export == eksport.NAGLOWKI
 
-    # typy komórek: kanonicznie czyste, nie odtwarzają niespójności źródła
+    # typy komórek: kanonicznie czyste, nie odtwarzają niespójności źródła.
+    # PNI jest WYJĄTKIEM od 0.1-alpha.3.2 - zostaje TEKSTEM, patrz
+    # test_pni_eksportuje_sie_jako_tekst_zachowujac_zera_wiodace
     for row in ws_export.iter_rows(min_row=2):
         assert isinstance(row[0].value, date)          # data
         assert isinstance(row[5].value, int)            # ilosc_total
         if row[7].value is not None:                    # PNI ZPO
-            assert isinstance(row[7].value, int)
+            assert isinstance(row[7].value, str)
 
 
 def test_round_trip_rejon_smieciowy_eksportuje_sie_jako_kanoniczny(conn, tmp_path):
@@ -147,3 +151,92 @@ def test_round_trip_rejon_smieciowy_eksportuje_sie_jako_kanoniczny(conn, tmp_pat
     wiersz_eksportu = next(ws.iter_rows(min_row=2, max_row=2))
     indeks_rejonu = eksport.NAGLOWKI.index("Rejon")
     assert wiersz_eksportu[indeks_rejonu].value == REJON_NIEZNANY
+
+
+# --- 0.1-alpha.3.2: PNI jako tekst (koercja do int gubiła zera wiodące) ---
+
+def test_pni_eksportuje_sie_jako_tekst_zachowujac_zera_wiodace(conn, tmp_path):
+    # do 0.1-alpha.3.1 eksport rzutował PNI "007" -> int 7, a reimport czytał
+    # "7" - ten sam fizyczny punkt dostawał DWA różne klucze i powstawał
+    # duplikat. Samo-zadana korupcja, bez udziału żadnego obcego pliku.
+    kurier_id = conn.execute(
+        "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Kowalski Jan')").lastrowid
+    punkt_id = conn.execute(
+        "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES ('Żabka', 'Odkryta 24', '007')"
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total)"
+        " VALUES ('2026-08-03', ?, ?, 3)", (kurier_id, punkt_id))
+
+    sciezka = tmp_path / "export.xlsx"
+    eksport.eksportuj_miesiac(conn, 2026, 8, sciezka)
+
+    ws = openpyxl.load_workbook(sciezka)[nazwa_arkusza(2026, 8)]
+    wiersz = next(ws.iter_rows(min_row=2, max_row=2, values_only=True))
+    assert wiersz[eksport.NAGLOWKI.index("PNI ZPO")] == "007"
+
+
+# --- 0.1-alpha.3.2: znacznik pochodzenia + odcisk palca danych ---
+
+def test_eksport_zapisuje_znacznik_i_odcisk(conn, tmp_path):
+    _wstaw_prosta_transakcje(conn)
+    sciezka = tmp_path / "export.xlsx"
+    eksport.eksportuj_miesiac(conn, 2026, 8, sciezka)
+
+    wb = openpyxl.load_workbook(sciezka)
+    nazwy = {p.name for p in wb.custom_doc_props.props}
+    assert eksport.NAZWA_ZNACZNIKA in nazwy
+    assert eksport.NAZWA_ODCISKU in nazwy
+
+
+def test_wlasny_nietkniety_eksport_jest_zaufany(conn, tmp_path):
+    _wstaw_prosta_transakcje(conn)
+    sciezka = tmp_path / "export.xlsx"
+    eksport.eksportuj_miesiac(conn, 2026, 8, sciezka)
+
+    assert eksport.zweryfikuj_plik(sciezka) == eksport.PLIK_ZAUFANY
+
+
+def test_plik_bez_znacznika_jest_obcy(tmp_path):
+    wb = openpyxl.Workbook()
+    wb.active.append(eksport.NAGLOWKI)
+    sciezka = tmp_path / "obcy.xlsx"
+    wb.save(sciezka)
+
+    assert eksport.zweryfikuj_plik(sciezka) == eksport.PLIK_OBCY
+
+
+def test_plik_ze_znacznikiem_ale_zmieniona_komorka_jest_zmodyfikowany(conn, tmp_path):
+    # sedno decyzji Papavera: ludziom modyfikującym pliki Excela nie ufamy -
+    # znacznik bez zgodnego odcisku NIE może uchodzić za zaufany
+    _wstaw_prosta_transakcje(conn)
+    sciezka = tmp_path / "export.xlsx"
+    eksport.eksportuj_miesiac(conn, 2026, 8, sciezka)
+
+    wb = openpyxl.load_workbook(sciezka)
+    ws = wb[nazwa_arkusza(2026, 8)]
+    ws.cell(row=2, column=6).value = 999  # ktoś "poprawił" ilość w Excelu
+    wb.save(sciezka)
+
+    assert eksport.zweryfikuj_plik(sciezka) == eksport.PLIK_ZMODYFIKOWANY
+
+
+def test_odcisk_zalezy_od_zawartosci_a_nie_od_kolejnosci_zapisu(conn, tmp_path):
+    # dwa eksporty tych samych danych muszą dać ten sam odcisk - inaczej
+    # własny plik po prostu nigdy by się nie zweryfikował
+    _wstaw_prosta_transakcje(conn)
+    a, b = tmp_path / "a.xlsx", tmp_path / "b.xlsx"
+    eksport.eksportuj_miesiac(conn, 2026, 8, a)
+    eksport.eksportuj_miesiac(conn, 2026, 8, b)
+
+    def odcisk(sciezka):
+        wb = openpyxl.load_workbook(sciezka)
+        return wb.custom_doc_props[eksport.NAZWA_ODCISKU].value
+
+    assert odcisk(a) == odcisk(b)
+
+
+def test_zweryfikuj_plik_nieczytelny_nie_wybucha(tmp_path):
+    sciezka = tmp_path / "uszkodzony.xlsx"
+    sciezka.write_text("to nie jest xlsx", encoding="utf-8")
+    assert eksport.zweryfikuj_plik(sciezka) == eksport.PLIK_OBCY
