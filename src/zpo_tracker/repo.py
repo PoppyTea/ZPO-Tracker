@@ -582,6 +582,159 @@ def historia_rejonow_punktu(conn, punkt_id):
     return [dict(w) for w in wiersze]
 
 
+# --- korekty (0.1-alpha.3.2): edycja i usuwanie transakcji ---
+#
+# Pierwsze w projekcie destrukcyjne prymitywy na `transakcje` poza importem/
+# formularzem - dotąd istniał wyłącznie INSERT (plus jeden UPDATE ilości,
+# WYŁĄCZNIE w scalanie.py, przy jawnym rozstrzygnięciu konfliktu). Świadomie
+# BEZ nadawcy/adresu/PNI: przepięcie wiersza na inny punkt to inna klasa
+# ryzyka (cicha zmiana historii punktu) niż poprawka daty/ilości/rejonu -
+# korekta punktu w tym wydaniu to usuń + wpisz ponownie w formularzu,
+# z pełną dedukcją. Patrz docs/roadmap.md.
+
+KOLUMNY_EDYTOWALNE_TRANSAKCJI = {
+    "data", "kurier", "wykonawca", "rejon", "ilosc_total", "ilosc_zpo",
+}
+
+
+class KolizjaTransakcji(Exception):
+    """
+    Docelowa trójka (data, kurier, punkt) już istnieje na INNYM wierszu.
+    Reguła projektu: konflikt wartości nigdy nie jest rozstrzygany
+    automatycznie (docs/roadmap.md) - operacja się nie udaje, baza zostaje
+    całkowicie nietknięta, użytkownik dostaje czytelny opis kolidującego
+    wiersza (patrz `_opisz_transakcje`) zamiast gołego "UNIQUE failed".
+    """
+
+
+def _opisz_transakcje(conn, transakcja_id):
+    w = conn.execute(
+        """SELECT t.data, k.imie_nazwisko AS kurier, p.nadawca, p.adres,
+                  t.ilosc_total, t.ilosc_zpo
+           FROM transakcje t
+           JOIN kurierzy k ON k.id = t.kurier_id
+           JOIN punkty p ON p.id = t.punkt_id
+           WHERE t.id = ?""",
+        (transakcja_id,),
+    ).fetchone()
+    if w is None:
+        return f"transakcja #{transakcja_id}"
+    opis = f"{w['data']} / {w['kurier']} / {w['nadawca']} ({w['adres']}) - ilość {w['ilosc_total']}"
+    if w["ilosc_zpo"] is not None:
+        opis += f", w tym ZPO {w['ilosc_zpo']}"
+    return opis
+
+
+def _zaktualizuj_transakcje_bez_transakcji(conn, transakcja_id, zmiany, teraz):
+    nieznane = set(zmiany) - KOLUMNY_EDYTOWALNE_TRANSAKCJI
+    if nieznane:
+        raise ValueError(
+            f"nieedytowalne/nieznane pole(a): {', '.join(sorted(nieznane))} - "
+            f"dozwolone: {', '.join(sorted(KOLUMNY_EDYTOWALNE_TRANSAKCJI))}")
+
+    obecna = conn.execute(
+        "SELECT data, kurier_id, punkt_id FROM transakcje WHERE id = ?",
+        (transakcja_id,),
+    ).fetchone()
+    if obecna is None:
+        raise ValueError(f"transakcja #{transakcja_id} nie istnieje")
+
+    if "data" in zmiany:
+        wartosc_daty = zmiany["data"]
+        nowa_data = (wartosc_daty.isoformat() if hasattr(wartosc_daty, "isoformat")
+                     else wartosc_daty)
+    else:
+        nowa_data = obecna["data"]
+    nowy_kurier_id = (get_or_create_kurier(conn, zmiany["kurier"])
+                       if "kurier" in zmiany else obecna["kurier_id"])
+
+    # kolizja sprawdzana WYŁĄCZNIE gdy zmienia się faktycznie część klucza
+    # naturalnego (data/kurier) - zmiana samej ilości/rejonu/wykonawcy nigdy
+    # nie może kolidować, bo nie są częścią UNIQUE(data, kurier_id, punkt_id)
+    if (nowa_data, nowy_kurier_id) != (obecna["data"], obecna["kurier_id"]):
+        kolidujaca = conn.execute(
+            "SELECT id FROM transakcje"
+            " WHERE data = ? AND kurier_id = ? AND punkt_id = ? AND id != ?",
+            (nowa_data, nowy_kurier_id, obecna["punkt_id"], transakcja_id),
+        ).fetchone()
+        if kolidujaca:
+            raise KolizjaTransakcji(
+                "Taka transakcja już istnieje: " + _opisz_transakcje(conn, kolidujaca["id"]))
+
+    kolumny_sql, wartosci = [], []
+    if "data" in zmiany:
+        kolumny_sql.append("data = ?")
+        wartosci.append(nowa_data)
+    if "kurier" in zmiany:
+        kolumny_sql.append("kurier_id = ?")
+        wartosci.append(nowy_kurier_id)
+    if "wykonawca" in zmiany:
+        kolumny_sql.append("wykonawca_id = ?")
+        wartosci.append(get_or_create_wykonawca(conn, zmiany["wykonawca"]))
+    if "rejon" in zmiany:
+        kolumny_sql.append("rejon_id = ?")
+        wartosci.append(get_or_create_rejon(conn, zmiany["rejon"]))
+    if "ilosc_total" in zmiany:
+        kolumny_sql.append("ilosc_total = ?")
+        wartosci.append(zmiany["ilosc_total"])
+    if "ilosc_zpo" in zmiany:
+        kolumny_sql.append("ilosc_zpo = ?")
+        wartosci.append(zmiany["ilosc_zpo"])
+
+    if not kolumny_sql:
+        return
+
+    kolumny_sql.append("zmodyfikowano = ?")
+    wartosci.append(teraz)
+    wartosci.append(transakcja_id)
+    conn.execute(
+        f"UPDATE transakcje SET {', '.join(kolumny_sql)} WHERE id = ?", wartosci)
+
+
+def zaktualizuj_transakcje(conn, transakcja_id, zmiany, teraz=None):
+    """
+    Poprawia jeden zapisany wiersz. `zmiany`: dict, klucze z
+    `KOLUMNY_EDYTOWALNE_TRANSAKCJI` (data/kurier/wykonawca/rejon/
+    ilosc_total/ilosc_zpo - patrz komentarz nad sekcją). Rzuca
+    `KolizjaTransakcji`, jeśli docelowa trójka (data, kurier, punkt) już
+    należy do INNEGO wiersza - baza zostaje wtedy całkowicie nietknięta.
+    Atomowe (`transakcja`).
+    """
+    teraz = teraz or datetime.now().isoformat(timespec="seconds")
+    with transakcja(conn):
+        _zaktualizuj_transakcje_bez_transakcji(conn, transakcja_id, zmiany, teraz)
+
+
+def usun_transakcje(conn, ids):
+    """Usuwa podane transakcje atomowo. Zwraca liczbę faktycznie usuniętych
+    wierszy (0 dla pustej listy, bez zapytania do bazy)."""
+    ids = list(ids)
+    if not ids:
+        return 0
+    with transakcja(conn):
+        cur = conn.execute(
+            f"DELETE FROM transakcje WHERE id IN ({','.join('?' * len(ids))})", ids)
+        return cur.rowcount
+
+
+def ustaw_pole_transakcji(conn, ids, pole, wartosc, teraz=None):
+    """
+    Ustawia JEDNO pole na wielu transakcjach naraz, w jednym SAVEPOINT -
+    pierwsza kolizja (`KolizjaTransakcji`) wycofuje CAŁOŚĆ, nie tylko
+    kolidujący wiersz (ten sam wzorzec co `scal_kurierow`): "zmień 5
+    wierszy, ale nie ten jeden" byłoby ciche i mylące dla użytkownika,
+    który zaznaczył je jako jedną operację.
+    """
+    if pole not in KOLUMNY_EDYTOWALNE_TRANSAKCJI:
+        raise ValueError(
+            f"nieedytowalne/nieznane pole: {pole} - "
+            f"dozwolone: {', '.join(sorted(KOLUMNY_EDYTOWALNE_TRANSAKCJI))}")
+    teraz = teraz or datetime.now().isoformat(timespec="seconds")
+    with transakcja(conn):
+        for transakcja_id in ids:
+            _zaktualizuj_transakcje_bez_transakcji(conn, transakcja_id, {pole: wartosc}, teraz)
+
+
 def historia_wykonawcow_kuriera(conn, kurier):
     """
     Wykonawcy, dla których historycznie jeździł ten kurier - świeższy
