@@ -159,7 +159,9 @@ class DialogKorektyImportu(tk.Toplevel):
             wraplength=600, justify="left",
         ).pack(anchor="w")
 
-        zaawansowane = ustawienia.wczytaj(self.katalog_danych).get("zaawansowane", {})
+        zaawansowane = ustawienia.wczytaj(self.katalog_danych).get("zaawansowane")
+        if not isinstance(zaawansowane, dict):
+            zaawansowane = {}
         if (self.status_zaufania == eksport.PLIK_OBCY
                 and zaawansowane.get("pokaz_wymuszenie_zaufania")):
             self.checkbox_wymuszenia = ttk.Checkbutton(
