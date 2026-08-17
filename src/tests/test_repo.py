@@ -425,6 +425,16 @@ def test_pobierz_transakcje_filtruje_po_tekscie_nadawcy_lub_adresu(conn):
     assert wiersze_nadawcy[0]["nadawca"] == "ZUS"
 
 
+def test_pobierz_transakcje_tekst_nie_traktuje_procenta_jako_wieloznacznika(conn):
+    # pole "Szukaj" to wejście użytkownika, nie wzorzec LIKE - "%"/"_"
+    # muszą szukać dosłownego znaku, inaczej "%" dopasowuje wszystko i
+    # "Odkryta_24" dopasowuje też "Odkryta 24"
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=1)]))
+    assert repo.pobierz_transakcje(conn, tekst="%") == []
+    assert repo.pobierz_transakcje(conn, tekst="Odkryta_24") == []
+
+
 def test_pobierz_transakcje_filtry_laczone_koniunkcja(conn):
     repo.zapisz_blankiet(conn, _blok(kurier="Kowalski Jan", data=date(2026, 8, 1)))
     repo.zapisz_blankiet(conn, _blok(kurier="Kowalski Jan", data=date(2026, 8, 20), wiersze=[

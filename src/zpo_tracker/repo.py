@@ -590,7 +590,8 @@ def pobierz_punkty(conn):
 
 
 def pobierz_transakcje(conn, limit=200, *, kurier=None, data_od=None, data_do=None,
-                        utworzono_od=None, utworzono_do=None, sesja_uuid=None, tekst=None):
+                        utworzono_od=None, utworzono_do=None, sesja_uuid=None, tekst=None,
+                        zrodlo=None):
     """
     Lista transakcji do przeglądania, najnowsze pierwsze, z nazwami zamiast
     ID. Dokłada `id`/`uuid`/`utworzono`/`sesja_uuid`/`zrodlo` (0.1-alpha.3.2)
@@ -601,9 +602,14 @@ def pobierz_transakcje(conn, limit=200, *, kurier=None, data_od=None, data_do=No
     dat ORAZ ..."): `kurier` (dokładne dopasowanie nazwy), `data_od`/
     `data_do` (zakres daty TRANSAKCJI, `date` albo string ISO), `utworzono_od`/
     `utworzono_do` (zakres znacznika wprowadzenia), `sesja_uuid` (dokładne
-    dopasowanie), `tekst` (dopasowanie częściowe nadawcy LUB adresu).
+    dopasowanie), `tekst` (dopasowanie częściowe nadawcy LUB adresu),
+    `zrodlo` (dokładne dopasowanie - podgląd formularza filtruje po
+    `"formularz"`, żeby import w tej samej sesji nie wskakiwał obok).
     """
     warunki, parametry = [], []
+    if zrodlo is not None:
+        warunki.append("t.zrodlo = ?")
+        parametry.append(zrodlo)
     if kurier is not None:
         warunki.append("k.imie_nazwisko = ?")
         parametry.append(kurier)
@@ -623,8 +629,12 @@ def pobierz_transakcje(conn, limit=200, *, kurier=None, data_od=None, data_do=No
         warunki.append("t.sesja_uuid = ?")
         parametry.append(sesja_uuid)
     if tekst is not None:
-        warunki.append("(p.nadawca LIKE ? OR p.adres LIKE ?)")
-        wzorzec = f"%{tekst}%"
+        # tekst to wejście użytkownika, nie wzorzec LIKE - "%"/"_" muszą
+        # szukać dosłownego znaku, więc escapujemy je PRZED doklejeniem
+        # otaczających "%" i mówimy SQLite, że "\" jest znakiem ucieczki
+        warunki.append("(p.nadawca LIKE ? ESCAPE '\\' OR p.adres LIKE ? ESCAPE '\\')")
+        tekst_escapowany = tekst.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        wzorzec = f"%{tekst_escapowany}%"
         parametry.extend([wzorzec, wzorzec])
 
     gdzie = f"WHERE {' AND '.join(warunki)}" if warunki else ""

@@ -382,7 +382,7 @@ def test_migracja_z_alpha3_bez_indeksow_dokłada_je():
         repo.migruj(conn)
         conn.execute("DROP INDEX idx_transakcje_kurier")
         conn.execute("DROP INDEX idx_punkty_adres")
-        conn.execute(f"PRAGMA user_version = 1")  # cofnij, jakby to była realna baza v1
+        conn.execute("PRAGMA user_version = 1")  # cofnij, jakby to była realna baza v1
 
         repo.migruj(conn)
 
@@ -409,7 +409,7 @@ def test_migracja_z_alpha3_1_dokłada_sesje_i_zrodlo():
     conn = _baza_alpha2()
     try:
         repo.migruj(conn)
-        conn.execute(f"PRAGMA user_version = 2")  # cofnij, jakby to była realna baza v2
+        conn.execute("PRAGMA user_version = 2")  # cofnij, jakby to była realna baza v2
 
         repo.migruj(conn)
 
