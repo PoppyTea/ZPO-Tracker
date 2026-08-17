@@ -22,6 +22,15 @@ def test_wczytaj_plik_ktory_nie_jest_obiektem_zwraca_puste(tmp_path):
     assert ustawienia.wczytaj(tmp_path) == {}
 
 
+def test_wczytaj_plik_w_zlym_kodowaniu_zwraca_puste_zamiast_wybuchac(tmp_path):
+    # UnicodeDecodeError dziedziczy z ValueError, nie z OSError - plik
+    # zapisany w innym kodowaniu (albo uszkodzony bajtowo) nie może
+    # zablokować startu aplikacji, tak samo jak uszkodzony JSON
+    (tmp_path / ustawienia.NAZWA_PLIKU).write_bytes(
+        '{"aktywny_login": "Zażółć"}'.encode("cp1250"))
+    assert ustawienia.wczytaj(tmp_path) == {}
+
+
 def test_zapisz_i_wczytaj_round_trip(tmp_path):
     ustawienia.zapisz(tmp_path, {"aktywny_login": "DOM\\a#Jan Kowalski"})
     assert ustawienia.wczytaj(tmp_path) == {"aktywny_login": "DOM\\a#Jan Kowalski"}

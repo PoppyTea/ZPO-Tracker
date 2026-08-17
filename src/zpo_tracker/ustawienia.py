@@ -27,7 +27,9 @@ def wczytaj(katalog_danych):
     try:
         with open(_sciezka(katalog_danych), encoding="utf-8") as f:
             dane = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+    # ValueError pokrywa też UnicodeDecodeError (dziedziczy z ValueError, nie
+    # z OSError) - plik w innym kodowaniu nie może zablokować startu
+    except (OSError, ValueError):
         return {}
     return dane if isinstance(dane, dict) else {}
 
