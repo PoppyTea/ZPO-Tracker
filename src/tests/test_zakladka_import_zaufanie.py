@@ -87,6 +87,15 @@ def test_z_wpisem_w_ustawieniach_przelacznik_istnieje_ale_odznaczony(root, conn,
     assert dialog.var_wymus_zaufanie.get() is False  # per użycie, nigdy domyślnie
 
 
+def test_zle_wpisana_sekcja_zaawansowane_nie_wysadza_dialogu(root, conn, tmp_path):
+    # settings.json jest edytowany ręcznie - "zaawansowane": true zamiast
+    # obiektu nie może wysadzić dialogu korekty importu (ta sama zasada co
+    # przy eksport.zweryfikuj_plik: decyzja o zaufaniu nie wysadza importu)
+    ustawienia.zapisz(tmp_path, {"zaawansowane": True})
+    dialog = _dialog(root, conn, tmp_path, eksport.PLIK_OBCY)
+    assert dialog.checkbox_wymuszenia is None
+
+
 def test_dla_pliku_zmodyfikowanego_przelacznik_nie_istnieje_mimo_wpisu(root, conn, tmp_path):
     # sedno decyzji Papavera: plik z NASZYM znacznikiem, ale zmienioną
     # zawartością, nie może zostać uznany za zaufany ŻADNĄ drogą - również

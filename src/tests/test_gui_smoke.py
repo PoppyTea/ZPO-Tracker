@@ -163,6 +163,30 @@ def test_wyloguj_usuwa_aktywny_login_i_otwiera_wybor(tmp_path, monkeypatch):
         dziennik.odepnij()
 
 
+def test_wyloguj_czysci_autora_przed_wyborem_nowego(tmp_path, monkeypatch):
+    # jeżeli użytkownik zamknie okno wyboru bez wybrania nikogo, kolejne
+    # zapisy NIE mogą zostać przypisane poprzedniej osobie
+    monkeypatch.setenv("USERDOMAIN", "POCZTA-POLSKA")
+    monkeypatch.setenv("USERNAME", "jkowalski")
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik
+
+    app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
+    try:
+        assert app.autor_id is not None
+        monkeypatch.setattr(
+            "zpo_tracker.gui.app.DialogWyboruUzytkownika", lambda *a, **k: None)
+
+        app._wyloguj()
+
+        assert app.autor_id is None
+        assert app.zakladka_wprowadzanie.autor_id is None
+        assert app.zakladka_import_export.autor_id is None
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
 def test_wybor_uzytkownika_aktualizuje_autora_we_wszystkich_zakladkach(tmp_path, monkeypatch):
     monkeypatch.setenv("USERDOMAIN", "POCZTA-POLSKA")
     monkeypatch.setenv("USERNAME", "jkowalski")
@@ -199,6 +223,33 @@ def test_start_aplikacji_uzywa_aktywnego_loginu_z_ustawien(tmp_path, monkeypatch
     app = Aplikacja(sciezka_bazy=str(tmp_path / "test.db"))
     try:
         assert app.autor_id == uzytkownicy.uuid_uzytkownika(login_rozszerzony)
+    finally:
+        app.destroy()
+        dziennik.odepnij()
+
+
+def test_start_z_istniejacym_aliasem_przekazuje_autora_do_zakladek(tmp_path, monkeypatch):
+    # gdy alias jest już zapisany, wymaga_uzupelnienia() zwraca False i
+    # dialog uzupełnienia danych w ogóle się nie otwiera - _zapamietaj_autora
+    # (jedyne miejsce, które dotąd propagowało autor_id do zakładek) nigdy
+    # nie zostaje wywołane, więc nowe wpisy lądowałyby z autor_id = NULL
+    monkeypatch.setenv("USERDOMAIN", "POCZTA-POLSKA")
+    monkeypatch.setenv("USERNAME", "jkowalski")
+    from zpo_tracker.gui.app import Aplikacja
+    from zpo_tracker import dziennik, repo, uzytkownicy
+
+    sciezka_bazy = str(tmp_path / "test.db")
+    conn_wstepne = repo.polacz(sciezka_bazy)
+    repo.utworz_schemat(conn_wstepne)
+    uzytkownicy.zapewnij_uzytkownika(
+        conn_wstepne, "POCZTA-POLSKA\\jkowalski", alias="Jan Kowalski")
+    conn_wstepne.close()
+
+    app = Aplikacja(sciezka_bazy=sciezka_bazy)
+    try:
+        assert app.autor_id is not None
+        assert app.zakladka_wprowadzanie.autor_id == app.autor_id
+        assert app.zakladka_import_export.autor_id == app.autor_id
     finally:
         app.destroy()
         dziennik.odepnij()

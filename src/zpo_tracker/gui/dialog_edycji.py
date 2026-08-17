@@ -9,10 +9,14 @@ repo.KOLUMNY_EDYTOWALNE_TRANSAKCJI) - zmiana punktu to inna klasa ryzyka
 korekta punktu w tym wydaniu to usuń wiersz + wpisz ponownie w formularzu,
 z pełną dedukcją (docs/roadmap.md).
 """
+import re
 import tkinter as tk
+from datetime import date
 from tkinter import ttk
 
 from zpo_tracker import operacje, repo
+
+_WZORZEC_DATY_ISO = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def _sparsuj_ilosc(tekst, wymagane):
@@ -26,6 +30,22 @@ def _sparsuj_ilosc(tekst, wymagane):
     if wartosc < 0:
         raise ValueError("wartość ujemna")
     return wartosc
+
+
+def _sparsuj_date(tekst):
+    """
+    Zwraca string ISO RRRR-MM-DD, albo rzuca ValueError. Kolumna `data`
+    w SQLite nie ma typu - bez tej walidacji śmieciowa wartość wypada
+    z filtrów zakresu dat (`t.data >= ?` porównuje leksykograficznie)
+    i psuje sortowanie/eksport. Regex PRZED `date.fromisoformat`, bo od
+    Python 3.11 ta metoda akceptuje więcej formatów ISO 8601 niż tylko
+    RRRR-MM-DD (np. `20260810`) - tu ma przejść wyłącznie ten jeden format.
+    """
+    tekst = tekst.strip()
+    if not _WZORZEC_DATY_ISO.match(tekst):
+        raise ValueError("zły format daty")
+    date.fromisoformat(tekst)  # rzuca ValueError samo, jeśli data nie istnieje
+    return tekst
 
 
 class DialogEdycji(tk.Toplevel):
@@ -105,6 +125,11 @@ class DialogEdycji(tk.Toplevel):
             return
         if not kurier:
             self.etykieta_status.configure(text="Podaj kuriera.")
+            return
+        try:
+            data = _sparsuj_date(data)
+        except ValueError:
+            self.etykieta_status.configure(text="Data musi być w formacie RRRR-MM-DD.")
             return
         try:
             ilosc_total = _sparsuj_ilosc(self.var_ilosc_total.get(), wymagane=True)

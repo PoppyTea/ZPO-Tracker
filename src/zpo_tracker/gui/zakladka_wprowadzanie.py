@@ -478,7 +478,11 @@ class ZakladkaWprowadzanie(ttk.Frame):
         self._klucz_podswietlony = docelowy
 
     def odswiez_podglad(self):
-        filtr_sesji = {} if self.var_pokaz_wszystko.get() else {"sesja_uuid": self.sesja_uuid}
+        # import używa TEGO SAMEGO sesja_uuid, gdy odpalony w tym samym
+        # uruchomieniu - zrodlo="formularz" wyklucza jego wiersze, bo import
+        # ma własny ekran korekty do przeglądania swoich wyników
+        filtr_sesji = ({} if self.var_pokaz_wszystko.get()
+                        else {"sesja_uuid": self.sesja_uuid, "zrodlo": "formularz"})
         self.podglad.ustaw_dane(repo.pobierz_transakcje(self.conn, limit=500, **filtr_sesji))
 
     def _edytuj_z_podgladu(self, wiersz):

@@ -257,3 +257,15 @@ def test_znajdz_konta_dla_loginu_nie_zwraca_obcych_kont(conn):
     konta = uzytkownicy.znajdz_konta_dla_loginu(conn, "DOM\\a")
 
     assert {k["alias"] for k in konta} == {"A"}
+
+
+def test_znajdz_konta_dla_loginu_nie_traktuje_podkreslenia_jak_wieloznacznika(conn):
+    # LIKE bez ESCAPE traktuje "_" jak "dowolny jeden znak" - login
+    # "DOM\\a_" nie może dopasować "DOM\\ab#..." innej osoby
+    uzytkownicy.zapewnij_uzytkownika(
+        conn, login=uzytkownicy.login_rozszerzony("DOM\\ab", "Cudze konto"),
+        alias="Cudze konto")
+
+    konta = uzytkownicy.znajdz_konta_dla_loginu(conn, "DOM\\a_")
+
+    assert konta == []

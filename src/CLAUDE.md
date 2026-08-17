@@ -109,8 +109,10 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   `historia_rejonow_punktu`/`historia_wykonawcow_kuriera`) — jedyny
   konsument to `dedukcja.py` niżej. `pobierz_transakcje` ma od
   `0.1-alpha.3.2` opcjonalne filtry (`kurier`/`data_od`/`data_do`/
-  `utworzono_od`/`utworzono_do`/`sesja_uuid`/`tekst`, łączone koniunkcją)
-  i zwraca też `id`/`uuid`/`utworzono`/`sesja_uuid`/`zrodlo` — widok
+  `utworzono_od`/`utworzono_do`/`sesja_uuid`/`tekst`/`zrodlo`, łączone
+  koniunkcją; `tekst` escapuje `%`/`_` przed doklejeniem do wzorca `LIKE` -
+  to wejście użytkownika, nie wzorzec) i zwraca też
+  `id`/`uuid`/`utworzono`/`sesja_uuid`/`zrodlo` — widok
   poprawek potrzebuje ich mimo że tabela ich nie pokazuje.
   `_resolve_schema_path` rozróżnia dev vs spakowany `.exe` (PyInstaller
   rozpakowuje dane do `sys._MEIPASS`).
@@ -329,7 +331,10 @@ wartości z pól i wywołanie warstwy logiki:
   gridzie — pole aktywowane niejednoznacznie (np. nadawca) może wylądować
   "za" polem, na którym użytkownik już jest.
   **Zmiany `0.1-alpha.3.2`:** podgląd filtruje domyślnie po `sesja_uuid`
-  (checkbox odsłania całą bazę), dwuklik w podglądzie otwiera
+  ORAZ `zrodlo="formularz"` (checkbox odsłania całą bazę, bez żadnego
+  z tych filtrów) - sam `sesja_uuid` nie wystarcza, bo import odpalony
+  w tym samym uruchomieniu dzieli sesję z formularzem, a ma własny ekran
+  korekty do przeglądania swoich wyników. Dwuklik w podglądzie otwiera
   `DialogEdycji`; Tab z ostatniego pola CAŁEJ kolejności dodaje nowy
   wiersz, ale tylko gdy ostatni wiersz nie jest pusty (predykat
   `dedukcja.czy_koniec_ostatniego_wiersza` — decyzja w logice, akcja w GUI);
@@ -406,9 +411,12 @@ wartości z pól i wywołanie warstwy logiki:
   gdy afordancja jest najbardziej potrzebna); domyślnie WYŁĄCZONE, żeby
   pełny słownik (kurier/nadawca/adres) nie wyskakiwał na każdy fokus.
   **Wpięty do `zakladka_wprowadzanie.py`** (kurier, nadawca, adres, a od
-  `0.1-alpha.3.1` też rejon i wykonawca — dla pokazywania kandydatów
-  dedukcji), źródło kandydatów z `repo.pobierz_punkty`/`pobierz_slownik`/
-  `dedukcja.StanPola.kandydaci`.
+  `0.1-alpha.3.1` też wykonawca — dla pokazywania kandydatów dedukcji),
+  źródło kandydatów z `repo.pobierz_punkty`/`pobierz_slownik`/
+  `dedukcja.StanPola.kandydaci`. Pole `rejon` korzysta z tego samego
+  widgetu, ale WYŁĄCZNIE jako prezentacja dedukcji (puste źródło
+  kandydatów) — od `0.1-alpha.3.2` nie jest już ręcznie edytowalne, patrz
+  `dedukcja.py` niżej.
 - `widget_pole.py` — `PoleZeWskaznikiem` (`0.1-alpha.3.1`): `tk.Frame`
   (NIE `ttk.Frame` — `highlightthickness`/`highlightbackground` na
   obwódkę jest opcją tk-ową) owijający widget pola paskiem koloru stanu
@@ -462,7 +470,8 @@ wskazuje na `uv`/inny menedżer zamiast na systemowego Pythona.
 `widget_autocomplete.py` zweryfikowany w izolacji przez systemowy Python:
 dropdown renderuje się poprawnie, dopasowanie rozmyte i klawiatura działają
 zgodnie z projektem. Wpięty do `zakladka_wprowadzanie.py` (kurier, nadawca,
-adres, rejon, wykonawca — patrz Local Contracts).
+adres, wykonawca — rejon też, ale wyłącznie jako prezentacja dedukcji, patrz
+Local Contracts).
 
 Dedukcja pól, wskaźniki i nawigacja (`0.1-alpha.3.1`) zweryfikowane
 bezgłowo pod Xvfb (`test_dedukcja.py`, `test_widget_pole.py`,

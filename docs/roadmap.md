@@ -28,7 +28,7 @@ ustalenia po `0.1-alpha.3` (info od Papavera).
 | `v0.1.0-alpha.2` | wydane | MVP: import/export, formularz blankietowy, słowniki, podpowiedzi |
 | `v0.1.0-alpha.3` | wydane | trwałość danych, atrybucja, ręczne scalanie baz (niżej) |
 | **`0.1-alpha.3.1`** | wydane | dedukcja pól formularza, wskaźniki stanu, tryb auto |
-| **`0.1-alpha.3.2`** | w toku | **używalność + zdrowie danych**: poprawki po zapisie, zaufanie importu |
+| **`0.1-alpha.3.2`** | wydane | **używalność + zdrowie danych**: poprawki po zapisie, zaufanie importu |
 | **`0.1-alpha.3.3/3.4`** | planowane | rejonarz jako źródło prawdy rejonów (+ backfill), narzędzie naprawy starych Exceli |
 | **`0.1-alpha.4`** | planowane | przebudowa UI/UX pod realne potrzeby + kanał feedbacku |
 | **`0.1-alpha.5`** | planowane | tryb pół-auto wprowadzania (wymaga sensownego interfejsu) |
@@ -171,7 +171,7 @@ Zakres do rozstrzygnięcia przy planowaniu:
 **Narzędzie naprawy starych Exceli** — osobny, jednorazowy program czyszczący
 zaległe miesiące PRZED importem do głównej aplikacji (docelowo dane przestają
 płynąć z Excela w ogóle). Zbiór wejściowy jest już wyznaczony przez
-`transakcje.zrodlo IS NULL OR 'import'`.
+`transakcje.zrodlo IS NULL OR transakcje.zrodlo = 'import'`.
 
 ### `0.1-alpha.4` — UI/UX
 

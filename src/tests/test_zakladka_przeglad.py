@@ -113,6 +113,31 @@ def test_checkbox_sesji_filtruje_do_biezacej(root, conn, tmp_path):
     assert zakladka.tabela._dane[0]["sesja_uuid"] == "sesja-biezaca"
 
 
+def test_etykieta_sygnalizuje_obciecie_wyniku_do_limitu(root, conn, tmp_path, monkeypatch):
+    # odswiez() pobiera maksymalnie 1000 wierszy - przy pełnym limicie
+    # etykieta musi to zasygnalizować, inaczej "1000 transakcji" wygląda
+    # jak cały zbiór, a operacje zbiorcze działają tylko na tym, co widać
+    zakladka = ZakladkaPrzeglad(root, conn, katalog_danych=tmp_path)
+    wiersze_obciete = [{"id": i} for i in range(1000)]
+    monkeypatch.setattr(
+        "zpo_tracker.gui.zakladka_przeglad.repo.pobierz_transakcje",
+        lambda *a, **k: wiersze_obciete,
+    )
+
+    zakladka.odswiez()
+
+    tekst = zakladka.etykieta_liczby.cget("text")
+    assert "1000" in tekst
+    assert "limit" in tekst.lower()
+
+
+def test_etykieta_bez_obciecia_nie_wspomina_limitu(root, conn, tmp_path):
+    _zapisz(conn)
+    zakladka = ZakladkaPrzeglad(root, conn, katalog_danych=tmp_path)
+
+    assert zakladka.etykieta_liczby.cget("text") == "1 transakcji"
+
+
 def test_dwuklik_otwiera_dialog_edycji_z_wlasciwym_wierszem(root, conn, tmp_path, monkeypatch):
     _zapisz(conn)
     zakladka = ZakladkaPrzeglad(root, conn, katalog_danych=tmp_path)
@@ -144,6 +169,21 @@ def test_ustaw_pole_zaznaczonym_aktualizuje_baze(root, conn, tmp_path):
     nazwy = [r[0] for r in conn.execute(
         "SELECT w.nazwa FROM transakcje t JOIN wykonawcy w ON w.id = t.wykonawca_id")]
     assert nazwy == ["Koli", "Koli"]
+
+
+def test_dialog_ustaw_pole_zbiorczo_odrzuca_zla_date(root, conn):
+    from zpo_tracker.gui.zakladka_przeglad import _DialogUstawPoleZbiorczo
+
+    wolania = []
+    dialog = _DialogUstawPoleZbiorczo(root, conn, on_zatwierdzono=lambda *a: wolania.append(a))
+    dialog.var_pole.set("data")
+    dialog.var_wartosc.set("10-08-2026")
+
+    dialog._zatwierdz()
+
+    assert wolania == []
+    assert dialog.winfo_exists()
+    assert dialog.etykieta_status.cget("text") != ""
 
 
 def test_usun_zaznaczone_z_potwierdzeniem_usuwa(root, conn, tmp_path, monkeypatch):

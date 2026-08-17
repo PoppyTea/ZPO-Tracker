@@ -258,6 +258,12 @@ class Aplikacja(tk.Tk):
         dane_ustawien = ustawienia.wczytaj(self.katalog_danych)
         self.login_aktywny = dane_ustawien.get("aktywny_login") or self.login
         self.autor_id = uzytkownicy.zapewnij_uzytkownika(self.conn, self.login_aktywny)
+        # autor_id trafia do zakładek OD RAZU, niezależnie od tego, czy
+        # poniższy dialog się otworzy - z aliasem już zapisanym (typowy
+        # restart) dialog się nie otwiera i _zapamietaj_autora nigdy by nie
+        # zostało wywołane, zostawiając zakładki bez autora
+        self.zakladka_wprowadzanie.autor_id = self.autor_id
+        self.zakladka_import_export.autor_id = self.autor_id
         if uzytkownicy.wymaga_uzupelnienia(self.conn, self.login_aktywny):
             # after_idle: okno główne musi być już narysowane, inaczej
             # modal wisi nad pustym prostokątem
@@ -282,6 +288,12 @@ class Aplikacja(tk.Tk):
         dane_ustawien = ustawienia.wczytaj(self.katalog_danych)
         dane_ustawien.pop("aktywny_login", None)
         ustawienia.zapisz(self.katalog_danych, dane_ustawien)
+        # autor CZYSZCZONY przed otwarciem wyboru - jeśli użytkownik zamknie
+        # okno bez wybrania nikogo, kolejne zapisy nie mogą trafić do
+        # poprzedniej osoby
+        self.autor_id = None
+        self.zakladka_wprowadzanie.autor_id = None
+        self.zakladka_import_export.autor_id = None
         self._zmien_uzytkownika()
 
     def _na_wybrano_uzytkownika(self, login):

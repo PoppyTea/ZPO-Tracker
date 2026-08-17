@@ -162,9 +162,12 @@ def znajdz_konta_dla_loginu(conn, login_bazowy):
     do wyboru w oknie "kto teraz pracuje" (zmiana użytkownika/wyloguj).
     Alfabetycznie po aliasie.
     """
+    # substr zamiast LIKE - login_bazowy może zawierać "_"/"%", które LIKE
+    # potraktowałby jak wieloznaczniki i dopasował cudze konto
+    prefiks = login_bazowy + "#"
     wiersze = conn.execute(
         "SELECT id, login, alias, nr_kadrowy FROM users"
-        " WHERE login = ? OR login LIKE ? ORDER BY alias",
-        (login_bazowy, login_bazowy + "#%"),
+        " WHERE login = ? OR substr(login, 1, ?) = ? ORDER BY alias",
+        (login_bazowy, len(prefiks), prefiks),
     ).fetchall()
     return [dict(w) for w in wiersze]

@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from zpo_tracker import operacje, repo
-from zpo_tracker.gui.dialog_edycji import DialogEdycji
+from zpo_tracker.gui.dialog_edycji import DialogEdycji, _sparsuj_date
 from zpo_tracker.gui.widget_tabela import Tabela
 
 KOLUMNY = [
@@ -31,6 +31,7 @@ POLA_ZBIORCZE = [("kurier", "Kurier"), ("wykonawca", "Wykonawca"),
                   ("data", "Data"), ("rejon", "Rejon")]
 
 LICZBA_PROBKI_USUWANIA = 3
+LIMIT_WIDOKU = 1000
 
 
 class ZakladkaPrzeglad(ttk.Frame):
@@ -105,9 +106,15 @@ class ZakladkaPrzeglad(ttk.Frame):
         if self.var_tylko_sesja.get() and self.sesja_uuid:
             filtry["sesja_uuid"] = self.sesja_uuid
 
-        wiersze = repo.pobierz_transakcje(self.conn, limit=1000, **filtry)
+        wiersze = repo.pobierz_transakcje(self.conn, limit=LIMIT_WIDOKU, **filtry)
         self.tabela.ustaw_dane(wiersze)
-        self.etykieta_liczby.configure(text=f"{len(wiersze)} transakcji")
+        # obcięty wynik MUSI być widoczny w etykiecie - operacje zbiorcze
+        # działają na tym, co użytkownik widzi, więc "1000 transakcji" bez
+        # ostrzeżenia sugerowałoby, że to cały zbiór
+        tekst = f"{len(wiersze)} transakcji"
+        if len(wiersze) == LIMIT_WIDOKU:
+            tekst += f" (limit {LIMIT_WIDOKU} - zawęź filtry)"
+        self.etykieta_liczby.configure(text=tekst)
 
     def _wyczysc_filtry(self):
         self.var_kurier.set("")
@@ -225,5 +232,11 @@ class _DialogUstawPoleZbiorczo(tk.Toplevel):
         if not wartosc:
             self.etykieta_status.configure(text="Podaj wartość.")
             return
+        if self.var_pole.get() == "data":
+            try:
+                wartosc = _sparsuj_date(wartosc)
+            except ValueError:
+                self.etykieta_status.configure(text="Data musi być w formacie RRRR-MM-DD.")
+                return
         self.on_zatwierdzono(self.var_pole.get(), wartosc)
         self.destroy()

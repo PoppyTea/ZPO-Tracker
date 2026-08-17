@@ -91,4 +91,5 @@ jednostki pracy do wzięcia; tam co i kiedy.
       moment przejścia na strukturalny adres (`normalization-v2.md`)
 - [ ] **Narzędzie naprawy starych Exceli** — osobny, jednorazowy program
       czyszczący zaległe miesiące PRZED importem. Zbiór wejściowy jest już
-      wyznaczony: `transakcje.zrodlo IS NULL OR 'import'` (patrz schemat v3)
+      wyznaczony: `transakcje.zrodlo IS NULL OR transakcje.zrodlo = 'import'`
+      (patrz schemat v3)

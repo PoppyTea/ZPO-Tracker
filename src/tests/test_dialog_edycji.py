@@ -129,6 +129,22 @@ def test_ilosc_zpo_moze_byc_puste(root, conn, tmp_path):
     assert conn.execute("SELECT ilosc_zpo FROM transakcje").fetchone()[0] is None
 
 
+def test_zla_data_pokazuje_blad_i_nie_zapisuje(root, conn, tmp_path):
+    # kolumna `data` w SQLite nie ma typu i nic dotąd nie sprawdzało formatu
+    # ISO - śmieciowa wartość wypadałaby z filtrów zakresu dat
+    # (`t.data >= ?` porównuje leksykograficznie) i psuła sortowanie/eksport
+    wiersz = _zapisz(conn)
+    dialog = DialogEdycji(root, conn, tmp_path, wiersz)
+    dialog.var_data.set("10-08-2026")
+
+    dialog._zatwierdz()
+
+    assert dialog.winfo_exists()
+    assert dialog.etykieta_status.cget("text") != ""
+    niezmieniona = conn.execute("SELECT data FROM transakcje").fetchone()[0]
+    assert niezmieniona == "2026-08-10"
+
+
 def test_ilosc_ujemna_pokazuje_blad(root, conn, tmp_path):
     wiersz = _zapisz(conn)
     dialog = DialogEdycji(root, conn, tmp_path, wiersz)
