@@ -32,9 +32,10 @@ knowledge lives in `docs/`, one topic per file:
 - `docs/ux-ui.md` — UX direction (courier-first entry modeled on the paper
   form), the "idiot-proof, not just non-technical" framing, validation
   approach, and what's still undecided about the suggestion engine
-- `docs/roadmap.md` — version sequence (`0.1-alpha.3` … `0.1-alpha.6`) and
-  the open direction-setting questions that would reshape it; read before
-  planning any multi-version work
+- `docs/roadmap.md` — version sequence (`0.1-alpha.3` … `0.1-alpha.6`), the
+  gate that must be cleared before `0.1-alpha.4` starts, and the open
+  direction-setting questions that would reshape it; read before planning
+  any multi-version work
 - `docs/backlog.md` — full backlog, grouped by topic
 - `docs/normalization-v2.md` — proposed relational schema v2 and the two
   open risks it depends on (see also `schema_v2_draft.sql`)
@@ -67,7 +68,7 @@ pytest
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
-379/379 tests currently pass under the pip/system-Python setup above, no
+528/528 tests currently pass under the pip/system-Python setup above, no
 skips (verified against a real 1294-row slice of source data, both import
 and export round-trip). `.venv/` must be built by the system Python, not
 `uv`'s managed one — `uv`'s python-build-standalone binary has a

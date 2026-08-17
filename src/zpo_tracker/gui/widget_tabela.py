@@ -8,11 +8,20 @@ from tkinter import ttk
 
 
 class Tabela(ttk.Frame):
-    def __init__(self, parent, kolumny):
-        """kolumny: lista (klucz, naglowek, szerokosc)."""
+    def __init__(self, parent, kolumny, on_dwuklik=None):
+        """
+        kolumny: lista (klucz, naglowek, szerokosc). `on_dwuklik` (opcjonalny,
+        0.1-alpha.3.2): wołane z PEŁNYM dictem wiersza (nie tylko kolumnami
+        wyświetlanymi) po dwukliku - widok poprawek dostaje w ten sposób
+        `id`/`uuid` mimo że tabela ich nie pokazuje. Bez `on_dwuklik`
+        zdarzenie w ogóle nie jest podpinane (istniejący, tylko-do-odczytu
+        użytkownicy tego widgetu mają zostać nietknięci).
+        """
         super().__init__(parent)
         self.kolumny = kolumny
+        self.on_dwuklik = on_dwuklik
         self._dane = []
+        self._iid_do_wiersza = {}
         self._sortowanie_odwrocone = {}
         self._rozmiar_czcionki = 10
         self._styl_nazwa = f"Tabela{id(self)}.Treeview"
@@ -40,6 +49,8 @@ class Tabela(ttk.Frame):
         self.tree.bind("<Control-MouseWheel>", self._zoom_windows)
         self.tree.bind("<Control-Button-4>", lambda e: self._zoom_krok(1))
         self.tree.bind("<Control-Button-5>", lambda e: self._zoom_krok(-1))
+        if on_dwuklik:
+            self.tree.bind("<Double-Button-1>", self._na_dwuklik)
 
         self._zastosuj_czcionke()
 
@@ -50,9 +61,34 @@ class Tabela(ttk.Frame):
 
     def _odswiez(self):
         self.tree.delete(*self.tree.get_children())
+        # mapa PRZEBUDOWANA przy każdym odświeżeniu (razem z iid, które
+        # Treeview przydziela na nowo przy każdym insert) - bezpieczne po
+        # sortowaniu, patrz zakladka_historia.py (ten sam problem, ten sam
+        # powód: identyfikacja po wartości, nie po pozycji w drzewie)
+        self._iid_do_wiersza = {}
         for wiersz in self._dane:
             wartosci = [wiersz.get(k, "") for k, _, _ in self.kolumny]
-            self.tree.insert("", "end", values=wartosci)
+            iid = self.tree.insert("", "end", values=wartosci)
+            self._iid_do_wiersza[iid] = wiersz
+
+    def wiersz_zaznaczony(self):
+        """Pełny dict (WSZYSTKIE klucze z `ustaw_dane`, nie tylko kolumny
+        wyświetlane) pierwszego zaznaczonego wiersza, albo None."""
+        zaznaczenie = self.tree.selection()
+        if not zaznaczenie:
+            return None
+        return self._iid_do_wiersza.get(zaznaczenie[0])
+
+    def wiersze_zaznaczone(self):
+        """Pełne dicty wszystkich zaznaczonych wierszy (Treeview ma domyślnie
+        `selectmode='extended'`, więc Ctrl/Shift-klik działają od ręki)."""
+        return [self._iid_do_wiersza[iid] for iid in self.tree.selection()
+                if iid in self._iid_do_wiersza]
+
+    def _na_dwuklik(self, _event):
+        wiersz = self.wiersz_zaznaczony()
+        if wiersz is not None:
+            self.on_dwuklik(wiersz)
 
     def _sortuj(self, klucz):
         odwroc = self._sortowanie_odwrocone.get(klucz, False)

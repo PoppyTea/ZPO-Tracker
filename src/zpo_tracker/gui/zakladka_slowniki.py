@@ -169,6 +169,62 @@ class PodzakladkaPunktowZpo(ttk.Frame):
         self.odswiez()
 
 
+class PodzakladkaNadawcowBezPni(ttk.Frame):
+    """
+    Nadawcy BEZ PNI (ZUS, PKO, Kruk...) - 0.1-alpha.3.2. Istnieją WYŁĄCZNIE
+    jako `punkty.nadawca` (`firma_zpo_id IS NULL`), nigdy jako wiersz w
+    `firmy_zpo` (patrz `importer.get_or_create_punkt`, gałąź bez PNI) -
+    dotąd literówka w takiej nazwie była nienaprawialna w aplikacji, bo
+    „Firmy ZPO" niżej pokazuje wyłącznie sieci z PNI.
+    """
+
+    def __init__(self, parent, conn, katalog_danych):
+        super().__init__(parent)
+        self.conn = conn
+        self.katalog_danych = katalog_danych
+
+        ttk.Label(
+            self,
+            text="Nadawcy bez PNI (np. ZUS, PKO, Kruk) - dwuklik, żeby poprawić nazwę "
+                 "(zmiana obejmie wszystkie ich punkty).",
+            wraplength=520, justify="left",
+        ).pack(anchor="w", padx=6, pady=6)
+
+        self.lista = tk.Listbox(self)
+        self.lista.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        self.lista.bind("<Double-Button-1>", self._edytuj_wybrany)
+
+        self._wpisy = []
+        self.odswiez()
+
+    def odswiez(self):
+        self._wpisy = repo.pobierz_nadawcow_bez_pni(self.conn)
+        self.lista.delete(0, "end")
+        for wpis in self._wpisy:
+            self.lista.insert("end", f"{wpis['nazwa']} ({wpis['liczba_punktow']} pkt.)")
+
+    def _edytuj_wybrany(self, _event):
+        zaznaczone = self.lista.curselection()
+        if not zaznaczone:
+            return
+        wpis = self._wpisy[zaznaczone[0]]
+        nowa = _zapytaj_o_tekst("Zmień nazwę nadawcy", wpis["nazwa"], self)
+        if nowa and nowa.strip() and nowa.strip() != wpis["nazwa"]:
+            self._zastosuj_zmiane(wpis["nazwa"], nowa.strip())
+
+    def _zastosuj_zmiane(self, stara, nowa):
+        try:
+            operacje.wykonaj(
+                self.conn, self.katalog_danych, rodzaj="zmien_nadawce",
+                etykieta=f"nadawca: „{stara}” → „{nowa}”",
+                funkcja=repo.zmien_nadawce_bez_pni, args=(stara, nowa),
+            )
+        except repo.KolizjaTransakcji as e:
+            messagebox.showerror("Błąd", str(e))
+            return
+        self.odswiez()
+
+
 def _zapytaj_o_tekst(tytul, wartosc_domyslna, parent):
     okno = tk.Toplevel(parent)
     okno.title(tytul)
@@ -199,10 +255,14 @@ class ZakladkaSlowniki(ttk.Frame):
             PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "wykonawcy", "Wykonawca"),
             PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "rejony", "Rejon"),
             PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "firmy_zpo", "Firma ZPO"),
+            # 0.1-alpha.3.2: DOŁOŻONA na końcu, żeby indeksy powyższych
+            # (_podzakladki[0] itd., patrz test_gui_smoke.py) zostały nietknięte
+            PodzakladkaNadawcowBezPni(notebook, conn, katalog_danych),
         ]
         for widget, etykieta in zip(
             self._podzakladki,
-            ["Kurierzy", "Punkty ZPO", "Wykonawcy", "Rejony", "Firmy ZPO"],
+            ["Kurierzy", "Punkty ZPO", "Wykonawcy", "Rejony",
+             "Firmy ZPO (sieci z PNI)", "Nadawcy (bez PNI)"],
         ):
             notebook.add(widget, text=etykieta)
 

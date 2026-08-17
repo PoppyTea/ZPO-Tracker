@@ -106,20 +106,16 @@ def dedukuj_wiersz(conn, *, kurier, adres, nadawca=None, ilosc_total=None, ilosc
     else:
         pola["pni_zpo"] = StanPola(stan="szary", aktywne=False)
 
-    if punkt_id is not None:
-        historia = repo.historia_rejonow_punktu(conn, punkt_id)
-        kody = {h["kod"] for h in historia}
-        if len(kody) == 1:
-            pola["rejon"] = StanPola(wartosc=next(iter(kody)), stan="zielony", aktywne=False)
-        elif len(kody) > 1:
-            pola["rejon"] = StanPola(
-                stan="pomaranczowy", aktywne=True, w_nawigacji=True,
-                kandydaci=tuple(h["kod"] for h in historia),
-                powod="Ten punkt bywał w różnych rejonach - wybierz właściwy.")
-        else:
-            pola["rejon"] = StanPola(
-                stan="pomaranczowy", aktywne=True, w_nawigacji=True,
-                powod="Brak historii rejonu dla tego punktu.")
+    # 0.1-alpha.3.2: rejon przestaje być ręcznie wpisywalne (patrz docstring
+    # modułu) - jednoznaczna historia wypełnia i tyle; brak historii ALBO
+    # historia sprzeczna zostają puste/readonly zamiast aktywować pole do
+    # ręcznego zgadywania. Zapis rozstrzyga to i tak na kanoniczne "???"
+    # (get_or_create_rejon), a rejonarz (0.1-alpha.3.3/3.4) doda prawdziwe
+    # źródło prawdy zamiast pamięci człowieka wpisującego dane.
+    kody = {h["kod"] for h in repo.historia_rejonow_punktu(conn, punkt_id)} \
+        if punkt_id is not None else set()
+    if len(kody) == 1:
+        pola["rejon"] = StanPola(wartosc=next(iter(kody)), stan="zielony", aktywne=False)
     else:
         pola["rejon"] = StanPola(stan="szary", aktywne=False)
 
@@ -171,7 +167,7 @@ def sprawdz_niezmienniki(pola, tryb):
     czerwony implikują aktywne; aktywne i nie-szare implikuje w_nawigacji
     (inaczej pole wymagające uwagi jest nieosiągalne z klawiatury - to był
     najgroźniejszy brak funkcjonalny poprzedniej wersji tego planu). Od
-    0.1-alpha.3.2 w trybie manualnym dojdzie: stan != "szary".
+    W trybie manualnym (0.1-alpha.5) dojdzie: stan != "szary".
     """
     for klucz, stan in pola.items():
         if stan.stan == "pomaranczowy":
@@ -190,14 +186,14 @@ def kolejnosc_pol(tryb, wynik_naglowka, wyniki_wierszy):
     Kolejność nawigacji TAB/Enter. Zwraca listę KLUCZY pól (krotki), NIE
     widgetów - mapowanie klucz->widget należy do GUI (`src/CLAUDE.md`:
     szeregowanie to logika, nie widok). Testowalne bez Tk i gotowe na
-    polityki innych trybów w 0.1-alpha.3.2 (dziś istnieje tylko "auto").
+    polityki innych trybów w 0.1-alpha.5 (dziś istnieje tylko "auto").
 
     Pole pomarańczowe/czerwone (w_nawigacji=True) MUSI wejść do kolejności
     niezależnie od tego, że nie jest polem głównym - inaczej nie da się go
     wypełnić z klawiatury (np. nadawca nowego punktu).
     """
     if tryb != "auto":
-        raise NotImplementedError(f"tryb {tryb!r} nie istnieje jeszcze - patrz 0.1-alpha.3.2")
+        raise NotImplementedError(f"tryb {tryb!r} nie istnieje jeszcze - patrz 0.1-alpha.5")
 
     kolejnosc = [("naglowek", "kurier"), ("naglowek", "data")]
     for klucz, stan in wynik_naglowka.items():
@@ -215,6 +211,19 @@ def kolejnosc_pol(tryb, wynik_naglowka, wyniki_wierszy):
         if wynik.pola.get("ilosc_zpo") and wynik.pola["ilosc_zpo"].aktywne:
             kolejnosc.append(("wiersz", i, "ilosc_zpo"))
     return kolejnosc
+
+
+def czy_koniec_ostatniego_wiersza(kolejnosc, biezace):
+    """
+    True, gdy `biezace` to OSTATNI klucz w `kolejnosc` - czyli koniec całej
+    sekwencji nawigacji, zawsze wewnątrz ostatniego wiersza (`kolejnosc_pol`
+    dokłada klucze per wiersz w kolejności, więc jej ostatni element zawsze
+    należy do ostatniego wiersza, niezależnie czy to `ilosc_total` czy
+    aktywne `ilosc_zpo`). 0.1-alpha.3.2: sygnał dla GUI, że Tab/Enter stąd
+    powinien dodać nowy wiersz zamiast zawinąć do nagłówka - patrz
+    `gui/zakladka_wprowadzanie.ZakladkaWprowadzanie._skocz`.
+    """
+    return bool(kolejnosc) and biezace == kolejnosc[-1]
 
 
 def przesun_w_kolejnosci(kolejnosc, biezace, kierunek):

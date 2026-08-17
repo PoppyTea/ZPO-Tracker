@@ -8,6 +8,7 @@ wbudowany menedżer kontekstu połączenia **nic nie wycofuje**. Kod używający
 absolutnie nic. Pierwszy test niżej pilnuje dokładnie tej różnicy.
 """
 import sqlite3
+from datetime import date
 
 import pytest
 
@@ -390,3 +391,92 @@ def test_migracja_z_alpha3_bez_indeksow_dokłada_je():
         assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU
     finally:
         conn.close()
+
+
+# --- migracja `0.1-alpha.3.2`: sesja_uuid + zrodlo ---
+
+def test_swieza_baza_ma_kolumny_sesji(conn):
+    kolumny = {r[1] for r in conn.execute("PRAGMA table_info(transakcje)")}
+    assert {"sesja_uuid", "zrodlo"} <= kolumny
+    assert "idx_transakcje_sesja" in _nazwy_indeksow(conn, "transakcje")
+    assert repo.wersja_schematu(conn) == 3
+    assert repo.WERSJA_SCHEMATU == 3
+
+
+def test_migracja_z_alpha3_1_dokłada_sesje_i_zrodlo():
+    # baza już z kolumnami atrybucji + indeksami dedukcji (alpha.3.1), ale
+    # sprzed sesja_uuid/zrodlo tego wydania
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        conn.execute(f"PRAGMA user_version = 2")  # cofnij, jakby to była realna baza v2
+
+        repo.migruj(conn)
+
+        kolumny = {r[1] for r in conn.execute("PRAGMA table_info(transakcje)")}
+        assert {"sesja_uuid", "zrodlo"} <= kolumny
+        assert "idx_transakcje_sesja" in _nazwy_indeksow(conn, "transakcje")
+        assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU
+    finally:
+        conn.close()
+
+
+def test_migracja_do_v3_zachowuje_dane_i_jest_idempotentna():
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        repo.migruj(conn)  # drugi przebieg nie może niczego zepsuć/zdublować
+        assert conn.execute("SELECT count(*) FROM transakcje").fetchone()[0] == 1
+        assert conn.execute("SELECT ilosc_total FROM transakcje").fetchone()[0] == 7
+    finally:
+        conn.close()
+
+
+def test_migracja_ze_stanu_posredniego_jednej_kolumny_przezywa():
+    # baza w kształcie "alpha.3.1 + tylko połowa 3.2" - jedna z dwóch nowych
+    # kolumn dołożona ręcznie (np. przerwana wcześniejsza aktualizacja).
+    # Budowana ręcznie (nie przez `migruj`, który za jednym razem dokłada
+    # OBIE kolumny) - inaczej nie da się odtworzyć tego konkretnego stanu.
+    conn = _baza_alpha2()
+    try:
+        for nazwa, typ in repo._KOLUMNY_ATRYBUCJI.items():
+            conn.execute(f"ALTER TABLE transakcje ADD COLUMN {nazwa} {typ}")
+        conn.execute(repo._DDL_USERS)
+        conn.execute("ALTER TABLE transakcje ADD COLUMN sesja_uuid TEXT")  # tylko ta jedna
+        conn.execute("PRAGMA user_version = 2")
+
+        repo.migruj(conn)
+
+        kolumny = {r[1] for r in conn.execute("PRAGMA table_info(transakcje)")}
+        assert {"sesja_uuid", "zrodlo"} <= kolumny
+        assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU
+    finally:
+        conn.close()
+
+
+def test_zapisz_blankiet_zapisuje_sesje_i_zrodlo_formularz(conn):
+    from zpo_tracker.models import Blankiet, WierszBlankietu
+
+    blankiet = Blankiet(
+        kurier="Kowalski Jan", data=date(2026, 8, 10), wykonawca="Koli",
+        wiersze=[WierszBlankietu(nadawca="Żabka", adres="Odkryta 24",
+                                   ilosc_total=3, ilosc_zpo=3)],
+    )
+    repo.zapisz_blankiet(conn, blankiet, sesja_uuid="sesja-abc")
+    wiersz = conn.execute("SELECT sesja_uuid, zrodlo FROM transakcje").fetchone()
+    assert wiersz["sesja_uuid"] == "sesja-abc"
+    assert wiersz["zrodlo"] == "formularz"
+
+
+def test_zapisz_blankiet_bez_sesji_zapisuje_null(conn):
+    from zpo_tracker.models import Blankiet, WierszBlankietu
+
+    blankiet = Blankiet(
+        kurier="Kowalski Jan", data=date(2026, 8, 10), wykonawca="Koli",
+        wiersze=[WierszBlankietu(nadawca="Żabka", adres="Odkryta 24",
+                                   ilosc_total=3, ilosc_zpo=3)],
+    )
+    repo.zapisz_blankiet(conn, blankiet)
+    wiersz = conn.execute("SELECT sesja_uuid, zrodlo FROM transakcje").fetchone()
+    assert wiersz["sesja_uuid"] is None
+    assert wiersz["zrodlo"] == "formularz"

@@ -11,6 +11,8 @@ scalenia w ekranie korekty, ale można je odznaczyć przed zatwierdzeniem
 importu, zamiast scalać na pewno i cofać później.
 """
 import sqlite3
+import uuid
+from datetime import datetime
 
 from pydantic import ValidationError
 
@@ -19,6 +21,7 @@ from zpo_tracker.importer import (
     get_or_create_punkt,
     get_or_create_rejon,
     get_or_create_wykonawca,
+    znajdz_lub_utworz_punkt_niezaufany,
 )
 from zpo_tracker.models import WierszImportu
 from zpo_tracker.normalizacja import czy_literowka, grupuj_bezpiecznie, znajdz_podobne
@@ -102,7 +105,8 @@ def znajdz_ostrzezenia_podobienstwa_kurierow(zwalidowane):
     return znajdz_podobne(grupy)
 
 
-def zaimportuj(conn, zwalidowane, mapowanie_scalen=None):
+def zaimportuj(conn, zwalidowane, mapowanie_scalen=None, *, zaufany=False,
+                autor_id=None, sesja_uuid=None, teraz=None):
     """
     Zapisuje zwalidowane wiersze do bazy, stosując mapowanie_scalen
     (surowy kurier -> kanoniczny, tylko zaakceptowane w ekranie korekty)
@@ -110,17 +114,46 @@ def zaimportuj(conn, zwalidowane, mapowanie_scalen=None):
     wymagajace_uwagi: {"wiersz": WierszImportu, "powod": str} dla
     duplikatów i konfliktów PNI/adres - jedyne, co ekran korekty pokazuje
     z tego etapu.
+
+    `zaufany` (0.1-alpha.3.2) - domyślnie **False**, bo brak jawnego
+    zaufania musi znaczyć brak zaufania. Plik niezaufany NIE wnosi:
+
+    - **PNI** - to klucz tożsamości punktu (`punkty.pni_zpo UNIQUE`), więc
+      śmieciowa wartość po cichu podpina transakcję pod cudzy punkt, zamienia
+      kolejne wiersze w "duplikaty" (utrata danych) i trwale otwiera pole
+      "w tym ZPO" przez `repo.czy_nadawca_ma_pni`;
+    - **rejon** - dane z papierowych blankietów są zakłamane, a rejonarz
+      (0.1-alpha.3.3/3.4) będzie źródłem prawdy; wiersze lądują na
+      kanonicznym "???" i staną się kandydatami do uzupełnienia.
+
+    Reszta (kurier, wykonawca, nadawca, adres, ilości) wchodzi normalnie -
+    to dane czytelne dla człowieka i poprawialne w aplikacji (widok poprawek,
+    Słowniki). Odcinamy WYŁĄCZNIE to, czego nie da się ani zweryfikować, ani
+    sensownie poprawić ręcznie.
+
+    Import pisze też `uuid`/`autor_id`/`utworzono`/`zmodyfikowano`/
+    `sesja_uuid`/`zrodlo` - dotąd wiersze z importu były "drugiej kategorii"
+    względem formularza (bez tożsamości niezależnej od klucza naturalnego,
+    bez atrybucji).
     """
     mapowanie_scalen = mapowanie_scalen or {}
+    teraz = teraz or datetime.now().isoformat(timespec="seconds")
+    zrodlo = "import_zaufany" if zaufany else "import"
     zaimportowano = 0
     wymagajace_uwagi = []
 
     for w in zwalidowane:
         kurier_nazwa = mapowanie_scalen.get(w.kurier, w.kurier)
         kurier_id = get_or_create_kurier(conn, kurier_nazwa)
-        rejon_id = get_or_create_rejon(conn, w.rejon)
+        # niezaufany: rejon -> kanoniczne "???" (get_or_create_rejon(None)),
+        # PNI -> całkowicie pominięte (osobna ścieżka podpinania punktu)
+        rejon_id = get_or_create_rejon(conn, w.rejon if zaufany else None)
         wykonawca_id = get_or_create_wykonawca(conn, w.wykonawca)
-        punkt_id, ostrzezenia = get_or_create_punkt(conn, w.nadawca, w.adres, w.pni_zpo)
+        if zaufany:
+            punkt_id, ostrzezenia = get_or_create_punkt(conn, w.nadawca, w.adres, w.pni_zpo)
+        else:
+            punkt_id, ostrzezenia = znajdz_lub_utworz_punkt_niezaufany(
+                conn, w.nadawca, w.adres)
         if ostrzezenia:
             wymagajace_uwagi.append({"wiersz": w, "powod": "; ".join(ostrzezenia)})
 
@@ -129,12 +162,16 @@ def zaimportuj(conn, zwalidowane, mapowanie_scalen=None):
                 """INSERT INTO transakcje
                    (data, kurier_id, punkt_id, rejon_id, wykonawca_id,
                     ilosc_total, ilosc_zpo, ilosc_vinted, ilosc_automaty,
-                    ilosc_kurier48, ilosc_niezrealizowane)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ilosc_kurier48, ilosc_niezrealizowane,
+                    uuid, autor_id, utworzono, zmodyfikowano,
+                    sesja_uuid, zrodlo)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     w.data.isoformat(), kurier_id, punkt_id, rejon_id, wykonawca_id,
                     w.ilosc_total, w.ilosc_zpo, w.ilosc_vinted, w.ilosc_automaty,
                     w.ilosc_kurier48, w.ilosc_niezrealizowane,
+                    str(uuid.uuid4()), autor_id, teraz, teraz,
+                    sesja_uuid, zrodlo,
                 ),
             )
             zaimportowano += 1

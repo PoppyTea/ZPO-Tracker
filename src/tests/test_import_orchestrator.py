@@ -140,11 +140,49 @@ def test_zaimportuj_scala_automatycznie_warianty_bialych_znakow(conn):
 
 
 def test_zaimportuj_flaguje_konflikt_pni_adres_jako_wymagajacy_uwagi(conn):
+    # konflikt PNI/adres dotyczy WYŁĄCZNIE ścieżki zaufanej - w niezaufanej
+    # PNI w ogóle nie wchodzi do bazy, więc nie ma czemu kolidować
+    # (0.1-alpha.3.2, patrz test_zaufanie_importu.py)
     zwalidowane, _ = zwaliduj_wiersze([
         _surowy(**{"Adres odbioru dla wszystkich nadawców": "Odkryta 24"}),
         _surowy(**{"Adres odbioru dla wszystkich nadawców": "Odkryta 82B", "data": date(2026, 8, 4)}),
     ])
-    wynik = zaimportuj(conn, zwalidowane)
+    wynik = zaimportuj(conn, zwalidowane, zaufany=True)
     assert wynik["zaimportowano"] == 2  # obie transakcje wchodzą, PNI tylko ostrzega
     assert len(wynik["wymagajace_uwagi"]) == 1
     assert "228648" in wynik["wymagajace_uwagi"][0]["powod"]
+
+
+# --- 0.1-alpha.3.2: sesja_uuid, zrodlo, i atrybucja dołożona do importu ---
+
+def test_zaimportuj_zapisuje_zrodlo_domyslnie_import(conn):
+    zwalidowane, _ = zwaliduj_wiersze([_surowy()])
+    zaimportuj(conn, zwalidowane)
+    wiersz = conn.execute("SELECT zrodlo, sesja_uuid FROM transakcje").fetchone()
+    assert wiersz["zrodlo"] == "import"
+    assert wiersz["sesja_uuid"] is None
+
+
+def test_zaimportuj_zapisuje_podana_sesje_a_zrodlo_wynika_z_zaufania(conn):
+    # `zrodlo` NIE jest wolnym parametrem - wyprowadza się z `zaufany`, żeby
+    # nie dało się zapisać "import_zaufany" dla pliku, któremu nie ufamy
+    zwalidowane, _ = zwaliduj_wiersze([_surowy()])
+    zaimportuj(conn, zwalidowane, sesja_uuid="sesja-xyz", zaufany=True)
+    wiersz = conn.execute("SELECT zrodlo, sesja_uuid FROM transakcje").fetchone()
+    assert wiersz["zrodlo"] == "import_zaufany"
+    assert wiersz["sesja_uuid"] == "sesja-xyz"
+
+
+def test_zaimportuj_zapisuje_atrybucje_i_znaczniki_czasu(conn):
+    # dotąd import nie pisał uuid/utworzono/autor_id w ogóle - wiersze
+    # z importu były "drugiej kategorii" względem formularza
+    conn.execute(
+        "INSERT INTO users (id, login, alias) VALUES ('uid-1', 'POCZTA\\jnowak', 'Jan Nowak')")
+    zwalidowane, _ = zwaliduj_wiersze([_surowy()])
+    zaimportuj(conn, zwalidowane, autor_id="uid-1", teraz="2026-08-13T10:00:00")
+    wiersz = conn.execute(
+        "SELECT uuid, autor_id, utworzono, zmodyfikowano FROM transakcje").fetchone()
+    assert wiersz["uuid"] is not None
+    assert wiersz["autor_id"] == "uid-1"
+    assert wiersz["utworzono"] == "2026-08-13T10:00:00"
+    assert wiersz["zmodyfikowano"] == "2026-08-13T10:00:00"

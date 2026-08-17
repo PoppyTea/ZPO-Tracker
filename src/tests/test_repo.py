@@ -192,6 +192,97 @@ def test_nie_mozna_usunac_kanonicznego_rejonu_nieznanego(conn):
         repo.usun_z_slownika(conn, "rejony", wpis_id)
 
 
+# --- 0.1-alpha.3.2: nadawcy bez PNI (ZUS/PKO/Kruk...) - naprawialność ---
+# root cause: firmy_zpo powstaje TYLKO w gałęzi PNI importer.get_or_create_punkt,
+# więc literówki nadawców bez PNI dotąd nie dało się poprawić w aplikacji.
+
+def test_pobierz_nadawcow_bez_pni_pomija_nadawcow_z_pni(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")  # ma PNI
+    get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)     # bez PNI
+
+    nadawcy = repo.pobierz_nadawcow_bez_pni(conn)
+
+    assert [n["nazwa"] for n in nadawcy] == ["ZUS"]
+
+
+def test_pobierz_nadawcow_bez_pni_liczy_punkty(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    get_or_create_punkt(conn, "ZUS", "Inna 5", None)
+
+    nadawcy = repo.pobierz_nadawcow_bez_pni(conn)
+
+    assert nadawcy == [{"nazwa": "ZUS", "liczba_punktow": 2}]
+
+
+def test_zmien_nadawce_bez_pni_propaguje_do_wszystkich_punktow(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    get_or_create_punkt(conn, "ZUS", "Inna 5", None)
+
+    repo.zmien_nadawce_bez_pni(conn, "ZUS", "Zakład Ubezpieczeń Społecznych")
+
+    nadawcy = {r[0] for r in conn.execute("SELECT nadawca FROM punkty")}
+    assert nadawcy == {"Zakład Ubezpieczeń Społecznych"}
+
+
+def test_zmien_nadawce_bez_pni_nie_rusza_nadawcy_z_pni(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
+
+    repo.zmien_nadawce_bez_pni(conn, "Żabka", "Żabka Polska")
+
+    assert conn.execute("SELECT nadawca FROM punkty").fetchone()[0] == "Żabka"
+
+
+def test_zmien_nadawce_bez_pni_zlepienie_przepina_transakcje_i_usuwa_przegrywajacy(conn):
+    # dwa RÓŻNE punkty (różne pisownie), ten sam adres - po zmianie nazwy
+    # stają się identyczne pod (nadawca, adres); schemat nie ma na to UNIQUE,
+    # więc trzeba je scalić ręcznie (wzorzec _przemianuj_lub_scal_firme)
+    from zpo_tracker.importer import get_or_create_punkt
+    id_a, _ = get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    id_b, _ = get_or_create_punkt(conn, "Zaklad Ubezpieczen", "Senatorska 6/8", None)
+    kurier_id = conn.execute(
+        "INSERT INTO kurierzy(imie_nazwisko) VALUES ('Kowalski Jan')").lastrowid
+    conn.execute(
+        "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total) VALUES (?,?,?,?)",
+        ("2026-08-10", kurier_id, id_b, 3))
+
+    repo.zmien_nadawce_bez_pni(conn, "Zaklad Ubezpieczen", "ZUS")
+
+    punkty = conn.execute("SELECT id FROM punkty WHERE nadawca = 'ZUS'").fetchall()
+    assert len(punkty) == 1  # zlepione w jeden
+    transakcja = conn.execute("SELECT punkt_id FROM transakcje").fetchone()
+    assert transakcja["punkt_id"] == id_a  # przepięta na wygrywający (najniższe id)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM punkty WHERE id = ?", (id_b,)).fetchone()[0] == 0
+
+
+def test_zmien_nadawce_bez_pni_kolizja_transakcji_blokuje_calosc(conn):
+    from zpo_tracker.importer import get_or_create_punkt
+    id_a, _ = get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
+    id_b, _ = get_or_create_punkt(conn, "Zaklad Ubezpieczen", "Senatorska 6/8", None)
+    kurier_id = conn.execute(
+        "INSERT INTO kurierzy(imie_nazwisko) VALUES ('Kowalski Jan')").lastrowid
+    # OBA punkty mają transakcję tego samego kuriera+daty -> po zlepieniu
+    # kolidowałyby na UNIQUE(data, kurier_id, punkt_id)
+    conn.execute(
+        "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total) VALUES (?,?,?,?)",
+        ("2026-08-10", kurier_id, id_a, 1))
+    conn.execute(
+        "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total) VALUES (?,?,?,?)",
+        ("2026-08-10", kurier_id, id_b, 2))
+
+    with pytest.raises(repo.KolizjaTransakcji):
+        repo.zmien_nadawce_bez_pni(conn, "Zaklad Ubezpieczen", "ZUS")
+
+    # CAŁOŚĆ zablokowana - nawet sam rename się nie utrzymał
+    nadawcy = {r[0] for r in conn.execute("SELECT nadawca FROM punkty")}
+    assert nadawcy == {"ZUS", "Zaklad Ubezpieczen"}
+    assert conn.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0] == 2
+
+
 def test_mozna_usunac_zwykly_nieuzywany_rejon(conn):
     wpis_id = repo.dodaj_do_slownika(conn, "rejony", "WA87")
     repo.usun_z_slownika(conn, "rejony", wpis_id)
@@ -279,6 +370,76 @@ def test_pobierz_transakcje_zwraca_czytelne_nazwy(conn):
     assert w["nadawca"] == "Żabka"
     assert w["rejon"] == "WA87"
     assert w["ilosc_total"] == 3
+
+
+# --- pobierz_transakcje: filtry widoku poprawek (0.1-alpha.3.2) ---
+
+def test_pobierz_transakcje_zawiera_pola_do_edycji_i_sesji(conn):
+    repo.zapisz_blankiet(conn, _blok(), sesja_uuid="sesja-1")
+    w = repo.pobierz_transakcje(conn)[0]
+    assert w["id"] is not None
+    assert w["uuid"] is not None
+    assert w["utworzono"] is not None
+    assert w["sesja_uuid"] == "sesja-1"
+    assert w["zrodlo"] == "formularz"
+
+
+def test_pobierz_transakcje_filtruje_po_kurierze(conn):
+    repo.zapisz_blankiet(conn, _blok(kurier="Kowalski Jan"))
+    repo.zapisz_blankiet(conn, _blok(kurier="Nowak Piotr", wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Inna 5", ilosc_total=1)]))
+    wiersze = repo.pobierz_transakcje(conn, kurier="Nowak Piotr")
+    assert len(wiersze) == 1
+    assert wiersze[0]["kurier"] == "Nowak Piotr"
+
+
+def test_pobierz_transakcje_filtruje_po_zakresie_dat(conn):
+    repo.zapisz_blankiet(conn, _blok(data=date(2026, 8, 1)))
+    repo.zapisz_blankiet(conn, _blok(data=date(2026, 8, 10), wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Inna 5", ilosc_total=1)]))
+    wiersze = repo.pobierz_transakcje(conn, data_od=date(2026, 8, 5), data_do=date(2026, 8, 15))
+    assert len(wiersze) == 1
+    assert wiersze[0]["data"] == "2026-08-10"
+
+
+def test_pobierz_transakcje_filtruje_po_sesji(conn):
+    repo.zapisz_blankiet(conn, _blok(), sesja_uuid="sesja-a")
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Inna 5", ilosc_total=1)]), sesja_uuid="sesja-b")
+    wiersze = repo.pobierz_transakcje(conn, sesja_uuid="sesja-a")
+    assert len(wiersze) == 1
+    assert wiersze[0]["sesja_uuid"] == "sesja-a"
+
+
+def test_pobierz_transakcje_filtruje_po_tekscie_nadawcy_lub_adresu(conn):
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", ilosc_total=1)]))
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="ZUS", adres="Inna 5", ilosc_total=1)]))
+    wiersze = repo.pobierz_transakcje(conn, tekst="Odkryta")
+    assert len(wiersze) == 1
+    assert wiersze[0]["adres"] == "Odkryta 24"
+
+    wiersze_nadawcy = repo.pobierz_transakcje(conn, tekst="ZUS")
+    assert len(wiersze_nadawcy) == 1
+    assert wiersze_nadawcy[0]["nadawca"] == "ZUS"
+
+
+def test_pobierz_transakcje_filtry_laczone_koniunkcja(conn):
+    repo.zapisz_blankiet(conn, _blok(kurier="Kowalski Jan", data=date(2026, 8, 1)))
+    repo.zapisz_blankiet(conn, _blok(kurier="Kowalski Jan", data=date(2026, 8, 20), wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Inna 5", ilosc_total=1)]))
+    wiersze = repo.pobierz_transakcje(
+        conn, kurier="Kowalski Jan", data_od=date(2026, 8, 15))
+    assert len(wiersze) == 1
+    assert wiersze[0]["data"] == "2026-08-20"
+
+
+def test_pobierz_transakcje_bez_filtrow_zwraca_wszystko(conn):
+    repo.zapisz_blankiet(conn, _blok())
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Inna 5", ilosc_total=1)]))
+    assert len(repo.pobierz_transakcje(conn)) == 2
 
 
 # --- zapytania dedukcyjne (0.1-alpha.3.1, patrz dedukcja.py) ---

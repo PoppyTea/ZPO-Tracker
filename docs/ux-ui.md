@@ -111,6 +111,70 @@ cieńsze podświetlenie tym samym motywem koloru — widoczny sygnał "tu
 wyląduję dalej", nawet gdy pole jest wciąż "w przygotowaniu" (dedukcja
 jeszcze nie zdążyła go rozstrzygnąć).
 
-**Świadomie odłożone do `0.1-alpha.3.2`** (patrz `roadmap.md`): tryb
-pół-auto i manualny, przełącznik trybów + `settings.json`, blokowanie
-pola kliknięciem we wskaźnik.
+**Świadomie odłożone do `0.1-alpha.5`** (patrz `roadmap.md`): tryb pół-auto
+i manualny, przełącznik trybów, blokowanie pola kliknięciem we wskaźnik. Nie
+weszły do `0.1-alpha.3.2`, bo nie przechodzą filtra „czy przybliża nas to do
+realnej pracy" — to wygoda, nie warunek używalności. (`settings.json`
+powstał w `0.1-alpha.3.2`, ale w innej roli — patrz niżej.)
+
+## Poprawki po zapisie i zdrowie danych (`0.1-alpha.3.2`, zrealizowane)
+
+Feedback pracowników (2026-08-13) wskazał jedną rzecz jako faktycznie
+blokującą pracę: **brak możliwości poprawiania danych po zapisie.**
+W kodzie okazało się to dosłowne — nie istniała żadna ścieżka edycji ani
+usunięcia zapisanej transakcji, a `UNIQUE(data, kurier, punkt)` odrzucał
+ponowne wpisanie poprawionego wiersza jako duplikat.
+
+**Widok poprawek** = przebudowana zakładka Przeglądanie (nie nowa zakładka —
+„znajdź i popraw" ma być jednym miejscem): filtry po kurierze, zakresie dat,
+tekście (nadawca/adres) i bieżącej sesji wprowadzania; dwuklik otwiera
+edycję wiersza; zaznaczenie wielu wierszy pozwala ustawić jedno wspólne pole
+albo usunąć je razem (z potwierdzeniem pokazującym próbkę tego, co znika).
+
+**Dialog edycji jest świadomie zwykły** — bez maszynerii dedukcji
+i wskaźników. Korekta to jawna decyzja człowieka nad już zapisanym wierszem;
+dedukcja walcząca z ręczną poprawką byłaby antywzorcem. Nadawca/adres/PNI
+pozostają nieedytowalne: przepięcie wiersza na inny punkt to inna klasa
+ryzyka (cicha zmiana historii punktu) niż poprawka daty czy ilości — na
+razie robi się to przez usunięcie i ponowne wpisanie w formularzu.
+**Docelowo** ta mechanika ma być niewidoczna dla użytkownika (czy pod maską
+punkt jest tworzony na nowo, nie powinno go obchodzić) — wymaga to jednak
+sprzężenia z dedukcją i blokad przy sprzecznościach, czyli powielenia logiki
+formularza. Za duże na to wydanie, warte uwagi później.
+
+**Zmiany w formularzu wprowadzania:**
+
+- podgląd pokazuje domyślnie **tylko bieżącą sesję** („czy to się zapisało?"
+  ma być odpowiadalne bez przewijania całej bazy); checkbox odsłania resztę
+- dwuklik w podglądzie otwiera ten sam dialog edycji
+- Tab/Enter z końca **wypełnionego** ostatniego wiersza tworzy nowy wiersz
+  zamiast zawijać do nagłówka (pusty ostatni wiersz dalej zawija — nie ma
+  sensu mnożyć pustych)
+- status zapisu ma realny kolor: zielony przy pełnym sukcesie, **czerwony
+  gdy cokolwiek pominięto**, z wypisaniem którego wiersza i dlaczego
+- **wiersze pominięte zostają w siatce, wypełnione** — do poprawki
+  i ponownego zapisu. Dotąd formularz czyścił się bezwarunkowo, także gdy
+  nie zapisał ani jednego wiersza: praca użytkownika przepadała bez śladu.
+- Historia pokazuje osobną kolumnę „Pominięto" — zapis samych duplikatów
+  przestaje wyglądać identycznie jak pełny sukces
+
+**Rejon przestał być polem do wpisywania.** Wypełnia się tylko wtedy, gdy
+historia punktu jest jednoznaczna; przy braku albo sprzeczności zostaje
+pusty i zapisuje się jako `???`. Dane o rejonach z papierowych blankietów są
+zakłamane, a rejonarz (`0.1-alpha.3.3/3.4`) będzie źródłem prawdy — do tego
+czasu lepiej mieć jawnie „nieznany" niż cudzą pomyłkę przepisaną z papieru.
+
+**Nadawcy bez PNI** (ZUS, PKO, Kruk…) dostali własną podzakładkę
+w Słownikach. Wcześniej istnieli wyłącznie jako tekst w `punkty.nadawca`
+i literówki w ich nazwach były w aplikacji nienaprawialne — słownik „Firmy
+ZPO" z konstrukcji pokazuje tylko sieci mające PNI.
+
+**Zaufanie do importowanych plików.** Eksport znakuje plik i dokłada
+kryptograficzny odcisk (SHA-256) zawartości. Plik bez znacznika nie wnosi
+PNI ani rejonu (reszta danych wchodzi normalnie — są czytelne i poprawialne).
+Plik z naszym znacznikiem, ale zmienioną zawartością, **nie może zostać
+uznany za zaufany żadną drogą**, także nie przez tryb zaawansowany: pliki
+`.xlsx` są trywialnie edytowalne w Excelu, więc sam znacznik niczego nie
+dowodzi. Wymuszenie zaufania dla obcych plików istnieje, ale jest ukryte —
+pojawia się dopiero, gdy `settings.json` zawiera wpis odsłaniający tryb
+zaawansowany, i wymaga osobnego zaznaczenia przy każdym użyciu.

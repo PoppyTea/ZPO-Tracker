@@ -96,13 +96,18 @@ def pobierz_uzytkownika(conn, login):
 
 def wymaga_uzupelnienia(conn, login):
     """
-    Czy pokazać popup "podaj imię, nazwisko i nr kadrowy" przy starcie.
-    True także wtedy, gdy użytkownika w ogóle jeszcze nie ma.
+    Czy pokazać popup "podaj imię i nazwisko" przy starcie. True także
+    wtedy, gdy użytkownika w ogóle jeszcze nie ma.
+
+    0.1-alpha.3.2: nr kadrowy PRZESTAŁ być tu sprawdzany - w momencie
+    wdrożenia pracownicy jeszcze go nie mają, więc nie może blokować
+    pierwszego uruchomienia. Pole zostaje w dialogu jako opcjonalne,
+    przywracalne do wymaganego później bez zmiany UI.
     """
     wiersz = pobierz_uzytkownika(conn, login)
     if wiersz is None:
         return True
-    return not wiersz["alias"] or not wiersz["nr_kadrowy"]
+    return not wiersz["alias"]
 
 
 def ostrzezenia_tozsamosci(conn, login, nr_kadrowy):
@@ -135,3 +140,31 @@ def ostrzezenia_tozsamosci(conn, login, nr_kadrowy):
             f"na dwóch kontach Windows."
         )
     return ostrzezenia
+
+
+# --- 0.1-alpha.3.2: współdzielone konta Windows ---
+
+def login_rozszerzony(login_bazowy, alias):
+    """
+    Login "rozszerzony" o alias: `DOMENA\\konto#Imię Nazwisko`. Pozwala
+    kilku osobom pracującym na TYM SAMYM koncie Windows mieć osobną
+    tożsamość w `users` bez wprowadzania nowego mechanizmu identyfikacji -
+    to wciąż zwykły string wchodzący do `uuid_uzytkownika` (ta sama
+    maszyneria UUIDv5), więc pozostaje deterministyczny między stacjami.
+    """
+    return f"{login_bazowy}#{alias}"
+
+
+def znajdz_konta_dla_loginu(conn, login_bazowy):
+    """
+    Wszystkie konta "spod" tego loginu Windows: samo konto bazowe oraz
+    wszystkie jego warianty rozszerzone (patrz `login_rozszerzony`) - lista
+    do wyboru w oknie "kto teraz pracuje" (zmiana użytkownika/wyloguj).
+    Alfabetycznie po aliasie.
+    """
+    wiersze = conn.execute(
+        "SELECT id, login, alias, nr_kadrowy FROM users"
+        " WHERE login = ? OR login LIKE ? ORDER BY alias",
+        (login_bazowy, login_bazowy + "#%"),
+    ).fetchall()
+    return [dict(w) for w in wiersze]

@@ -91,6 +91,16 @@ CREATE TABLE transakcje (
     utworzono               TEXT,
     zmodyfikowano           TEXT,
 
+    -- 0.1-alpha.3.2: grupowanie i pochodzenie, patrz docs/roadmap.md.
+    -- `sesja_uuid` = losowy UUID nadany RAZ przy starcie aplikacji (klucz
+    -- grupujący "co wpisałem teraz", NIE tożsamość jak UUIDv5 w users.id -
+    -- nie musi być deterministyczny między stacjami). `zrodlo` = skąd
+    -- wiersz powstał ('formularz'/'import'/'import_zaufany'); NULL oznacza
+    -- wiersz sprzed tego wydania, celowo bez backfillu - to zbiór kandydatów
+    -- do przyszłego narzędzia naprawy starych danych.
+    sesja_uuid               TEXT,
+    zrodlo                   TEXT,
+
     -- twarda ochrona przed literalnym duplikatem tego samego wiersza
     UNIQUE(data, kurier_id, punkt_id)
 );
@@ -126,9 +136,12 @@ CREATE INDEX idx_transakcje_punkt ON transakcje(punkt_id);
 CREATE INDEX idx_transakcje_kurier ON transakcje(kurier_id);
 CREATE INDEX idx_punkty_adres ON punkty(adres);
 
+-- 0.1-alpha.3.2: filtrowanie widoku poprawek/podglądu formularza po sesji.
+CREATE INDEX idx_transakcje_sesja ON transakcje(sesja_uuid);
+
 -- Wersja schematu. Podnosić przy KAŻDEJ zmianie struktury.
 -- Bez tego przywrócenie starszej migawki po aktualizacji aplikacji otwiera
 -- bazę o nieaktualnej strukturze i wywala się na "no such column" - już po
 -- nadpisaniu dobrych danych. Musi być zgodna z repo.WERSJA_SCHEMATU
 -- (pilnowane testem test_utworzenie_schematu_ustawia_user_version).
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;

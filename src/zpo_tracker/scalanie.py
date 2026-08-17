@@ -387,18 +387,24 @@ def _wykonaj_scalenie_bez_transakcji(conn_docelowa, conn_zrodlowa,
         ).fetchone()
 
         if istniejaca is None:
+            # sesja_uuid/zrodlo (0.1-alpha.3.2): PRZENIESIONE ze źródła, nie
+            # nadpisane - pochodzenie wiersza to miejsce, gdzie POWSTAŁ, nie
+            # gdzie zostało scalone. `.get()` zamiast `w["..."]`: źródło może
+            # być bazą sprzed tego wydania (kolumny wtedy nie istnieją w
+            # ogóle w `dict(row)`), a nie tylko mieć w nich NULL.
             conn_docelowa.execute(
                 """INSERT INTO transakcje
                    (data, kurier_id, punkt_id, rejon_id, wykonawca_id,
                     ilosc_total, ilosc_zpo, ilosc_vinted, ilosc_automaty,
                     ilosc_kurier48, ilosc_niezrealizowane, komentarz,
-                    uuid, autor_id, utworzono, zmodyfikowano)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    uuid, autor_id, utworzono, zmodyfikowano,
+                    sesja_uuid, zrodlo)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (w["data"], kurier_id, punkt_id, rejon_id, wykonawca_id,
                  w["ilosc_total"], w["ilosc_zpo"], w["ilosc_vinted"],
                  w["ilosc_automaty"], w["ilosc_kurier48"], w["ilosc_niezrealizowane"],
                  w["komentarz"], w["uuid"], w["autor_id"], w["utworzono"],
-                 w["zmodyfikowano"]),
+                 w["zmodyfikowano"], w.get("sesja_uuid"), w.get("zrodlo")),
             )
             dodano += 1
             continue

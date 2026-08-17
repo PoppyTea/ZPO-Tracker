@@ -28,9 +28,10 @@ from tkinter import ttk
 from pydantic import ValidationError
 
 from zpo_tracker import dedukcja, operacje, repo
-from zpo_tracker.gui.formularz_logika import zbuduj_blankiet
+from zpo_tracker.gui.dialog_edycji import DialogEdycji
+from zpo_tracker.gui.formularz_logika import wiersz_pusty, zbuduj_blankiet
 from zpo_tracker.gui.widget_autocomplete import EntryZPodpowiedzia
-from zpo_tracker.gui.widget_pole import PoleZeWskaznikiem
+from zpo_tracker.gui.widget_pole import KOLORY, PoleZeWskaznikiem
 from zpo_tracker.gui.widget_tabela import Tabela
 
 KOLUMNY_PODGLADU = [
@@ -223,11 +224,14 @@ class WierszWidget:
 
 
 class ZakladkaWprowadzanie(ttk.Frame):
-    def __init__(self, parent, conn, katalog_danych, on_zapisano=None):
+    def __init__(self, parent, conn, katalog_danych, on_zapisano=None, sesja_uuid=None):
         super().__init__(parent)
         self.conn = conn
         self.katalog_danych = katalog_danych
         self.on_zapisano = on_zapisano
+        # 0.1-alpha.3.2: grupuje wiersze zapisane w tym uruchomieniu
+        # aplikacji - mintowane raz w gui/app.py, patrz repo.zapisz_blankiet.
+        self.sesja_uuid = sesja_uuid
         self.wiersze = []
         self._ustawiam_programowo = False
         self._kolejnosc = []
@@ -238,10 +242,21 @@ class ZakladkaWprowadzanie(ttk.Frame):
         panel.pack(fill="both", expand=True)
 
         gora = ttk.Frame(panel)
-        ttk.Label(gora, text="Podgląd bazy (scroll / Ctrl+scroll = powiększenie):").pack(
-            anchor="w", padx=6, pady=(4, 0)
-        )
-        self.podglad = Tabela(gora, KOLUMNY_PODGLADU)
+        pasek_podgladu = ttk.Frame(gora)
+        pasek_podgladu.pack(fill="x", padx=6, pady=(4, 0))
+        ttk.Label(
+            pasek_podgladu, text="Podgląd (scroll / Ctrl+scroll = powiększenie, "
+                                  "dwuklik = popraw):",
+        ).pack(side="left")
+        # 0.1-alpha.3.2: domyślnie tylko to, co wpisano W TYM uruchomieniu -
+        # "czy to się zapisało?" ma być odpowiadalne bez przewijania 500
+        # najnowszych wierszy całej bazy (patrz docs/roadmap.md)
+        self.var_pokaz_wszystko = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            pasek_podgladu, text="pokaż całą bazę", variable=self.var_pokaz_wszystko,
+            command=self.odswiez_podglad,
+        ).pack(side="left", padx=(10, 0))
+        self.podglad = Tabela(gora, KOLUMNY_PODGLADU, on_dwuklik=self._edytuj_z_podgladu)
         self.podglad.pack(fill="both", expand=True, padx=6, pady=6)
         panel.add(gora, weight=1)
 
@@ -417,6 +432,17 @@ class ZakladkaWprowadzanie(ttk.Frame):
         self._skocz(self._klucz_wiersza(wiersz, nazwa), -1)
 
     def _skocz(self, klucz_biezace, kierunek):
+        # 0.1-alpha.3.2: Tab/Enter z ostatniego pola CAŁEJ sekwencji (zawsze
+        # wewnątrz ostatniego wiersza, patrz dedukcja.czy_koniec_ostatniego_wiersza)
+        # dodaje nowy wiersz zamiast zawijać do nagłówka - ale TYLKO gdy ten
+        # ostatni wiersz jest faktycznie wypełniony; pusty ostatni wiersz
+        # dalej zawija (nie ma sensu mnożyć pustych wierszy).
+        if (kierunek == 1
+                and dedukcja.czy_koniec_ostatniego_wiersza(self._kolejnosc, klucz_biezace)
+                and self.wiersze and not wiersz_pusty(self.wiersze[-1].pobierz_surowe())):
+            self.dodaj_wiersz()
+            self.wiersze[-1].widget_pola("adres").focus_set()
+            return
         docelowy = dedukcja.przesun_w_kolejnosci(self._kolejnosc, klucz_biezace, kierunek)
         widget = self._widget_dla_klucza(docelowy)
         if widget is not None:
@@ -452,7 +478,16 @@ class ZakladkaWprowadzanie(ttk.Frame):
         self._klucz_podswietlony = docelowy
 
     def odswiez_podglad(self):
-        self.podglad.ustaw_dane(repo.pobierz_transakcje(self.conn, limit=500))
+        filtr_sesji = {} if self.var_pokaz_wszystko.get() else {"sesja_uuid": self.sesja_uuid}
+        self.podglad.ustaw_dane(repo.pobierz_transakcje(self.conn, limit=500, **filtr_sesji))
+
+    def _edytuj_z_podgladu(self, wiersz):
+        DialogEdycji(self, self.conn, self.katalog_danych, wiersz, on_zapisano=self._po_edycji)
+
+    def _po_edycji(self):
+        self.odswiez_podglad()
+        if self.on_zapisano:
+            self.on_zapisano()
 
     def zapisz(self):
         dane_wierszy = [w.pobierz_surowe() for w in self.wiersze]
@@ -462,42 +497,79 @@ class ZakladkaWprowadzanie(ttk.Frame):
                 self.var_wykonawca.get().strip() or None, dane_wierszy,
             )
         except ValidationError as e:
-            self.etykieta_status.configure(text=f"Błąd: {_pierwszy_blad(e)}", foreground="red")
+            self.etykieta_status.configure(
+                text=f"Błąd: {_pierwszy_blad(e)}", foreground=KOLORY["czerwony"])
             return
 
         if blankiet is None:
-            self.etykieta_status.configure(text="Brak wypełnionych wierszy do zapisania.", foreground="red")
+            self.etykieta_status.configure(
+                text="Brak wypełnionych wierszy do zapisania.", foreground=KOLORY["czerwony"])
             return
+
+        # widgety wierszy NIEPUSTYCH, w TEJ SAMEJ kolejności co blankiet.wiersze
+        # (zbuduj_blankiet filtruje puste tym samym predykatem) - `wyniki`
+        # z zapisz_blankiet jest z nimi indeksowo równoległe (repo.py: "jeden
+        # na wiersz, w kolejności wejściowej"), puste wiersze-placeholdery
+        # nigdy do zapisu nie trafiają, więc nie mają odpowiednika w wyniki
+        widgety_probowane = [w for w in self.wiersze if not wiersz_pusty(w.pobierz_surowe())]
 
         wyniki = operacje.wykonaj(
             self.conn, self.katalog_danych, rodzaj="zapis_blankietu",
             etykieta=f"{self.var_kurier.get().strip()}, {len(blankiet.wiersze)} wiersz(y)",
             funkcja=repo.zapisz_blankiet,
-            args=(blankiet,), kwargs={"autor_id": getattr(self, "autor_id", None)},
+            args=(blankiet,),
+            kwargs={"autor_id": getattr(self, "autor_id", None),
+                    "sesja_uuid": self.sesja_uuid},
             licz_wiersze=operacje.licz_zapisane_wiersze,
+            licz_pominiete=operacje.licz_pominiete_wiersze,
         )
-        ostrzezenia, pominiete = [], 0
-        for wynik in wyniki:
-            if wynik["pominieto"]:
-                pominiete += 1
+
+        ostrzezenia = []
+        powody_pominietych = []  # (numer_1_based_wsrod_probowanych, powod)
+        for numer, wynik in enumerate(wyniki, start=1):
             ostrzezenia.extend(wynik["ostrzezenia"])
+            if wynik["pominieto"]:
+                powody_pominietych.append((numer, wynik["powod"]))
+        pominiete = len(powody_pominietych)
+        zapisane = len(wyniki) - pominiete
 
-        data_zachowana = self.var_data.get()
-        for wiersz_widget in list(self.wiersze):
-            wiersz_widget.destroy()
-        self.wiersze.clear()
-        self.var_kurier.set("")
-        self.var_wykonawca.set("")
-        self.var_data.set(data_zachowana)
-        self.dodaj_wiersz()
-        self.dodaj_wiersz()
+        if pominiete == 0:
+            # pełny sukces - świeży start, jak przed 0.1-alpha.3.2 (razem ze
+            # sprzątnięciem ewentualnych pustych wierszy-placeholderów)
+            data_zachowana = self.var_data.get()
+            for wiersz_widget in list(self.wiersze):
+                wiersz_widget.destroy()
+            self.wiersze.clear()
+            self.var_kurier.set("")
+            self.var_wykonawca.set("")
+            self.var_data.set(data_zachowana)
+            self.dodaj_wiersz()
+            self.dodaj_wiersz()
+        else:
+            # 0.1-alpha.3.2: TYLKO zapisane znikają - pominięte zostają
+            # widoczne i wypełnione, do poprawki i ponownego zapisu; nagłówek
+            # (kurier/wykonawca) NIE jest czyszczony, użytkownik wciąż
+            # pracuje nad tym samym blankietem
+            widgety_do_usuniecia = [
+                widget for widget, wynik in zip(widgety_probowane, wyniki)
+                if not wynik["pominieto"]
+            ]
+            for widget in widgety_do_usuniecia:
+                widget.destroy()
+                self.wiersze.remove(widget)
+            self._przelicz_wiersze_siatki()
+            self._odswiez_kolejnosc()
 
-        tekst = f"Zapisano {len(blankiet.wiersze) - pominiete} wierszy."
-        if pominiete:
-            tekst += f" Pominięto {pominiete} (duplikat)."
+        if pominiete == 0:
+            tekst = f"Zapisano {zapisane} wierszy."
+            kolor = KOLORY["zielony"]
+        else:
+            opis = "; ".join(f"wiersz {n}: {powod}" for n, powod in powody_pominietych)
+            tekst = f"Zapisano {zapisane} z {zapisane + pominiete} wierszy. Pominięto - {opis}."
+            kolor = KOLORY["czerwony"]
         if ostrzezenia:
             tekst += f" Ostrzeżeń: {len(ostrzezenia)}."
-        self.etykieta_status.configure(text=tekst, foreground="black")
+        self.etykieta_status.configure(text=tekst, foreground=kolor)
 
         self.odswiez_podglad()
         if self.on_zapisano:

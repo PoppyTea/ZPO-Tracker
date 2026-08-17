@@ -28,9 +28,21 @@ ustalenia po `0.1-alpha.3` (info od Papavera).
 | `v0.1.0-alpha.2` | wydane | MVP: import/export, formularz blankietowy, słowniki, podpowiedzi |
 | `v0.1.0-alpha.3` | wydane | trwałość danych, atrybucja, ręczne scalanie baz (niżej) |
 | **`0.1-alpha.3.1`** | wydane | dedukcja pól formularza, wskaźniki stanu, tryb auto |
+| **`0.1-alpha.3.2`** | w toku | **używalność + zdrowie danych**: poprawki po zapisie, zaufanie importu |
+| **`0.1-alpha.3.3/3.4`** | planowane | rejonarz jako źródło prawdy rejonów (+ backfill), narzędzie naprawy starych Exceli |
 | **`0.1-alpha.4`** | planowane | przebudowa UI/UX pod realne potrzeby + kanał feedbacku |
 | **`0.1-alpha.5`** | planowane | tryb pół-auto wprowadzania (wymaga sensownego interfejsu) |
 | **`0.1-alpha.6`** | planowane | automatyczna synchronizacja między stacjami |
+
+**Warunek przejścia do `0.1-alpha.4`:** program uznany za nadający się do
+użytku. Funkcjonalności mogą być podstawowe, ale muszą być. Filtr, przez
+który musi przejść każdy kandydat do `0.1-alpha.3.x`:
+
+1. Czy przybliża nas to do umożliwienia realnej pracy na programie?
+2. Czy pomaga powstrzymać wpływ skorumpowanych danych z wcześniejszych
+   miesięcy na nowo tworzone dane?
+3. Czy naraża dane na zepsucie lub niekompletność, którą trudno będzie
+   naprawić później? (jak wyglądałaby taka naprawa? czy mamy źródło prawdy?)
 
 ### `0.1-alpha.3` — domknięcie MVP: trwałość, atrybucja, scalanie
 
@@ -81,6 +93,85 @@ Zakres:
   Enter działa jak TAB, podświetlenie następnego pola
 - `???` jako kanoniczny „rejon nieznany" we wszystkich ścieżkach zapisu
 - naprawa błędu `firmy_zpo` ↔ `punkty.nadawca` + naprawa istniejących baz
+
+### `0.1-alpha.3.2` — używalność i zdrowie danych
+
+Po `0.1-alpha.3.1` program był „feature-complete" wg tej roadmapy, ale
+**bezużyteczny do realnej pracy** (feedback pracowników, 2026-08-13). Dwa
+RÓWNORZĘDNE filary — samo szybkie wdrożenie nie ma sensu, jeśli nie umiemy
+zagwarantować, że wprowadzone tak dane będą zdrowe:
+
+1. UI faktycznie umożliwia pracę,
+2. dane wprowadzane i importowane są zdrowe — powstrzymujemy wpływ
+   skorumpowanych Exceli na nowo tworzone dane.
+
+Co konkretnie blokowało pracę (potwierdzone w kodzie, nie domysł):
+**nie istniała ŻADNA ścieżka edycji ani usunięcia zapisanej transakcji.**
+`UNIQUE(data, kurier, punkt)` odrzucał naturalny gest korekty („wpiszę
+poprawnie jeszcze raz") jako duplikat — zła wartość zostawała, poprawka
+znikała, komunikat leciał czarnym tekstem. Jedynym wyjściem było cofnięcie
+punkt-w-czasie, zamykające aplikację i cofające też całą pracę po tym punkcie.
+
+Zakres:
+
+- **schemat v3**: `transakcje.sesja_uuid` (grupuje „co wpisałem w tym
+  uruchomieniu") + `transakcje.zrodlo` (`formularz`/`import`/`import_zaufany`;
+  **NULL = sprzed 3.2**, celowo bez backfillu — to zbiór wejściowy przyszłego
+  narzędzia naprawy starych danych)
+- **edycja i usuwanie transakcji** (`repo.zaktualizuj_transakcje`,
+  `usun_transakcje`, `ustaw_pole_transakcji`) — kolizja klucza naturalnego
+  blokuje z opisem kolidującego wiersza, nigdy nie rozstrzyga po cichu;
+  edycja zbiorcza atomowa (jedna kolizja wycofuje całość)
+- **Przegląd → widok poprawek**: filtry (kurier / zakres dat / tekst /
+  bieżąca sesja), dwuklik → edycja, operacje zbiorcze + usuwanie
+- **formularz**: podgląd domyślnie tylko bieżąca sesja, Tab z końca
+  wypełnionego ostatniego wiersza dodaje nowy wiersz, status zapisu
+  kolorowy i z powodami pominięć, **wiersze pominięte zostają w siatce**
+  (dotąd formularz czyścił się nawet gdy nie zapisał nic)
+- **rejon przestaje być wpisywalny ręcznie** — tylko wyświetlacz dedukcji;
+  brak jednoznacznej historii → zapis `???` do uzupełnienia przez rejonarz
+- **nadawcy bez PNI naprawialni** — `firmy_zpo` powstaje wyłącznie w gałęzi
+  z PNI, więc literówki w ZUS/PKO/Kruk były nienaprawialne w aplikacji
+- **model zaufania importu**: eksport dostaje znacznik pochodzenia + SHA-256
+  odcisk danych; plik bez znacznika nie wnosi PNI ani rejonu, plik ze
+  znacznikiem ale zmienioną zawartością **nie da się odblokować żadną drogą**
+  (pliki `.xlsx` są trywialnie edytowalne — sam znacznik nic nie dowodzi);
+  wymuszenie zaufania dla obcych plików to ukryty przełącznik, odsłaniany
+  wpisem w `settings.json`
+- **naprawa koercji PNI w eksporcie** — `"007"` → int `7` → reimport `"7"`
+  rozdwajał ten sam fizyczny punkt; PNI to klucz, nie liczba
+- `ustawienia.py` (`settings.json` per stacja), nr kadrowy przestaje być
+  wymagany, „Wyloguj"/zmiana użytkownika na współdzielonych kontach Windows
+
+**Świadomie NIE w tym wydaniu** (ławka rezerwowa — nie przechodzą filtra
+„czy przybliża do realnej pracy"): tryb pół-auto i manualny, przełącznik
+trybów, blokowanie pola kliknięciem we wskaźnik. Patrz `0.1-alpha.5`.
+
+### `0.1-alpha.3.3 / 3.4` — rejonarz i naprawa zaległych Exceli
+
+**Rejonarz** — zewnętrzny rejestr z pełną rejonizacją kraju (eksport `.xlsx`,
+>400 tys. rekordów: rejon per numer budynku). Dostęp załatwiony 2026-08-13;
+tylko eksporty plikowe, brak API. Kompresowalny do zakresów („ulica X,
+numery 0<N≤120"), realnie potrzebna ok. 1/3 rekordów — do potwierdzenia na
+pliku. To jest **źródło prawdy o rejonach**, w odróżnieniu od danych
+z papierowych blankietów, które są zakłamane.
+
+Zakres do rozstrzygnięcia przy planowaniu:
+
+- import + kompresja do zakresów; szew dedukcji jest już gotowy
+  (`dedukcja.dedukuj_wiersz` — jedyne miejsce, które rozstrzyga rejon)
+- backfill wszystkich rekordów bez rejonu (`???`) po integracji
+- **adresy**: rejonarz jako źródło prawdy także dla adresów, czy raczej
+  otwarte zbiory adresowe? (patrz `reference-data-sources.md`) — ostrzeżenie
+  przy adresie spoza bazy + propozycje najbliższych po podobieństwie nazwy
+- formularz przechowuje adres bliżej `schema v2` (osobno miejscowość / ulica
+  / nr budynku) — integracja rejonarza to naturalny moment na tę zmianę
+  schematu, patrz `normalization-v2.md`
+
+**Narzędzie naprawy starych Exceli** — osobny, jednorazowy program czyszczący
+zaległe miesiące PRZED importem do głównej aplikacji (docelowo dane przestają
+płynąć z Excela w ogóle). Zbiór wejściowy jest już wyznaczony przez
+`transakcje.zrodlo IS NULL OR 'import'`.
 
 ### `0.1-alpha.4` — UI/UX
 
@@ -184,17 +275,13 @@ Konsekwencja: `schema_v2_draft.sql` zawiera
 `numery_kadrowe_kurierow(kurier_id, numer)`. Poprawione w drafcie, żeby
 nikt nie zaimplementował wadliwego wzorca.
 
-### 4. Rejonarz — docelowe źródło rejonów
+### 4. Rejonarz — ROZSTRZYGNIĘTE (2026-08-13)
 
-Rejony pochodzą realnie z **rejonarza** (zewnętrzny rejestr przypisujący
-rejon do adresu). Docelowo pole `rejon` ma **zniknąć z formularza
-całkowicie** — zamiast wpisywać je albo dedukować z własnej historii,
-program pytałby rejonarz o rejon dla adresu.
+Pytanie „w jakiej formie rejonarz jest dostępny" jest już zamknięte:
+**eksport `.xlsx`, bez API.** Dostęp załatwiony. Ręczne wpisywanie rejonu
+zniknęło z formularza już w `0.1-alpha.3.2`, sama integracja jest
+zaplanowana jako `0.1-alpha.3.3/3.4` — patrz sekcja tej wersji wyżej.
 
-Dedukcja rejonu z adresu wprowadzona w `0.1-alpha.3.1` jest krokiem w tę
-stronę: odwzorowuje docelowy wzorzec (adres → rejon) na danych, które już
-mamy. Kiedy pojawi się integracja, zmienia się źródło odpowiedzi, nie
-kształt formularza.
-
-Do rozstrzygnięcia przed rozpoczęciem: w jakiej formie rejonarz jest
-dostępny (plik? eksport? API?) i jak często się zmienia.
+Otwarte zostaje tylko jedno, do rozstrzygnięcia przy planowaniu tamtej
+wersji: czy rejonarz ma być źródłem prawdy także dla **adresów**, czy
+lepsze są do tego otwarte zbiory adresowe (`reference-data-sources.md`).

@@ -50,7 +50,9 @@ class DialogUzytkownika(tk.Toplevel):
         ttk.Entry(ramka, textvariable=self.var_nr, width=12).grid(
             row=2, column=1, sticky="w", padx=(8, 0), pady=3)
         ttk.Label(
-            ramka, text="(5 znaków, litery i cyfry; wielkość liter ma znaczenie)",
+            ramka,
+            text="(opcjonalnie - 5 znaków, litery i cyfry, wielkość liter ma "
+                 "znaczenie, jeśli już go masz)",
             foreground="#666",
         ).grid(row=3, column=1, sticky="w", padx=(8, 0))
 
@@ -73,15 +75,18 @@ class DialogUzytkownika(tk.Toplevel):
 
     def _zatwierdz(self):
         alias = self.var_alias.get().strip()
-        nr = self.var_nr.get().strip()
+        nr = self.var_nr.get().strip() or None  # "" -> None: CHECK w bazie
+        # dopuszcza NULL, nie pusty string (0.1-alpha.3.2: nr kadrowy
+        # przestał być wymagany, patrz uzytkownicy.wymaga_uzupelnienia)
 
         if not alias:
             self.etykieta_status.configure(text="Podaj imię i nazwisko.")
             return
-        if not uzytkownicy.poprawny_nr_kadrowy(nr):
+        if nr is not None and not uzytkownicy.poprawny_nr_kadrowy(nr):
             self.etykieta_status.configure(
-                text="Numer kadrowy musi mieć dokładnie 5 znaków "
-                     "(litery i cyfry, bez spacji i myślników).")
+                text="Jeśli podajesz numer kadrowy, musi mieć dokładnie "
+                     "5 znaków (litery i cyfry, bez spacji i myślników). "
+                     "Możesz też zostawić to pole puste.")
             return
 
         # miękkie ostrzeżenie: pokazujemy raz, drugie kliknięcie zapisuje
@@ -99,3 +104,68 @@ class DialogUzytkownika(tk.Toplevel):
         if self.on_gotowe:
             self.on_gotowe(self.wynik_id)
         self.destroy()
+
+
+class DialogWyboruUzytkownika(tk.Toplevel):
+    """
+    "Kto teraz pracuje?" - wybór osoby na WSPÓŁDZIELONYM koncie Windows
+    (0.1-alpha.3.2). Listuje konto bazowe i wszystkie jego warianty
+    rozszerzone (`uzytkownicy.znajdz_konta_dla_loginu`) + pozwala dodać
+    nową osobę (`uzytkownicy.login_rozszerzony`). Używane zarówno przez
+    "Zmień użytkownika…" jak i "Wyloguj" (patrz gui/app.py) - to ten sam
+    wybór, różni się tylko tym, co dzieje się PRZED otwarciem tego okna.
+    """
+
+    def __init__(self, parent, conn, login_bazowy, on_wybrano):
+        super().__init__(parent)
+        self.conn = conn
+        self.login_bazowy = login_bazowy
+        self.on_wybrano = on_wybrano
+        self.konta = uzytkownicy.znajdz_konta_dla_loginu(conn, login_bazowy)
+
+        self.title("Kto teraz pracuje?")
+        self.resizable(False, False)
+        self.transient(parent)
+
+        ramka = ttk.Frame(self, padding=14)
+        ramka.pack(fill="both", expand=True)
+
+        ttk.Label(
+            ramka, text="Wybierz, kto teraz wprowadza dane na tej stacji:",
+        ).pack(anchor="w", pady=(0, 8))
+
+        for konto in self.konta:
+            ttk.Button(
+                ramka, text=konto["alias"] or konto["login"],
+                command=lambda login=konto["login"]: self._wybierz(login),
+            ).pack(fill="x", pady=2)
+
+        ttk.Separator(ramka).pack(fill="x", pady=8)
+
+        ramka_nowy = ttk.Frame(ramka)
+        ramka_nowy.pack(fill="x")
+        ttk.Label(ramka_nowy, text="Ktoś nowy:").pack(side="left")
+        self.var_nazwa = tk.StringVar()
+        ttk.Entry(ramka_nowy, textvariable=self.var_nazwa, width=22).pack(
+            side="left", padx=6)
+        ttk.Button(ramka_nowy, text="Dodaj", command=self._dodaj_nowego).pack(
+            side="left")
+
+        self.etykieta_status = ttk.Label(
+            ramka, text="", foreground="red", wraplength=320, justify="left")
+        self.etykieta_status.pack(anchor="w", pady=(8, 0))
+
+    def _wybierz(self, login):
+        self.on_wybrano(login)
+        self.destroy()
+
+    def _dodaj_nowego(self):
+        nazwa = self.var_nazwa.get().strip()
+        if not nazwa:
+            self.etykieta_status.configure(text="Podaj imię i nazwisko.")
+            return
+        nowy_login = uzytkownicy.login_rozszerzony(self.login_bazowy, nazwa)
+        # alias ustawiony od razu z nazwy podanej tutaj - bez tego kroku
+        # dalej trzeba by pytać o alias osobnym dialogiem (DialogUzytkownika)
+        uzytkownicy.zapewnij_uzytkownika(self.conn, login=nowy_login, alias=nazwa)
+        self._wybierz(nowy_login)

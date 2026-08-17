@@ -42,7 +42,7 @@ def _resolve_schema_path(frozen=None, meipass=None):
 SCHEMA_PATH = _resolve_schema_path()
 
 # Musi być zgodna z `PRAGMA user_version` na końcu schema.sql - patrz tam.
-WERSJA_SCHEMATU = 2
+WERSJA_SCHEMATU = 3
 
 _licznik_savepointow = itertools.count()
 
@@ -113,6 +113,13 @@ _KOLUMNY_ATRYBUCJI = {
     "zmodyfikowano": "TEXT",
 }
 
+# Kolumny dołożone do `transakcje` w `0.1-alpha.3.2` (sesja + pochodzenie
+# wiersza) - patrz komentarz przy tych samych kolumnach w schema.sql.
+_KOLUMNY_SESJI = {
+    "sesja_uuid": "TEXT",
+    "zrodlo": "TEXT",
+}
+
 _DDL_USERS = """
 CREATE TABLE users (
     id          TEXT PRIMARY KEY,
@@ -158,6 +165,16 @@ def migruj(conn):
             "CREATE INDEX IF NOT EXISTS idx_transakcje_kurier ON transakcje(kurier_id)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_punkty_adres ON punkty(adres)")
+
+        # 0.1-alpha.3.2: sesja_uuid + zrodlo (dołożone niezależnie od
+        # _KOLUMNY_ATRYBUCJI, żeby baza w stanie pośrednim - np. tylko
+        # jedna z dwóch kolumn ręcznie dołożona - przeżyła, patrz test)
+        obecne = _kolumny(conn, "transakcje")
+        for nazwa, typ in _KOLUMNY_SESJI.items():
+            if nazwa not in obecne:
+                conn.execute(f"ALTER TABLE transakcje ADD COLUMN {nazwa} {typ}")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_transakcje_sesja ON transakcje(sesja_uuid)")
 
         conn.execute(f"PRAGMA user_version = {WERSJA_SCHEMATU}")
 
@@ -314,7 +331,7 @@ def transakcja(conn):
     conn.execute(f"RELEASE {nazwa}")
 
 
-def zapisz_blankiet(conn, blankiet, autor_id=None, teraz=None):
+def zapisz_blankiet(conn, blankiet, autor_id=None, teraz=None, sesja_uuid=None):
     """
     Zapisuje Blankiet (jeden kurier, jeden dzień) jako jedną transakcję na
     WierszBlankietu. Rejon i wykonawca liczone PER WIERSZ (0.1-alpha.3.1):
@@ -331,14 +348,17 @@ def zapisz_blankiet(conn, blankiet, autor_id=None, teraz=None):
     wewnątrz transakcji bez zmian - patrz `transakcja`.
 
     `autor_id` jest opcjonalny: atrybucja nie może być warunkiem
-    zapisania danych.
+    zapisania danych. `sesja_uuid` (0.1-alpha.3.2) grupuje wiersze
+    wpisane w tym samym uruchomieniu aplikacji - podgląd formularza
+    filtruje po niej domyślnie, patrz gui/zakladka_wprowadzanie.py.
     """
     with transakcja(conn):
         return _zapisz_blankiet_bez_transakcji(
-            conn, blankiet, autor_id=autor_id, teraz=teraz)
+            conn, blankiet, autor_id=autor_id, teraz=teraz, sesja_uuid=sesja_uuid)
 
 
-def _zapisz_blankiet_bez_transakcji(conn, blankiet, autor_id=None, teraz=None):
+def _zapisz_blankiet_bez_transakcji(conn, blankiet, autor_id=None, teraz=None,
+                                     sesja_uuid=None):
     kurier_id = get_or_create_kurier(conn, blankiet.kurier)
     wykonawca_id = get_or_create_wykonawca(conn, blankiet.wykonawca)
     teraz = teraz or datetime.now().isoformat(timespec="seconds")
@@ -354,12 +374,14 @@ def _zapisz_blankiet_bez_transakcji(conn, blankiet, autor_id=None, teraz=None):
                 """INSERT INTO transakcje
                    (data, kurier_id, punkt_id, rejon_id, wykonawca_id,
                     ilosc_total, ilosc_zpo,
-                    uuid, autor_id, utworzono, zmodyfikowano)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    uuid, autor_id, utworzono, zmodyfikowano,
+                    sesja_uuid, zrodlo)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     blankiet.data.isoformat(), kurier_id, punkt_id, rejon_id,
                     wykonawca_id, wiersz.ilosc_total, wiersz.ilosc_zpo,
                     str(uuid.uuid4()), autor_id, teraz, teraz,
+                    sesja_uuid, "formularz",
                 ),
             )
             wyniki.append({
@@ -486,6 +508,76 @@ def pobierz_unikalne_adresy(conn):
     ]
 
 
+def pobierz_nadawcow_bez_pni(conn):
+    """
+    Nadawcy BEZ PNI (ZUS, PKO, Kruk...) - istnieją WYŁĄCZNIE jako
+    `punkty.nadawca` (`firma_zpo_id IS NULL`), nigdy jako wiersz w
+    `firmy_zpo` (patrz `importer.get_or_create_punkt` - ten wpis powstaje
+    TYLKO w gałęzi z PNI). Do podzakładki „Nadawcy (bez PNI)" w Słownikach -
+    `firmy_zpo` sama w sobie pokazuje tylko sieci z PNI, nie pełny zbiór.
+    """
+    wiersze = conn.execute(
+        """SELECT nadawca AS nazwa, COUNT(*) AS liczba_punktow
+           FROM punkty WHERE firma_zpo_id IS NULL
+           GROUP BY nadawca ORDER BY nadawca"""
+    ).fetchall()
+    return [dict(w) for w in wiersze]
+
+
+def zmien_nadawce_bez_pni(conn, stara, nowa):
+    """
+    Zmienia nazwę nadawcy bez PNI wszędzie, gdzie występuje - naprawa
+    literówek (ZUS/PKO/Kruk...), dotąd nienaprawialnych w aplikacji (patrz
+    `pobierz_nadawcow_bez_pni`). Atomowe.
+
+    Po zmianie różne punkty mogą stać się identyczne pod (nadawca, adres) -
+    schemat NIE ma na to UNIQUE (tylko `get_or_create_punkt` sam dba o
+    deduplikację PRZY ZAPISIE, nie przy rename). Takie zlepienia scalamy:
+    wygrywa punkt o najniższym id (najstarszy), transakcje przegrywającego
+    przepinamy na niego i przegrywający usuwamy - wzorzec
+    `_przemianuj_lub_scal_firme`. Kolizja `UNIQUE(data,kurier_id,punkt_id)`
+    przy przepinaniu (oba punkty mają transakcję tego samego dnia/kuriera)
+    rzuca `KolizjaTransakcji` i wycofuje CAŁOŚĆ - konflikt nigdy nie jest
+    rozstrzygany po cichu (reguła projektu, patrz repo.KolizjaTransakcji).
+    """
+    with transakcja(conn):
+        conn.execute(
+            "UPDATE punkty SET nadawca = ? WHERE nadawca = ? AND firma_zpo_id IS NULL",
+            (nowa, stara),
+        )
+        punkty = conn.execute(
+            "SELECT id, adres FROM punkty WHERE nadawca = ? AND firma_zpo_id IS NULL"
+            " ORDER BY id", (nowa,),
+        ).fetchall()
+        po_adresie = {}
+        for p in punkty:
+            po_adresie.setdefault(p["adres"], []).append(p["id"])
+        for ids in po_adresie.values():
+            if len(ids) < 2:
+                continue
+            wygrywajacy, *przegrywajacy = ids
+            for id_przegrywajacy in przegrywajacy:
+                _scal_punkty(conn, id_przegrywajacy, wygrywajacy)
+
+
+def _scal_punkty(conn, punkt_zrodlowy, punkt_docelowy):
+    kolidujaca = conn.execute(
+        """SELECT z.id FROM transakcje z
+           JOIN transakcje d ON d.data = z.data AND d.kurier_id = z.kurier_id
+           WHERE z.punkt_id = ? AND d.punkt_id = ?""",
+        (punkt_zrodlowy, punkt_docelowy),
+    ).fetchone()
+    if kolidujaca:
+        raise KolizjaTransakcji(
+            "Nie można scalić punktów po zmianie nazwy nadawcy - " +
+            _opisz_transakcje(conn, kolidujaca["id"]) +
+            " koliduje z transakcją drugiego punktu tego samego dnia/kuriera.")
+    conn.execute(
+        "UPDATE transakcje SET punkt_id = ? WHERE punkt_id = ?",
+        (punkt_docelowy, punkt_zrodlowy))
+    conn.execute("DELETE FROM punkty WHERE id = ?", (punkt_zrodlowy,))
+
+
 def pobierz_punkty(conn):
     """Lista punktów z nazwą firmy ZPO (jeśli ma PNI), do zakładki słowników."""
     wiersze = conn.execute(
@@ -497,20 +589,59 @@ def pobierz_punkty(conn):
     return [dict(w) for w in wiersze]
 
 
-def pobierz_transakcje(conn, limit=200):
-    """Lista transakcji do przeglądania, najnowsze pierwsze, z nazwami zamiast ID."""
+def pobierz_transakcje(conn, limit=200, *, kurier=None, data_od=None, data_do=None,
+                        utworzono_od=None, utworzono_do=None, sesja_uuid=None, tekst=None):
+    """
+    Lista transakcji do przeglądania, najnowsze pierwsze, z nazwami zamiast
+    ID. Dokłada `id`/`uuid`/`utworzono`/`sesja_uuid`/`zrodlo` (0.1-alpha.3.2)
+    - potrzebne przez widok poprawek (edycja/usuwanie po `id`, filtr sesji)
+    mimo że część z nich nie jest wyświetlana w tabeli.
+
+    Filtry (wszystkie opcjonalne, łączone koniunkcją - "kurier ORAZ zakres
+    dat ORAZ ..."): `kurier` (dokładne dopasowanie nazwy), `data_od`/
+    `data_do` (zakres daty TRANSAKCJI, `date` albo string ISO), `utworzono_od`/
+    `utworzono_do` (zakres znacznika wprowadzenia), `sesja_uuid` (dokładne
+    dopasowanie), `tekst` (dopasowanie częściowe nadawcy LUB adresu).
+    """
+    warunki, parametry = [], []
+    if kurier is not None:
+        warunki.append("k.imie_nazwisko = ?")
+        parametry.append(kurier)
+    if data_od is not None:
+        warunki.append("t.data >= ?")
+        parametry.append(data_od.isoformat() if hasattr(data_od, "isoformat") else data_od)
+    if data_do is not None:
+        warunki.append("t.data <= ?")
+        parametry.append(data_do.isoformat() if hasattr(data_do, "isoformat") else data_do)
+    if utworzono_od is not None:
+        warunki.append("t.utworzono >= ?")
+        parametry.append(utworzono_od)
+    if utworzono_do is not None:
+        warunki.append("t.utworzono <= ?")
+        parametry.append(utworzono_do)
+    if sesja_uuid is not None:
+        warunki.append("t.sesja_uuid = ?")
+        parametry.append(sesja_uuid)
+    if tekst is not None:
+        warunki.append("(p.nadawca LIKE ? OR p.adres LIKE ?)")
+        wzorzec = f"%{tekst}%"
+        parametry.extend([wzorzec, wzorzec])
+
+    gdzie = f"WHERE {' AND '.join(warunki)}" if warunki else ""
     wiersze = conn.execute(
-        """SELECT t.id, t.data, k.imie_nazwisko AS kurier, p.nadawca,
-                  p.adres, r.kod AS rejon, w.nazwa AS wykonawca,
-                  t.ilosc_total, t.ilosc_zpo, t.komentarz
-           FROM transakcje t
-           JOIN kurierzy k ON k.id = t.kurier_id
-           JOIN punkty p ON p.id = t.punkt_id
-           LEFT JOIN rejony r ON r.id = t.rejon_id
-           LEFT JOIN wykonawcy w ON w.id = t.wykonawca_id
-           ORDER BY t.data DESC, t.id DESC
-           LIMIT ?""",
-        (limit,),
+        f"""SELECT t.id, t.data, k.imie_nazwisko AS kurier, p.nadawca,
+                   p.adres, r.kod AS rejon, w.nazwa AS wykonawca,
+                   t.ilosc_total, t.ilosc_zpo, t.komentarz,
+                   t.uuid, t.utworzono, t.sesja_uuid, t.zrodlo
+            FROM transakcje t
+            JOIN kurierzy k ON k.id = t.kurier_id
+            JOIN punkty p ON p.id = t.punkt_id
+            LEFT JOIN rejony r ON r.id = t.rejon_id
+            LEFT JOIN wykonawcy w ON w.id = t.wykonawca_id
+            {gdzie}
+            ORDER BY t.data DESC, t.id DESC
+            LIMIT ?""",
+        (*parametry, limit),
     ).fetchall()
     return [dict(w) for w in wiersze]
 
@@ -558,6 +689,159 @@ def historia_rejonow_punktu(conn, punkt_id):
         (punkt_id,),
     ).fetchall()
     return [dict(w) for w in wiersze]
+
+
+# --- korekty (0.1-alpha.3.2): edycja i usuwanie transakcji ---
+#
+# Pierwsze w projekcie destrukcyjne prymitywy na `transakcje` poza importem/
+# formularzem - dotąd istniał wyłącznie INSERT (plus jeden UPDATE ilości,
+# WYŁĄCZNIE w scalanie.py, przy jawnym rozstrzygnięciu konfliktu). Świadomie
+# BEZ nadawcy/adresu/PNI: przepięcie wiersza na inny punkt to inna klasa
+# ryzyka (cicha zmiana historii punktu) niż poprawka daty/ilości/rejonu -
+# korekta punktu w tym wydaniu to usuń + wpisz ponownie w formularzu,
+# z pełną dedukcją. Patrz docs/roadmap.md.
+
+KOLUMNY_EDYTOWALNE_TRANSAKCJI = {
+    "data", "kurier", "wykonawca", "rejon", "ilosc_total", "ilosc_zpo",
+}
+
+
+class KolizjaTransakcji(Exception):
+    """
+    Docelowa trójka (data, kurier, punkt) już istnieje na INNYM wierszu.
+    Reguła projektu: konflikt wartości nigdy nie jest rozstrzygany
+    automatycznie (docs/roadmap.md) - operacja się nie udaje, baza zostaje
+    całkowicie nietknięta, użytkownik dostaje czytelny opis kolidującego
+    wiersza (patrz `_opisz_transakcje`) zamiast gołego "UNIQUE failed".
+    """
+
+
+def _opisz_transakcje(conn, transakcja_id):
+    w = conn.execute(
+        """SELECT t.data, k.imie_nazwisko AS kurier, p.nadawca, p.adres,
+                  t.ilosc_total, t.ilosc_zpo
+           FROM transakcje t
+           JOIN kurierzy k ON k.id = t.kurier_id
+           JOIN punkty p ON p.id = t.punkt_id
+           WHERE t.id = ?""",
+        (transakcja_id,),
+    ).fetchone()
+    if w is None:
+        return f"transakcja #{transakcja_id}"
+    opis = f"{w['data']} / {w['kurier']} / {w['nadawca']} ({w['adres']}) - ilość {w['ilosc_total']}"
+    if w["ilosc_zpo"] is not None:
+        opis += f", w tym ZPO {w['ilosc_zpo']}"
+    return opis
+
+
+def _zaktualizuj_transakcje_bez_transakcji(conn, transakcja_id, zmiany, teraz):
+    nieznane = set(zmiany) - KOLUMNY_EDYTOWALNE_TRANSAKCJI
+    if nieznane:
+        raise ValueError(
+            f"nieedytowalne/nieznane pole(a): {', '.join(sorted(nieznane))} - "
+            f"dozwolone: {', '.join(sorted(KOLUMNY_EDYTOWALNE_TRANSAKCJI))}")
+
+    obecna = conn.execute(
+        "SELECT data, kurier_id, punkt_id FROM transakcje WHERE id = ?",
+        (transakcja_id,),
+    ).fetchone()
+    if obecna is None:
+        raise ValueError(f"transakcja #{transakcja_id} nie istnieje")
+
+    if "data" in zmiany:
+        wartosc_daty = zmiany["data"]
+        nowa_data = (wartosc_daty.isoformat() if hasattr(wartosc_daty, "isoformat")
+                     else wartosc_daty)
+    else:
+        nowa_data = obecna["data"]
+    nowy_kurier_id = (get_or_create_kurier(conn, zmiany["kurier"])
+                       if "kurier" in zmiany else obecna["kurier_id"])
+
+    # kolizja sprawdzana WYŁĄCZNIE gdy zmienia się faktycznie część klucza
+    # naturalnego (data/kurier) - zmiana samej ilości/rejonu/wykonawcy nigdy
+    # nie może kolidować, bo nie są częścią UNIQUE(data, kurier_id, punkt_id)
+    if (nowa_data, nowy_kurier_id) != (obecna["data"], obecna["kurier_id"]):
+        kolidujaca = conn.execute(
+            "SELECT id FROM transakcje"
+            " WHERE data = ? AND kurier_id = ? AND punkt_id = ? AND id != ?",
+            (nowa_data, nowy_kurier_id, obecna["punkt_id"], transakcja_id),
+        ).fetchone()
+        if kolidujaca:
+            raise KolizjaTransakcji(
+                "Taka transakcja już istnieje: " + _opisz_transakcje(conn, kolidujaca["id"]))
+
+    kolumny_sql, wartosci = [], []
+    if "data" in zmiany:
+        kolumny_sql.append("data = ?")
+        wartosci.append(nowa_data)
+    if "kurier" in zmiany:
+        kolumny_sql.append("kurier_id = ?")
+        wartosci.append(nowy_kurier_id)
+    if "wykonawca" in zmiany:
+        kolumny_sql.append("wykonawca_id = ?")
+        wartosci.append(get_or_create_wykonawca(conn, zmiany["wykonawca"]))
+    if "rejon" in zmiany:
+        kolumny_sql.append("rejon_id = ?")
+        wartosci.append(get_or_create_rejon(conn, zmiany["rejon"]))
+    if "ilosc_total" in zmiany:
+        kolumny_sql.append("ilosc_total = ?")
+        wartosci.append(zmiany["ilosc_total"])
+    if "ilosc_zpo" in zmiany:
+        kolumny_sql.append("ilosc_zpo = ?")
+        wartosci.append(zmiany["ilosc_zpo"])
+
+    if not kolumny_sql:
+        return
+
+    kolumny_sql.append("zmodyfikowano = ?")
+    wartosci.append(teraz)
+    wartosci.append(transakcja_id)
+    conn.execute(
+        f"UPDATE transakcje SET {', '.join(kolumny_sql)} WHERE id = ?", wartosci)
+
+
+def zaktualizuj_transakcje(conn, transakcja_id, zmiany, teraz=None):
+    """
+    Poprawia jeden zapisany wiersz. `zmiany`: dict, klucze z
+    `KOLUMNY_EDYTOWALNE_TRANSAKCJI` (data/kurier/wykonawca/rejon/
+    ilosc_total/ilosc_zpo - patrz komentarz nad sekcją). Rzuca
+    `KolizjaTransakcji`, jeśli docelowa trójka (data, kurier, punkt) już
+    należy do INNEGO wiersza - baza zostaje wtedy całkowicie nietknięta.
+    Atomowe (`transakcja`).
+    """
+    teraz = teraz or datetime.now().isoformat(timespec="seconds")
+    with transakcja(conn):
+        _zaktualizuj_transakcje_bez_transakcji(conn, transakcja_id, zmiany, teraz)
+
+
+def usun_transakcje(conn, ids):
+    """Usuwa podane transakcje atomowo. Zwraca liczbę faktycznie usuniętych
+    wierszy (0 dla pustej listy, bez zapytania do bazy)."""
+    ids = list(ids)
+    if not ids:
+        return 0
+    with transakcja(conn):
+        cur = conn.execute(
+            f"DELETE FROM transakcje WHERE id IN ({','.join('?' * len(ids))})", ids)
+        return cur.rowcount
+
+
+def ustaw_pole_transakcji(conn, ids, pole, wartosc, teraz=None):
+    """
+    Ustawia JEDNO pole na wielu transakcjach naraz, w jednym SAVEPOINT -
+    pierwsza kolizja (`KolizjaTransakcji`) wycofuje CAŁOŚĆ, nie tylko
+    kolidujący wiersz (ten sam wzorzec co `scal_kurierow`): "zmień 5
+    wierszy, ale nie ten jeden" byłoby ciche i mylące dla użytkownika,
+    który zaznaczył je jako jedną operację.
+    """
+    if pole not in KOLUMNY_EDYTOWALNE_TRANSAKCJI:
+        raise ValueError(
+            f"nieedytowalne/nieznane pole: {pole} - "
+            f"dozwolone: {', '.join(sorted(KOLUMNY_EDYTOWALNE_TRANSAKCJI))}")
+    teraz = teraz or datetime.now().isoformat(timespec="seconds")
+    with transakcja(conn):
+        for transakcja_id in ids:
+            _zaktualizuj_transakcje_bez_transakcji(conn, transakcja_id, {pole: wartosc}, teraz)
 
 
 def historia_wykonawcow_kuriera(conn, kurier):
