@@ -21,6 +21,14 @@ Jak w całym projekcie — patrz root `CLAUDE.md`.
   w produkcji. Zawiera też listę tego, czego tkinter NIE narysuje
   (zaokrąglenia, cienie, gradienty), żeby makieta była kontraktem, a nie
   wizją. Samodzielna, bez zależności.
+- `warianty-wskaznikow.py` + `.html` — siatka wariantów do wyboru
+  (2026-08-24): afordancja rozwijanej listy (A1-A6), traktowanie obwódki
+  pola wymagającego uwagi (W0-W6), wskaźnik przy wierszach bez danych.
+  **Warianty implementowane na własną rękę, NIE przez
+  `widget_pole.PoleZeWskaznikiem`** — o to właśnie chodzi, żeby sprawdzić,
+  co trzeba by w tamtym zmienić. Plik `.html` to strona z zrzutami
+  wklejonymi jako `data:` URI, nie osobna makieta — źródłem prawdy jest
+  tkinter, przeglądarka tylko go pokazuje.
 - `podglad-stylu.py` — ten sam ekran w REALNYM tkinterze, do porównania
   z makietą: `python demo/podglad-stylu.py` (nowy styl) albo z flagą
   `--bez` (stan obecny). **Jedyny plik w tym katalogu importujący z
