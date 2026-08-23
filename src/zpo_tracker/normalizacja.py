@@ -13,6 +13,7 @@ przypadek "Wołczuk Rafal"/"Wołczuk Rafał"):
 Wzorzec kluczy przeniesiony z demo/przeglad-kurierow-prototyp.html
 (wsKey/fuzzyKey), tam sprawdzony na realnej liście 70 kurierów.
 """
+import re
 from dataclasses import dataclass, field
 
 _DIAKRYTYKI = str.maketrans("ąćęłńóśźż", "acelnoszz")
@@ -44,6 +45,63 @@ def normalizuj_rejon(kod: str | None) -> str:
     if kod.lower() in _REJON_SMIECI:
         return REJON_NIEZNANY
     return kod
+
+
+PREFIKS_REJONU_WARSZAWA = "WA"
+
+# Pięć wartości, które stoją w drzewie ścieżek BaŚKi jako rodzeństwo
+# rejonów numerycznych, ale kodami rejonu NIE są. Instrukcja mówi wprost
+# o pierwszej z nich: "należy zmienić pozycje oznaczone *UP poprzez
+# uzupełnienie właściwego rejonu doręczeń", a o ZPO: "ZPO LUB właściwy
+# nr rejonu doręczeń". Czyli oba znaczą dokładnie tyle, co nasze "???".
+_WARTOWNICY_BASKI = frozenset({"*up", "zpo", "up", "ap", "fup"})
+
+_GOLY_NUMER = re.compile(r"^\d+[A-Za-z]?$")
+_Z_PREFIKSEM = re.compile(r"^[A-Za-z]{1,3}\d+[A-Za-z]?$")
+
+
+def normalizuj_rejon_baska(kod: str | None) -> str:
+    """
+    Rejon z eksportu BaŚKi -> kanoniczny kod albo REJON_NIEZNANY.
+
+    Reguła potwierdzona naocznie w przeglądarce (2026-08-23): interesują
+    nas rejony węzła `WW` o typie kierowania `1`, a do gołego numeru
+    doklejamy literał `WA`.
+
+    UWAGA, pułapka: **`WA` NIE jest kodem węzła źródłowego.** W BaŚce
+    istnieje osobny węzeł o kodzie `WA` - to WER Warszawa W101 przy
+    ul. Łączyny, zupełnie inny byt. Wnioskowanie "prefiks = kod węzła"
+    jest błędne, mimo że pozornie potwierdzają je i zrzuty siatki dla
+    Warszawy, i przykładowa odpowiedź w dokumentacji API
+    (`<endNode>WA</endNode>` obok `<deliveryRegion>100</deliveryRegion>`).
+    Kiedyś ta reguła była prawdziwa, dziś nie jest.
+
+    Filtrowanie po węźle i typie kierowania NIE należy tutaj - to zadanie
+    warstwy importu, która widzi cały wiersz, nie samą wartość rejonu.
+
+    Kod z innym prefiksem literowym (`ND1`, `L11`, `Z3` - z wcześniejszej
+    epoki danych) zostaje nietknięty poza podniesieniem wielkości liter;
+    doklejenie `WA` dałoby `WAND1`, czyli gorzej niż zostawienie jak jest.
+    """
+    if kod is None:
+        return REJON_NIEZNANY
+    kod = kod.strip()
+    if not kod:
+        return REJON_NIEZNANY
+    if kod.lower() in _WARTOWNICY_BASKI:
+        return REJON_NIEZNANY
+    # Stare reguły śmieci (spacja w środku, "?", "-", "n/a", "null")
+    # obowiązują dalej - nie powielamy ich tutaj.
+    if normalizuj_rejon(kod) == REJON_NIEZNANY:
+        return REJON_NIEZNANY
+    if _GOLY_NUMER.match(kod):
+        return PREFIKS_REJONU_WARSZAWA + kod.upper()
+    if _Z_PREFIKSEM.match(kod):
+        return kod.upper()
+    # Wszystko inne to najczęściej ścieżka częściowa ("PO-1----") albo
+    # kształt, którego nie rozpoznajemy. Zgadywanie tutaj byłoby dokładnie
+    # tym, co rejonarz ma wyeliminować.
+    return REJON_NIEZNANY
 
 
 def klucz_bialych_znakow(s: str) -> str:

@@ -3,6 +3,9 @@ Testy dla normalizacji tekstu i dedupu literówek. TDD.
 Wzorzec kluczy (klucz_bialych_znakow/klucz_rozmyty) przeniesiony
 z demo/przeglad-kurierow-prototyp.html (wsKey/fuzzyKey).
 """
+import pytest
+
+from zpo_tracker import normalizacja
 from zpo_tracker.normalizacja import (
     REJON_NIEZNANY,
     klucz_bialych_znakow,
@@ -131,3 +134,72 @@ def test_normalizuj_rejon_smieciowe_wartosci_daja_nieznany():
 
 def test_normalizuj_rejon_jest_idempotentny():
     assert normalizuj_rejon(REJON_NIEZNANY) == REJON_NIEZNANY
+
+
+# --- rejon z eksportu BaŚKi (0.1-alpha.3.3) ----------------------------
+#
+# Reguła potwierdzona naocznie w przeglądarce 2026-08-23: interesują nas
+# rejony węzła WW o typie kierowania 1, a do numeru doklejamy literał
+# "WA". UWAGA: "WA" NIE jest kodem węzła źródłowego - w BaŚce istnieje
+# osobny węzeł o kodzie WA (WER Warszawa W101, ul. Łączyny) i to zupełnie
+# inny byt. Wnioskowanie "prefiks = kod węzła" jest błędne, mimo że
+# dokumentacja i przykłady w API pozornie je potwierdzają.
+
+def test_goly_numer_dostaje_prefiks_wa():
+    assert normalizacja.normalizuj_rejon_baska("119") == "WA119"
+
+
+def test_numer_z_litera_na_koncu_tez_dostaje_prefiks():
+    assert normalizacja.normalizuj_rejon_baska("21A") == "WA21A"
+
+
+def test_biale_znaki_wokol_numeru_nie_przeszkadzaja():
+    assert normalizacja.normalizuj_rejon_baska("  119  ") == "WA119"
+
+
+def test_jest_idempotentna_dla_kodu_juz_z_prefiksem():
+    """Backfill i ponowny import muszą móc przejechać po tych samych
+    danych bez robienia z WA119 -> WAWA119."""
+    assert normalizacja.normalizuj_rejon_baska("WA119") == "WA119"
+
+
+def test_kod_z_innym_prefiksem_zostaje_nietkniety():
+    """W bazie żyją kody typu Z3/L11/ND1 z wcześniejszej epoki danych.
+    Doklejenie WA dałoby WAZ3 - gorzej niż zostawienie jak jest."""
+    assert normalizacja.normalizuj_rejon_baska("ND1") == "ND1"
+    assert normalizacja.normalizuj_rejon_baska("l11") == "L11"
+
+
+@pytest.mark.parametrize("wartownik", ["*UP", "ZPO", "UP", "AP", "FUP"])
+def test_wartownicy_baski_sa_rejonem_nieznanym(wartownik):
+    """Wszystkie pięć stoi w drzewie ścieżek jako rodzeństwo rejonów
+    numerycznych, ale żaden nie jest kodem rejonu. Instrukcja mówi wprost
+    o *UP: 'należy zmienić pozycje oznaczone *UP poprzez uzupełnienie
+    właściwego rejonu doręczeń'."""
+    assert normalizacja.normalizuj_rejon_baska(wartownik) == normalizacja.REJON_NIEZNANY
+
+
+@pytest.mark.parametrize("wartownik", ["zpo", "  fup  ", "*up"])
+def test_wartownicy_lapia_sie_niezaleznie_od_wielkosci_liter(wartownik):
+    assert normalizacja.normalizuj_rejon_baska(wartownik) == normalizacja.REJON_NIEZNANY
+
+
+@pytest.mark.parametrize("puste", [None, "", "   "])
+def test_brak_wartosci_to_rejon_nieznany(puste):
+    assert normalizacja.normalizuj_rejon_baska(puste) == normalizacja.REJON_NIEZNANY
+
+
+@pytest.mark.parametrize("sciezka", ["PO-1----", "KA-2----", "WA-1----119"])
+def test_sciezka_czesciowa_nie_jest_rejonem(sciezka):
+    """BaŚKa sama oznacza je komunikatem 'Znaleziona ścieżka nie jest
+    ścieżką pełną!'. Do kolumny rejonu nie mają prawa wejść."""
+    assert normalizacja.normalizuj_rejon_baska(sciezka) == normalizacja.REJON_NIEZNANY
+
+
+@pytest.mark.parametrize("smiec", ["-", "n/a", "NULL", "119 120", "12?"])
+def test_smieci_lapia_sie_tak_samo_jak_w_starej_regule(smiec):
+    assert normalizacja.normalizuj_rejon_baska(smiec) == normalizacja.REJON_NIEZNANY
+
+
+def test_prefiks_jest_stala_nie_literalem_w_kodzie():
+    assert normalizacja.PREFIKS_REJONU_WARSZAWA == "WA"
