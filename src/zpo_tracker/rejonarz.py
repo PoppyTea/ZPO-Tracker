@@ -18,6 +18,7 @@ generatorem przez `read_only=True`, zapis partiami przez `executemany`.
 Reszta importów materializuje cały arkusz do listy dictów, co przy
 >400 tys. wierszy nie przejdzie.
 """
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,11 @@ _DDL = """
 CREATE TABLE IF NOT EXISTS adresy_rejony (
     id           INTEGER PRIMARY KEY,
     klucz        TEXT NOT NULL,
+    -- Drugi klucz, bez miejscowości: realne adresy w formularzu bywają
+    -- zapisane bez miasta ("Odkryta 24"), a odmowa odpowiedzi dla nich
+    -- wyłączyłaby rejonarz dla sporej części danych. Wyszukiwanie tym
+    -- kluczem odpowiada TYLKO gdy trafienie jest jednoznaczne.
+    klucz_ulica_nr TEXT NOT NULL,
     miejscowosc  TEXT NOT NULL,
     ulica        TEXT,
     nr           TEXT NOT NULL,
@@ -66,6 +72,7 @@ CREATE TABLE IF NOT EXISTS adresy_rejony (
     UNIQUE (klucz, rejon)
 );
 CREATE INDEX IF NOT EXISTS idx_rejonarz_klucz ON adresy_rejony(klucz);
+CREATE INDEX IF NOT EXISTS idx_rejonarz_ulica_nr ON adresy_rejony(klucz_ulica_nr);
 """
 
 
@@ -130,6 +137,14 @@ def klucz_adresu(miejscowosc, ulica, nr) -> str:
         _tekst(nr).upper().replace(" ", ""),
     ]
     return "|".join(czesci)
+
+
+def klucz_ulica_nr(ulica, nr) -> str:
+    """Klucz bez miejscowości - patrz komentarz przy kolumnie w schemacie."""
+    return "|".join([
+        normalizacja.klucz_rozmyty(_tekst(ulica)),
+        _tekst(nr).upper().replace(" ", ""),
+    ])
 
 
 def _tekst(wartosc) -> str:
@@ -224,6 +239,7 @@ def _do_zapisu(wiersz, rejon):
     nr = _tekst(wiersz.get("nr"))
     return (
         klucz_adresu(miejscowosc, ulica, nr),
+        klucz_ulica_nr(ulica, nr),
         miejscowosc, ulica or None, nr,
         _tekst(wiersz.get("pna")) or None,
         rejon,
@@ -236,7 +252,8 @@ def _zapisz_partie(conn, partia) -> int:
     przed = policz(conn)
     conn.executemany(
         "INSERT OR IGNORE INTO adresy_rejony "
-        "(klucz, miejscowosc, ulica, nr, pna, rejon) VALUES (?, ?, ?, ?, ?, ?)",
+        "(klucz, klucz_ulica_nr, miejscowosc, ulica, nr, pna, rejon) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         partia,
     )
     return policz(conn) - przed
@@ -258,5 +275,73 @@ def znajdz_rejon(conn, miejscowosc, ulica, nr):
     rejony = conn.execute(
         "SELECT DISTINCT rejon FROM adresy_rejony WHERE klucz = ?",
         (klucz_adresu(miejscowosc, ulica, nr),),
+    ).fetchall()
+    return rejony[0][0] if len(rejony) == 1 else None
+
+
+# --- most do formularza -------------------------------------------------
+#
+# Formularz trzyma adres jako JEDEN wolny tekst, a migawka kluczuje po
+# (miejscowość, ulica, nr). Ta różnica to dokładnie odłożona normalizacja
+# adresu z docs/normalization-v2.md. Do czasu jej wdrożenia rozbijamy
+# tekst heurystycznie - ale konserwatywnie: przy wątpliwości NIC.
+
+_NUMER_NA_KONCU = re.compile(r"^(?P<ulica>.*?)[\s,]+(?P<nr>\d+[A-Za-z]?(?:/\d+[A-Za-z]?)?)$")
+
+
+def rozbij_adres(adres):
+    """
+    Wolny tekst -> `(miejscowosc | None, ulica, nr)` albo `None`.
+
+    Rozpoznaje dwa układy spotykane w danych: `"Ulica 12, Miasto"` oraz
+    `"Miasto, Ulica 12"` - decyduje o tym, która część kończy się numerem
+    budynku. Adres bez miejscowości (`"Odkryta 24"`) jest poprawnym
+    wynikiem z `miejscowosc=None`, bo takich w bazie jest sporo.
+
+    Brak numeru budynku oznacza `None`: bez niego nie ma czego szukać,
+    a zgadywanie rejonu dla samej ulicy byłoby dokładnie tym, co rejonarz
+    ma wyeliminować.
+    """
+    if not adres or not str(adres).strip():
+        return None
+    czesci = [c.strip() for c in str(adres).split(",") if c.strip()]
+    if not czesci:
+        return None
+
+    if len(czesci) == 1:
+        dopasowanie = _NUMER_NA_KONCU.match(czesci[0])
+        if not dopasowanie or not dopasowanie.group("ulica").strip():
+            return None
+        return None, dopasowanie.group("ulica").strip(), dopasowanie.group("nr")
+
+    # Część z numerem na końcu to ulica; pozostała - miejscowość.
+    for i, czesc in enumerate(czesci):
+        dopasowanie = _NUMER_NA_KONCU.match(czesc)
+        if dopasowanie and dopasowanie.group("ulica").strip():
+            miejscowosc = ", ".join(czesci[:i] + czesci[i + 1:]).strip() or None
+            return (miejscowosc,
+                    dopasowanie.group("ulica").strip(),
+                    dopasowanie.group("nr"))
+    return None
+
+
+def znajdz_rejon_dla_adresu(conn, adres):
+    """
+    Rejon dla adresu w postaci, w jakiej trzyma go formularz, albo `None`.
+
+    Gdy adres niesie miejscowość - zwykłe wyszukiwanie po pełnym kluczu.
+    Gdy jej nie ma, szukamy po samej ulicy i numerze, ale odpowiadamy
+    **wyłącznie przy jednoznacznym trafieniu**: ta sama ulica i numer
+    w dwóch miastach to nie jest przypadek do rozstrzygnięcia losowaniem.
+    """
+    rozbite = rozbij_adres(adres)
+    if rozbite is None:
+        return None
+    miejscowosc, ulica, nr = rozbite
+    if miejscowosc:
+        return znajdz_rejon(conn, miejscowosc, ulica, nr)
+    rejony = conn.execute(
+        "SELECT DISTINCT rejon FROM adresy_rejony WHERE klucz_ulica_nr = ?",
+        (klucz_ulica_nr(ulica, nr),),
     ).fetchall()
     return rejony[0][0] if len(rejony) == 1 else None

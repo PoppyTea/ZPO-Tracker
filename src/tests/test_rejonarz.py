@@ -244,3 +244,61 @@ def test_import_duzego_pliku_konczy_sie_w_rozsadnym_czasie(conn, tmp_path):
 
     assert wynik.wczytane == ile
     assert czas < 60, f"import {ile} wierszy zajął {czas:.1f}s"
+
+
+# --- rozbicie adresu z formularza --------------------------------------
+#
+# Formularz trzyma adres jako JEDEN wolny tekst, a rejonarz kluczuje po
+# (miejscowość, ulica, nr). Ta różnica to dokładnie odłożona normalizacja
+# adresu (docs/normalization-v2.md). Do czasu jej wdrożenia rozbijamy
+# tekst heurystycznie - ale konserwatywnie: przy wątpliwości NIC.
+
+@pytest.mark.parametrize("adres,oczekiwane", [
+    ("Grochowska 214, Warszawa", ("Warszawa", "Grochowska", "214")),
+    ("Ostrobramska 75C, Warszawa", ("Warszawa", "Ostrobramska", "75C")),
+    ("Warszawa, Marsa 56", ("Warszawa", "Marsa", "56")),
+    ("al. Jerozolimskie 12, Warszawa", ("Warszawa", "al. Jerozolimskie", "12")),
+])
+def test_rozbija_adres_z_miejscowoscia(adres, oczekiwane):
+    assert rejonarz.rozbij_adres(adres) == oczekiwane
+
+
+def test_rozbija_adres_bez_miejscowosci():
+    """Realne dane mają mnóstwo takich - 'Odkryta 24' bez miasta."""
+    assert rejonarz.rozbij_adres("Odkryta 24") == (None, "Odkryta", "24")
+
+
+@pytest.mark.parametrize("adres", [None, "", "   ", "Warszawa", "bez numeru"])
+def test_nie_rozbija_gdy_brak_numeru(adres):
+    """Bez numeru budynku nie ma czego szukać w rejonarzu."""
+    assert rejonarz.rozbij_adres(adres) is None
+
+
+# --- wyszukiwanie po adresie z formularza ------------------------------
+
+def test_znajduje_rejon_dla_adresu_z_miejscowoscia(conn, tmp_path):
+    rejonarz.zaimportuj(conn, zbuduj_xlsx(tmp_path / "r.xlsx", [
+        wiersz(miejscowosc="Warszawa", ulica="Grochowska", nr="214", rejon="119")]))
+    assert rejonarz.znajdz_rejon_dla_adresu(conn, "Grochowska 214, Warszawa") == "WA119"
+
+
+def test_znajduje_rejon_bez_miejscowosci_gdy_jednoznaczne(conn, tmp_path):
+    rejonarz.zaimportuj(conn, zbuduj_xlsx(tmp_path / "r.xlsx", [
+        wiersz(miejscowosc="Warszawa", ulica="Odkryta", nr="24", rejon="119")]))
+    assert rejonarz.znajdz_rejon_dla_adresu(conn, "Odkryta 24") == "WA119"
+
+
+def test_nie_zgaduje_gdy_ta_sama_ulica_w_dwoch_miastach(conn, tmp_path):
+    """Bez miejscowości 'Marsa 56' może być w dwóch miejscach naraz.
+    Wybranie któregokolwiek byłoby zgadywaniem."""
+    rejonarz.zaimportuj(conn, zbuduj_xlsx(tmp_path / "r.xlsx", [
+        wiersz(miejscowosc="Warszawa", ulica="Marsa", nr="56", rejon="119"),
+        wiersz(miejscowosc="Radom", ulica="Marsa", nr="56", rejon="124"),
+    ]))
+    assert rejonarz.znajdz_rejon_dla_adresu(conn, "Marsa 56") is None
+    assert rejonarz.znajdz_rejon_dla_adresu(conn, "Marsa 56, Radom") == "WA124"
+
+
+def test_nierozbijalny_adres_nie_wybucha(conn, tmp_path):
+    rejonarz.zaimportuj(conn, zbuduj_xlsx(tmp_path / "r.xlsx", [wiersz()]))
+    assert rejonarz.znajdz_rejon_dla_adresu(conn, "cokolwiek bez numeru") is None
