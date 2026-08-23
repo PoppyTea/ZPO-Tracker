@@ -12,11 +12,21 @@ nie honoruje jej tak samo przewidywalnie.
 """
 import tkinter as tk
 
+# Przestrojone pod CIEMNE tło (2026-08-24) - poprzedni zestaw
+# (#888888/#1e7a3a/#b35c00/#c0392b) był dobrany pod jasne i na ciemnym
+# schodził poniżej progu czytelności: sam zielony miał tam ok. 1.6:1.
+# Wartości niżej mają na `styl.PALETA["tlo"]` od 5.5:1 do 7.0:1, co
+# pilnuje test_kolory_stanow_widoczne_na_tle. Zielony i czerwony trafiają
+# dodatkowo na etykietę statusu jako TEKST, więc dla nich obowiązuje
+# ostrzejszy próg 4.5:1, nie 3:1 jak dla paska wskaźnika.
+#
+# To JEDYNE źródło tych czterech barw w projekcie - `styl.KOLORY_STANOW`
+# jest tym samym obiektem, nie kopią (przypięte testem tożsamości).
 KOLORY = {
-    "szary": "#888888",
-    "zielony": "#1e7a3a",
-    "pomaranczowy": "#b35c00",
-    "czerwony": "#c0392b",
+    "szary": "#8b95a5",
+    "zielony": "#4caf6a",
+    "pomaranczowy": "#e0913c",
+    "czerwony": "#e4695c",
 }
 
 GRUBOSC_AKTYWNE = 2

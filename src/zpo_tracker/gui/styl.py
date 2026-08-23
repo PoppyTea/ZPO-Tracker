@@ -18,20 +18,67 @@ from tkinter import ttk
 
 from zpo_tracker.gui.widget_pole import KOLORY as KOLORY_STANOW
 
+def luminancja(kolor):
+    """Względna luminancja wg WCAG 2.1 dla `#rrggbb`."""
+    kolor = kolor.lstrip("#")
+    skladowe = [int(kolor[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    skladowe = [
+        s / 12.92 if s <= 0.04045 else ((s + 0.055) / 1.055) ** 2.4
+        for s in skladowe
+    ]
+    return 0.2126 * skladowe[0] + 0.7152 * skladowe[1] + 0.0722 * skladowe[2]
+
+
+def kontrast(pierwszy, drugi):
+    """Współczynnik kontrastu wg WCAG 2.1, od 1.0 do 21.0.
+
+    Istnieje po to, żeby dobór kolorów w tym projekcie był LICZONY, a nie
+    oceniany na oko - raz już to kosztowało etykiety kolumn o kontraście
+    2.85:1, czyli poniżej progu nawet dla grafiki, na napisach mówiących
+    nietechnicznemu użytkownikowi, co ma wpisać. Progi pilnują testy.
+    """
+    jasniejsza = max(luminancja(pierwszy), luminancja(drugi))
+    ciemniejsza = min(luminancja(pierwszy), luminancja(drugi))
+    return (jasniejsza + 0.05) / (ciemniejsza + 0.05)
+
+
 # Neutralne mają lekki skręt w niebieski (ku akcentowi) - czysta szarość
 # czyta się jak brak decyzji. Akcent musi być niebieski: cztery kolory
 # semantyczne wskaźników (zielony/pomarańczowy/czerwony/szary) są zajęte,
 # a akcent kolidujący z którymkolwiek z nich zabiłby ich czytelność.
+#
+# DOMYŚLNY JEST TRYB CIEMNY - na takim realnie pracują użytkownicy
+# w dziale. Jasny zestaw zostaje niżej jako PALETA_JASNA, żeby ewentualne
+# przełączenie było podmianą słownika, a nie ponownym dobieraniem barw.
 PALETA = {
+    "tlo": "#14181f",
+    "powierzchnia": "#1c212a",
+    # W ciemnym motywie "wgłębione" jest CIEMNIEJSZE od powierzchni
+    # (odwrotnie niż w jasnym) - inaczej pole readonly czytałoby się jako
+    # wyróżnione, a ma się czytać jako bezwładne.
+    "powierzchnia_wglebiona": "#0f1216",
+    "tekst": "#e6e9ef",
+    "tekst_wyciszony": "#9aa5b5",
+    # UWAGA: 3.77:1 na tle - wystarcza na grafikę, NIE na tekst (próg 4.5).
+    # Wyłącznie do elementów nieinformacyjnych: obramowania pomocnicze,
+    # widgety wyłączone. NIGDY jako `foreground`; test
+    # test_tekst_slaby_nie_jest_uzywany_do_tekstu skanuje ten plik.
+    "tekst_slaby": "#6b7482",
+    "linia": "#2a313c",
+    "linia_mocna": "#3d4653",
+    "akcent": "#7fa8d4",
+    "akcent_tlo": "#1e2c3d",
+    # Akcent jest jasny, więc tekst NA nim musi być ciemny - odwrotnie
+    # niż w motywie jasnym.
+    "akcent_tekst": "#0e1116",
+}
+
+PALETA_JASNA = {
     "tlo": "#f7f8fa",
     "powierzchnia": "#ffffff",
     "powierzchnia_wglebiona": "#eef1f5",
     "tekst": "#16191f",
     "tekst_wyciszony": "#5a6473",
-    # UWAGA: kontrast 2.85:1 na tle - poniżej progu nawet dla grafiki.
-    # Wyłącznie do elementów nieinformacyjnych (obramowania pomocnicze,
-    # widgety wyłączone). NIGDY jako `foreground` tekstu; test
-    # test_tekst_slaby_nie_jest_uzywany_do_tekstu tego pilnuje.
     "tekst_slaby": "#8b95a5",
     "linia": "#dde1e8",
     "linia_mocna": "#c3cad6",

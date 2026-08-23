@@ -59,6 +59,58 @@ def test_odstepy_zaczynaja_sie_od_czterech_i_rosna():
     assert list(styl.ODSTEPY) == sorted(set(styl.ODSTEPY))
 
 
+def test_jasna_paleta_zostaje_dostepna_z_tymi_samymi_kluczami():
+    """Domyślny jest tryb ciemny (tam realnie pracują użytkownicy), ale
+    jasny zestaw zostaje - żeby przełączenie było podmianą słownika,
+    a nie ponownym dobieraniem kolorów."""
+    assert set(styl.PALETA_JASNA) == set(styl.PALETA)
+
+
+# --- kontrast: reguła wykonywalna, nie ręczny rachunek -----------------
+
+def test_kontrast_zna_skrajne_wartosci():
+    assert round(styl.kontrast("#000000", "#ffffff"), 1) == 21.0
+    assert round(styl.kontrast("#7f7f7f", "#7f7f7f"), 1) == 1.0
+
+
+def test_paleta_domyslna_jest_ciemna():
+    """Papaver: 'tryb ciemny niech będzie domyślnym - i tak na takim będą
+    ludzie pracować'."""
+    assert styl.luminancja(styl.PALETA["tlo"]) < 0.1
+    assert styl.luminancja(styl.PALETA_JASNA["tlo"]) > 0.5
+
+
+POWIERZCHNIE = ("tlo", "powierzchnia", "powierzchnia_wglebiona")
+
+
+def test_tekst_czytelny_na_kazdej_powierzchni():
+    """4.5:1 to próg dla zwykłego tekstu. Sprawdzamy KAŻDĄ kombinację,
+    bo pole readonly siedzi na innym tle niż etykieta obok niego."""
+    for tekst in ("tekst", "tekst_wyciszony"):
+        for tlo in POWIERZCHNIE:
+            k = styl.kontrast(styl.PALETA[tekst], styl.PALETA[tlo])
+            assert k >= 4.5, f"{tekst} na {tlo}: {k:.2f}"
+
+
+def test_kolory_stanow_widoczne_na_tle():
+    """Wskaźnik to pasek 4 px, czyli grafika - próg 3:1. Ale zielony
+    i czerwony trafiają też na etykietę statusu jako TEKST, więc te dwa
+    muszą wyrobić 4.5:1."""
+    for nazwa, kolor in styl.KOLORY_STANOW.items():
+        k = styl.kontrast(kolor, styl.PALETA["tlo"])
+        prog = 4.5 if nazwa in ("zielony", "czerwony") else 3.0
+        assert k >= prog, f"stan {nazwa}: {k:.2f} < {prog}"
+
+
+def test_tekst_na_przycisku_akcentu_jest_czytelny():
+    k = styl.kontrast(styl.PALETA["akcent_tekst"], styl.PALETA["akcent"])
+    assert k >= 4.5, f"{k:.2f}"
+
+
+def test_akcent_odcina_sie_od_tla():
+    assert styl.kontrast(styl.PALETA["akcent"], styl.PALETA["tlo"]) >= 3.0
+
+
 def test_kolory_stanow_sa_te_same_co_w_widget_pole():
     """Wskaźniki stanu pól mają JEDNO źródło prawdy. Gdyby styl.py
     zdublował te kolory, rozjechałyby się po cichu przy pierwszej
@@ -126,10 +178,13 @@ def test_zastosuj_styl_definiuje_etykiete_kolumny(root):
     """Etykiety kolumn siatki mają być wyciszone i mniejsze od danych -
     dziś są tej samej wagi, więc nagłówek zlewa się z zawartością.
 
-    Wyciszone, ale NIE `tekst_slaby`: ten ma na tle kontrast 2.85:1, czyli
-    poniżej progu nawet dla grafiki. Etykieta kolumny mówi nietechnicznemu
-    użytkownikowi, co ma wpisać - to najgorsze możliwe miejsce na
-    oszczędzanie na czytelności (patrz docs/ux-ui.md, "idioto-odporność").
+    Wyciszone, ale NIE `tekst_slaby`: ten wyrabia na tle 3.77:1, czyli
+    wystarczy na grafikę, ale nie na tekst (próg 4.5). Etykieta kolumny
+    mówi nietechnicznemu użytkownikowi, co ma wpisać - to najgorsze możliwe
+    miejsce na oszczędzanie na czytelności (docs/ux-ui.md, "idioto-odporność").
+
+    W jasnej palecie ten sam token miał 2.85:1, czyli był poniżej progu
+    nawet dla grafiki - stąd reguła w ogóle powstała.
     """
     s = styl.zastosuj_styl(root)
     assert s.lookup("Etykieta.TLabel", "foreground") == styl.PALETA["tekst_wyciszony"]
@@ -145,8 +200,13 @@ def test_naglowki_tabeli_sa_czytelne(root):
 
 def test_tekst_slaby_nie_jest_uzywany_do_tekstu():
     """Token zostaje w palecie (linie pomocnicze, elementy wyłączone), ale
-    żaden styl tekstowy nie ma prawa go użyć - kontrast 2.85:1. Test
-    pilnuje, żeby nie wrócił tylnymi drzwiami przy kolejnej zmianie."""
+    żaden styl tekstowy nie ma prawa go użyć - nie wyrabia progu 4.5:1
+    w ŻADNEJ z palet. Test pilnuje, żeby nie wrócił tylnymi drzwiami przy
+    kolejnej zmianie kolorów."""
+
+    assert styl.kontrast(styl.PALETA["tekst_slaby"], styl.PALETA["tlo"]) < 4.5
+    assert styl.kontrast(
+        styl.PALETA_JASNA["tekst_slaby"], styl.PALETA_JASNA["tlo"]) < 4.5
     zrodlo = (styl.__file__)
     with open(zrodlo, encoding="utf-8") as f:
         tresc = f.read()
