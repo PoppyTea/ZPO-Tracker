@@ -7,8 +7,9 @@ Referencja dla `CLAUDE.md`.
 - Windows 11 Pro, konta bez uprawnień administratora
 - Internet efektywnie zablokowany, poza whitelistowanym ruchem Microsoft 365
   (stąd OneDrive/SharePoint działają, ale nic poza tym)
-- **Wyjątek: `github.com` jest częściowo dostępny** — warto to wykorzystać
-  (patrz `backlog.md`, sekcja infrastruktura)
+- **Wyjątek: `github.com` jest częściowo dostępny** — warto to wykorzystać.
+  Czy obejmuje to pobieranie artefaktów z Releases, jest niesprawdzone
+  i bramkuje strategię aktualizacji (→ AID-107)
 - VBA zablokowane (teoretycznie odblokowywalne przez IT, ale proces
   uzyskiwania pozwoleń w firmie jest na tyle kulawy, że wolimy tego unikać)
 - Power Apps: zablokowany dostęp do wymaganych adresów proxy

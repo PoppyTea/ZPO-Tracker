@@ -200,7 +200,7 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   Od `0.1-alpha.3.2` `wymaga_uzupelnienia` NIE sprawdza już `nr_kadrowy`
   (pracownicy jeszcze go nie mają — nie może blokować pierwszego
   uruchomienia; pole zostało w dialogu jako opcjonalne, przywrócenie
-  wymagalności to jedna linia, patrz `../docs/backlog.md`).
+  wymagalności to jedna linia, → AID-99).
   **`login_rozszerzony`/`znajdz_konta_dla_loginu`** — konta Windows bywają
   współdzielone przez kilka osób na jednej stacji; login
   `DOMENA\login#Imię Nazwisko` daje im osobną tożsamość BEZ nowego
@@ -296,6 +296,25 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
 Warstwa GUI (tkinter, `gui/`) — **zero logiki biznesowej**, tylko zbieranie
 wartości z pól i wywołanie warstwy logiki:
 
+- `styl.py` — JEDYNE miejsce ustalające kolory, odstępy i czcionki
+  (`PALETA`, `ODSTEPY`, `zastosuj_styl(root)`). **Jeszcze NIE wpięty do
+  `app.py`** — czeka na akceptację, makieta i podgląd w `../demo/`.
+  `theme_use("clam")` jest warunkiem koniecznym, nie estetycznym: `vista`
+  (domyślny na Windowsie) ignoruje większość ustawianych kolorów, więc bez
+  podmiany motywu reszta konfiguracji nie ma żadnego efektu.
+  `KOLORY_STANOW` **jest tym samym obiektem** co `widget_pole.KOLORY`, nie
+  kopią — dwie palety wskaźników rozjechałyby się po cichu przy pierwszej
+  korekcie jednej z nich (przypięte testem).
+  `PALETA["tekst_slaby"]` ma kontrast 2.85:1 i **nie wolno go użyć jako
+  koloru tekstu** — test `test_tekst_slaby_nie_jest_uzywany_do_tekstu`
+  skanuje źródło i tego pilnuje; etykiety kolumn mówią nietechnicznemu
+  użytkownikowi, co ma wpisać, więc to najgorsze miejsce na oszczędzanie
+  na czytelności. `wlacz_swiadomosc_dpi()` jest ŚWIADOMIE osobnym
+  wywołaniem, nie efektem ubocznym `zastosuj_styl` — zmienia rzeczywisty
+  rozmiar okna w pikselach, więc układ trzeba obejrzeć na docelowej
+  maszynie; poza Windowsem i bez `shcore.dll` jest bezpiecznym brakiem
+  działania (rozmyta aplikacja jest do przeżycia, aplikacja, która nie
+  startuje — nie).
 - `app.py` — okno główne, `Notebook` z sześcioma zakładkami.
   `_katalog_danych` — na Windows **`%LOCALAPPDATA%`, nie `%APPDATA%`**
   (Roaming przy profilach mobilnych wciąga bazę i historię kopii na

@@ -1,0 +1,106 @@
+# Konfiguracja CodeRabbita dla zpo-tracker (2026-08-23).
+#
+# Do tej pory repo nie miało tego pliku w ogóle — CodeRabbit recenzował PR-y
+# (patrz PR #7 i #8) na domyślnych ustawieniach, czyli nie znając ani jednej
+# reguły ani kontraktu tego projektu. Ten plik to naprawia.
+#
+# Uzupełniające źródła wiedzy o repo, których treści tutaj NIE duplikujemy:
+#   - docs/proces.md         — reguły recenzji R1-R3 i granice Linear <-> docs/
+#   - **/AGENTS.md           — kontrakty DOX per podkatalog
+#   - Linear (team AID)      — jedyny rejestr zadań, projekt ZPO-Tracker
+
+language: pl-PL
+
+reviews:
+  auto_review:
+    enabled: true
+    drafts: false
+
+  review_status: true
+
+  path_instructions:
+    - path: "src/zpo_tracker/**/*.py"
+      instructions: >
+        TDD jest w tym projekcie obowiązkowe (CLAUDE.md): czerwony test →
+        minimalna implementacja → zielony → refaktor. Nowy albo zmieniony kod
+        produkcyjny bez towarzyszącego testu zgłaszaj zawsze, nawet gdy zmiana
+        wygląda na trywialną. Wyjątek: czyste definicje schematu/konfiguracji
+        (DDL w schema.sql) nie wymagają testu.
+
+    - path: "src/zpo_tracker/repo.py"
+      instructions: >
+        Warstwa dostępu do SQLite. Transakcje są re-entrant (SAVEPOINT) —
+        funkcje `_*_bez_transakcji` są celowo pozbawione własnej transakcji
+        i wołane wewnątrz cudzej; nie sugeruj dodawania tam commitu ani
+        własnego kontekstu transakcji. Kolizja klucza naturalnego
+        UNIQUE(data, kurier, punkt) ma ZAWSZE blokować z opisem kolidującego
+        wiersza i nigdy nie rozstrzygać po cichu; edycja zbiorcza jest atomowa
+        (jedna kolizja wycofuje całość). Naruszenie któregokolwiek z tych
+        kontraktów to realny bug, nie kwestia stylu.
+
+    - path: "src/zpo_tracker/importer.py"
+      instructions: >
+        `znajdz_lub_utworz_punkt_niezaufany` jest CELOWO osobne od
+        `get_or_create_punkt` — to drugie obsługuje także scalanie baz i ich
+        semantyki nie wolno zbliżać ani scalać "dla uniknięcia duplikacji".
+        Import domyślnie jest niezaufany (`zaufany=False`), a `zrodlo` jest
+        z tego WYPROWADZANE, nigdy nie jest swobodnym parametrem. Plik bez
+        znacznika pochodzenia nie wnosi PNI ani rejonu; plik ze znacznikiem,
+        ale zmienioną zawartością (odcisk SHA-256 się nie zgadza) nie może
+        dać się odblokować żadną drogą.
+
+    - path: "src/zpo_tracker/dedukcja.py"
+      instructions: >
+        Silnik rozstrzyga najpierw PUNKT, a dopiero z niego nadawcę, PNI
+        i rejon — PNI dedukowane niezależnie podpinałoby transakcje pod zły
+        punkt. Reguła jednolita: jednoznaczne → wypełniamy; niejednoznaczne →
+        NIE wypełniamy, aktywujemy pole, warianty dajemy jako podpowiedzi.
+        `dedukuj_wiersz` jest jedynym miejscem w kodzie rozstrzygającym rejon.
+
+    - path: "src/zpo_tracker/gui/**"
+      instructions: >
+        Odbiorcy to osoby nietechniczne na zablokowanych maszynach Windows —
+        docs/ux-ui.md nazywa ten wymóg "idioto-odpornością", czyli wyraźnie
+        niższą tolerancją na błąd niż zwykłe "nietechniczny użytkownik".
+        Cicha porażka zapisu, komunikat bez koloru i bez powodu, albo
+        wyczyszczenie niezapisanej pracy użytkownika to zawsze poważny
+        problem, nie drobiazg UX. Wyjątków w callbackach Tk nie wolno
+        połykać — w buildzie `console=False` `sys.stderr is None`, więc
+        połknięty wyjątek jest całkowicie niewidoczny.
+
+    - path: "src/tests/**"
+      instructions: >
+        Testy GUI wymagają systemowego Pythona — Python zarządzany przez `uv`
+        ma na maszynie deweloperskiej zepsuty tkinter i wywala SIGABRT
+        (docs/environment.md). Test, który POMIJA SIĘ zamiast wykonać,
+        jest tu realnym problemem, nie neutralnym stanem: dokładnie tak
+        testy GUI przez pewien czas milcząco nie działały.
+
+    - path: "docs/**/*.md"
+      instructions: >
+        Dokumenty trzymają wiedzę trwałą, nie stan — zasada opisana
+        w docs/proces.md. Zgłaszaj każdą nową listę `- [ ]` odbijającą pracę
+        do wykonania oraz tabele z kolumną Priorytet/Status opisujące
+        pojedyncze zadania: jedynym rejestrem zadań jest Linear (reguła R3,
+        severity ERROR). Kotwica `(→ AID-XXX)` w tekście jest dozwolona.
+
+tone_instructions: >
+  Solo-projekt wewnętrzny, jeden maintainer, użytkownicy nietechniczni na
+  zablokowanych maszynach Windows bez uprawnień administratora. Priorytet:
+  poprawność i trwałość danych rozliczeniowych oraz odporność interfejsu na
+  błąd użytkownika. Nie proponuj abstrakcji "na przyszłość", warstw
+  serwisowych ani zależności zewnętrznych — projekt ma świadomie dwie
+  zależności produkcyjne (openpyxl, pydantic) i musi działać w pełni offline.
+  Realne bugi, ciche awarie i utrata danych zawsze ważne.
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/AGENTS.md"
+      - "CLAUDE.md"
+      - "docs/proces.md"
+  linear:
+    enabled: true
+    team_keys:
+      - "AID"

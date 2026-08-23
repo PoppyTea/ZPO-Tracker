@@ -19,9 +19,19 @@ data/*
 !data/README.md
 !data/CLAUDE.md
 !data/AGENTS.md
-
 # Bazy danych (pliki wygenerowane, nie schemat) - nie commitować
 *.db-journal
+
+## Pliki poczty-polskiej
+docs/internal/**/*
+### Celowane w konkretne pliki
+**/BaSKa-dokumentacja*
+**/Dokumentacja-API*
+**/baska-raport-zastosowania*
+docs/internal/baska-rejonarz/AGENTS.md
+
+## moje brudnopisy
+**/*notes.tmp.md
 
 # Środowisko na systemowym Pythonie - patrz docs/environment.md
 # (uv-owy Python ma na tej maszynie zepsuty tkinter, więc testy GUI

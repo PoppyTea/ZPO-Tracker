@@ -108,7 +108,7 @@ def test_round_trip_import_export_na_realnych_danych(conn, tmp_path):
         if not wynik["skipped"]:
             zaimportowano += 1
 
-    assert zaimportowano > 1000  # rząd wielkości z docs/backlog.md (1239)
+    assert zaimportowano > 1000  # rząd wielkości z realnej próbki (1239 z 4573)
 
     sciezka = tmp_path / "export.xlsx"
     liczba_wyeksportowanych = eksport.eksportuj_miesiac(conn, 2026, 8, sciezka)

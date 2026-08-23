@@ -19,9 +19,20 @@ No other contributors yet.
 
 ## Local Contracts
 
+**Tasks live in Linear, never in this repo.** The ZPO-Tracker project
+(<https://linear.app/aid4u/project/zpo-tracker-07c6d93278dd/overview>,
+team `Aid4u`, key `AID`) is the single registry of work: issues, bugs,
+decisions to make, and version milestones. Do not create TODO lists,
+backlog files, or status tables anywhere in `docs/` — see `docs/proces.md`
+for the boundary and for the review rules that enforce it.
+
 This file is intentionally an index, not a knowledge dump. Durable project
 knowledge lives in `docs/`, one topic per file:
 
+- `docs/proces.md` — where each kind of fact lives (Linear vs `docs/` vs
+  `AGENTS.md`), the conventions every new issue must satisfy (project +
+  assignee are mandatory), the no-state-in-docs rule, and review rules
+  R1–R3 that CodeRabbit reads via `.coderabbit.yaml`
 - `docs/domain-model.md` — why this project exists, real column layout,
   and the specific findings from analyzing real source data (PNI ZPO
   reliability, conditional formatting caveats, template/blank rows, etc.)
@@ -32,11 +43,10 @@ knowledge lives in `docs/`, one topic per file:
 - `docs/ux-ui.md` — UX direction (courier-first entry modeled on the paper
   form), the "idiot-proof, not just non-technical" framing, validation
   approach, and what's still undecided about the suggestion engine
-- `docs/roadmap.md` — version sequence (`0.1-alpha.3` … `0.1-alpha.6`), the
-  gate that must be cleared before `0.1-alpha.4` starts, and the open
-  direction-setting questions that would reshape it; read before planning
-  any multi-version work
-- `docs/backlog.md` — full backlog, grouped by topic
+- `docs/roadmap.md` — **not a schedule** (that's Linear milestones): the
+  gate that must be cleared before `0.1-alpha.4`, the lessons those gates
+  grew out of, and the cross-version design rules that hold regardless of
+  version; read before planning any multi-version work
 - `docs/normalization-v2.md` — proposed relational schema v2 and the two
   open risks it depends on (see also `schema_v2_draft.sql`)
 - `docs/reference-data-sources.md` — external reference datasets
@@ -68,9 +78,9 @@ pytest
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
-528/528 tests currently pass under the pip/system-Python setup above, no
-skips (verified against a real 1294-row slice of source data, both import
-and export round-trip). `.venv/` must be built by the system Python, not
+540/540 tests currently pass under the pip/system-Python setup above, no
+skips (last run 2026-08-23; verified against a real 1294-row slice of
+source data, both import and export round-trip). `.venv/` must be built by the system Python, not
 `uv`'s managed one — `uv`'s python-build-standalone binary has a
 reproducible tkinter/X11 SIGABRT on this dev machine, which silently skips
 the GUI tests instead of running them (see `docs/environment.md`). If GUI
@@ -171,9 +181,19 @@ Default section order:
   pytest suite (`src/tests/`)
 - `demo/AGENTS.md` — throwaway HTML UX prototypes, not production code
 - `data/AGENTS.md` — local real-data scratch space, gitignored contract
-- Root-owned reference docs, see `docs/`: `domain-model.md`,
+- `docs/internal/` — **gitignored, local-only.** BaŚKa / DeliveryPath vendor
+  docs and our derived applications report (rejon / address / pickup-point
+  source of truth). Deliberately outside the repo: this repository is
+  public, and the tree carries internal Poczta Polska documentation plus
+  internal hostnames and an auth-scheme description. Its `AGENTS.md` is
+  untracked too, so it cannot be read from a fresh clone — treat references
+  to `docs/internal/…` in other docs as pointers to Papaver's machine, not
+  to repo content.
+- Root-owned reference docs, see `docs/`: `proces.md`, `domain-model.md`,
   `tech-decisions.md`, `environment.md`, `ux-ui.md`, `roadmap.md`,
-  `backlog.md`, `normalization-v2.md`, `reference-data-sources.md`
+  `normalization-v2.md`, `reference-data-sources.md`
 - Root-owned project files: `README.md`, `schema.sql`, `schema_v2_draft.sql`,
-  `pyproject.toml`, `.gitignore`, `zpo_tracker.spec` (PyInstaller, must be
-  built on Windows — see `docs/environment.md`)
+  `pyproject.toml`, `.gitignore`, `.coderabbit.yaml` (CodeRabbit reads
+  `docs/proces.md` + every `AGENTS.md` as its knowledge base),
+  `zpo_tracker.spec` (PyInstaller, must be built on Windows — see
+  `docs/environment.md`)
