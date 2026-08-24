@@ -365,3 +365,79 @@ def test_przesun_gdy_biezace_pole_nie_jest_w_kolejnosci_zaczyna_od_poczatku():
 
 def test_przesun_pusta_kolejnosc_zwraca_none():
     assert dedukcja.przesun_w_kolejnosci([], ("naglowek", "kurier"), 1) is None
+
+
+# --- rejonarz jako źródło rejonu (0.1-alpha.3.3) -----------------------
+#
+# Wpięcie jest bezpieczne z natury: bez migawki dedukcja zachowuje się
+# BIT W BIT tak jak dotąd, co poniższe testy sprawdzają w obie strony.
+# Migawka wypełnia wyłącznie lukę - historia jednoznaczna nadal wygrywa,
+# bo nadpisywanie jej po cichu byłoby zmianą zachowania, a nie
+# uzupełnieniem go.
+
+import sqlite3  # noqa: E402
+
+from zpo_tracker import rejonarz  # noqa: E402
+
+
+@pytest.fixture
+def conn_rejonarz():
+    c = sqlite3.connect(":memory:")
+    rejonarz.utworz_schemat(c)
+    yield c
+    c.close()
+
+
+def _wstaw_do_migawki(c, miejscowosc, ulica, nr, rejon):
+    c.execute(
+        "INSERT INTO adresy_rejony "
+        "(klucz, klucz_ulica_nr, miejscowosc, ulica, nr, rejon) VALUES (?,?,?,?,?,?)",
+        (rejonarz.klucz_adresu(miejscowosc, ulica, nr),
+         rejonarz.klucz_ulica_nr(ulica, nr), miejscowosc, ulica, nr, rejon))
+
+
+def test_bez_rejonarza_rejon_zostaje_szary(conn):
+    """Punkt odniesienia: dzisiejsze zachowanie dla nieznanego adresu."""
+    wynik = dedukcja.dedukuj_wiersz(conn, kurier="Kowalski Jan", adres="Odkryta 24")
+    assert wynik.pola["rejon"].stan == "szary"
+    assert wynik.pola["rejon"].wartosc is None
+
+
+def test_pusta_migawka_zachowuje_sie_jak_brak_migawki(conn, conn_rejonarz):
+    """Pusty plik i żaden plik muszą dawać ten sam wynik - inaczej
+    zachowanie programu zależałoby od tego, czy ktoś kiedyś kliknął
+    import i przerwał go w połowie."""
+    bez = dedukcja.dedukuj_wiersz(conn, kurier="K", adres="Odkryta 24")
+    z_pusta = dedukcja.dedukuj_wiersz(
+        conn, kurier="K", adres="Odkryta 24", conn_rejonarz=conn_rejonarz)
+    assert z_pusta.pola["rejon"] == bez.pola["rejon"]
+
+
+def test_migawka_wypelnia_rejon_dla_nieznanego_punktu(conn, conn_rejonarz):
+    _wstaw_do_migawki(conn_rejonarz, "Warszawa", "Odkryta", "24", "WA119")
+    wynik = dedukcja.dedukuj_wiersz(
+        conn, kurier="K", adres="Odkryta 24", conn_rejonarz=conn_rejonarz)
+    assert wynik.pola["rejon"].wartosc == "WA119"
+    assert wynik.pola["rejon"].stan == "zielony"
+    assert wynik.pola["rejon"].aktywne is False
+
+
+def test_migawka_bez_tego_adresu_nie_zmienia_niczego(conn, conn_rejonarz):
+    _wstaw_do_migawki(conn_rejonarz, "Warszawa", "Marsa", "56", "WA124")
+    wynik = dedukcja.dedukuj_wiersz(
+        conn, kurier="K", adres="Odkryta 24", conn_rejonarz=conn_rejonarz)
+    assert wynik.pola["rejon"].stan == "szary"
+
+
+def test_jednoznaczna_historia_wygrywa_z_migawka(conn, conn_rejonarz):
+    """Historia punktu i migawka mogą się różnić - reguły rozstrzygania
+    tej kolizji to osobna robota (§10 raportu BaŚKi). Do czasu jej
+    wdrożenia migawka WYPEŁNIA LUKĘ, a nie nadpisuje po cichu tego,
+    co użytkownik już widział."""
+    repo.zapisz_blankiet(conn, _blok(wiersze=[WierszBlankietu(
+        nadawca="Żabka", adres="Odkryta 24", rejon="WA87",
+        ilosc_total=1, ilosc_zpo=1)]))
+    _wstaw_do_migawki(conn_rejonarz, "Warszawa", "Odkryta", "24", "WA119")
+    wynik = dedukcja.dedukuj_wiersz(
+        conn, kurier="Kowalski Jan", adres="Odkryta 24", conn_rejonarz=conn_rejonarz)
+    assert wynik.pola["rejon"].wartosc == "WA87"

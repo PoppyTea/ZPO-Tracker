@@ -104,7 +104,12 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   i mylące), `scal_kurierow`
   (droga naprawy dla ostrzeżeń o podobieństwie, **atomowy**; przy kolizji
   `UNIQUE(data,kurier,punkt)` scalenie się nie uda — ale nie zostawi
-  stanu połowicznego), `pobierz_transakcje`, `pobierz_punkty`. Zapytania
+  stanu połowicznego), `pobierz_transakcje`, `pobierz_punkty`. **`znajdz_punkt_po_pni`** (`0.1-alpha.3.3`) — odwraca kierunek
+  dedukcji: PNI jest tu WEJŚCIEM, nie wyjściem. Jednoznaczność gwarantuje
+  schemat (`punkty.pni_zpo UNIQUE`), więc nie ma tu żadnego rozstrzygania.
+  Porównanie **tekstowe, nigdy liczbowe** — `"007"` i `"7"` to dwa różne
+  punkty, a ich zrównanie to dokładnie błąd koercji naprawiony w 3.2.
+  Zapytania
   dedukcyjne (`znajdz_punkty_po_adresie`/`czy_nadawca_ma_pni`/
   `historia_rejonow_punktu`/`historia_wykonawcow_kuriera`) — jedyny
   konsument to `dedukcja.py` niżej. `pobierz_transakcje` ma od
@@ -154,6 +159,13 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   sprzeczna → szare/nieaktywne (zapis rozstrzyga na kanoniczne `???`).
   Wcześniej pole aktywowało się do ręcznego zgadywania — czyli dokładnie
   tego, co rejonarz (`0.1-alpha.3.3/3.4`) ma zastąpić źródłem prawdy.
+  **Od `0.1-alpha.3.3` `dedukuj_wiersz` przyjmuje opcjonalne `conn_rejonarz`.**
+  Pominięte ALBO wskazujące na pustą migawkę daje zachowanie bit w bit
+  dotychczasowe — własność celowa, przypięta testem w obie strony:
+  na stacji bez zaimportowanej migawki program ma działać dokładnie tak
+  jak przedtem. Migawka WYPEŁNIA LUKĘ (historia pusta lub sprzeczna),
+  nigdy nie nadpisuje jednoznacznej historii punktu — reguły kolizji
+  „historia vs rejonarz" to §10 raportu BaŚKi i osobna robota.
 - `import_orchestrator.py` — cały import w partii: `zwaliduj_wiersze`,
   `znajdz_propozycje_scalenia_kurierow` (literówki, auto-merge PRZED
   zapisem, nie cofanie po fakcie), `znajdz_ostrzezenia_podobienstwa_kurierow`
@@ -185,6 +197,57 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   Nieczytelny plik to `PLIK_OBCY`, nie wyjątek: „nie umiem zweryfikować"
   znaczy dokładnie tyle co „nie ufam", a decyzja o zaufaniu nie może
   wysadzić importu.
+- `profil_kolumn.py` (`0.1-alpha.3.3`) — dopasowanie kolumn arkusza po
+  NAGŁÓWKU, nie po pozycji. Profil jest parametrem, nie stałą modułową,
+  więc moduł nie wie nic o rejonach. Porównanie idzie po
+  `normalizacja.klucz_rozmyty` z `czy_literowka` jako ostatnią deską
+  ratunku — a ta wymaga DOKŁADNIE jednego kandydata, bo dwóch to już
+  niejednoznaczność. `dopasuj_kolumny` **nie rzuca przy pierwszym braku**:
+  oddaje pełny obraz (`braki` + `nierozpoznane`), bo rzucanie pokazywałoby
+  jeden problem naraz. Powtórzony nagłówek nie nadpisuje pierwszego —
+  arkusze bywają sklejane z kilku. `pasuje_do_wzorca` zwraca **None dla
+  pól bez wzorca**, nie False: "nie wiem" i "nie pasuje" to dwie różne
+  odpowiedzi, a ich zlanie zamieniłoby siatkę bezpieczeństwa w generator
+  fałszywych alarmów. **Świadomie NIE podpięty pod
+  `import_orchestrator.MAPA_NAGLOWKOW`** — tamta ścieżka działa, jej
+  przepisanie to osobna robota.
+- `rejonarz.py` (`0.1-alpha.3.3`) — migawka `adres → rejon` z eksportu
+  BaŚKi w **OSOBNYM pliku `rejonarz.db`**, nie w głównej bazie. Zbiór jest
+  identyczny na wszystkich stacjach, więc nie ma po co wędrować przez
+  `scalanie.py` ani powiększać każdej migawki z `kopie.py`; skutkiem
+  ubocznym `schema.sql` i `WERSJA_SCHEMATU` zostają nietknięte, czyli
+  integracja nie niesie ryzyka migracji dla danych rozliczeniowych.
+  Pierwszy kod w repo pracujący na dużym zbiorze: `read_only=True` +
+  generator przy odczycie, `executemany` partiami przy zapisie (reszta
+  importów materializuje cały arkusz — przy >400 tys. wierszy nie
+  przejdzie). Trzy rozstrzygnięcia, nie szczegóły implementacji:
+  (1) **import PODMIENIA całą migawkę**, bo to stan, nie dziennik
+  przyrostowy — przy dopisywaniu adresy wycofane z BaŚKi zostawałyby
+  u nas na zawsze, wyglądając na potwierdzone; (2) **wartownik nie trafia
+  do migawki** — zapisane `???` kazałoby dedukcji mówić "wiem, że nie
+  wiem" tam, gdzie prawdą jest "nie mam wpisu"; (3) **sprzeczna migawka
+  daje `None`**, nigdy pierwszego lepszego — `UNIQUE(klucz, rejon)`
+  zdejmuje powtórzone pary, a dwa różne rejony pod jednym kluczem zostają
+  oba i `znajdz_rejon` odmawia rozstrzygnięcia. Filtr `WEZEL_ZPO="WW"` +
+  `TYP_KIEROWANIA_ZPO="1"` jest tutaj, nie w normalizacji (wymaga widoku
+  na cały wiersz); brak tych kolumn w arkuszu oznacza brak filtrowania,
+  ale **jawnie zaznaczony** w `WynikImportu.bez_filtrowania`.
+  `rozbij_adres`/`znajdz_rejon_dla_adresu` — most do formularza, który
+  trzyma adres jako jeden wolny tekst; to proteza na czas do wdrożenia
+  strukturalnego adresu (`../docs/normalization-v2.md`). Adres bez
+  miejscowości (`"Odkryta 24"`, w realnych danych bardzo częsty) szuka po
+  samej ulicy i numerze, ale odpowiada **wyłącznie przy jednoznacznym
+  trafieniu** — ta sama ulica w dwóch miastach to nie przypadek do
+  rozstrzygnięcia losowaniem.
+  **Lokal** (format adresu to miejscowość / ulica / budynek / lokal,
+  lokal opcjonalny): odcinają go WYŁĄCZNIE jawne znaczniki (`m.`, `lok.`,
+  `mieszk.`). Goły ukośnik zostaje częścią numeru budynku, bo `"12/14"`
+  bywa podwójnym numerem JEDNEGO budynku równie często, co budynkiem
+  z mieszkaniem — rozstrzyga dopiero wyszukiwanie, próbując obu odczytów
+  z pierwszeństwem dosłownego. Lokal jest **rozpoznawany przy imporcie,
+  ale nie zapisywany**: rejon jest przypisany do budynku, więc lokal nie
+  wnosi informacji, a w kluczu rozbiłby deduplikację (pięć mieszkań =
+  pięć wierszy mówiących to samo).
 - `podpowiedzi.py` — silnik podpowiedzi (`podpowiedz`,
   `najlepsza_podpowiedz`), źródło kandydatów wstrzykiwane, nie zaszyte.
 - `uzytkownicy.py` — tożsamość osoby wprowadzającej dane. `users.id` to

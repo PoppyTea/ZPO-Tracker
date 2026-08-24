@@ -547,3 +547,54 @@ def test_historia_wykonawcow_kuriera_posortowana_po_ostatniej_dacie(conn):
 
 def test_historia_wykonawcow_kuriera_nowy_kurier(conn):
     assert repo.historia_wykonawcow_kuriera(conn, "Nikt Taki") == []
+
+
+# --- wyszukiwanie punktu po PNI (0.1-alpha.3.3) ------------------------
+#
+# Prośba użytkowników: "wyszukiwanie sklepów po PNI, jeśli było już kiedyś
+# w bazie". Odwraca dzisiejszy kierunek dedukcji, w której PNI jest
+# WYŁĄCZNIE polem wyjściowym, wyprowadzanym z rozstrzygniętego punktu.
+
+def _punkt_z_pni(conn, pni, nadawca="Żabka", adres="Odkryta 24"):
+    conn.execute(
+        "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES (?, ?, ?)",
+        (nadawca, adres, pni))
+
+
+def test_znajduje_punkt_po_pni(conn):
+    _punkt_z_pni(conn, "231270")
+    punkt = repo.znajdz_punkt_po_pni(conn, "231270")
+    assert punkt["nadawca"] == "Żabka"
+    assert punkt["adres"] == "Odkryta 24"
+
+
+def test_nieznane_pni_daje_nic(conn):
+    _punkt_z_pni(conn, "231270")
+    assert repo.znajdz_punkt_po_pni(conn, "999999") is None
+
+
+def test_biale_znaki_wokol_pni_nie_przeszkadzaja(conn):
+    _punkt_z_pni(conn, "231270")
+    assert repo.znajdz_punkt_po_pni(conn, "  231270 ")["nadawca"] == "Żabka"
+
+
+def test_pni_porownywane_jest_tekstowo_nie_liczbowo(conn):
+    """PNI to KLUCZ, nie wielkość liczbowa. Zrównanie "007" z "7" to
+    dokładnie ten błąd koercji, który w 0.1-alpha.3.2 rozdwajał ten sam
+    fizyczny punkt na dwa wpisy przy round-tripie eksport-import."""
+    _punkt_z_pni(conn, "007", nadawca="Orlen", adres="Marsa 1")
+    _punkt_z_pni(conn, "7", nadawca="RUCH", adres="Marsa 2")
+    assert repo.znajdz_punkt_po_pni(conn, "007")["nadawca"] == "Orlen"
+    assert repo.znajdz_punkt_po_pni(conn, "7")["nadawca"] == "RUCH"
+
+
+def test_pni_podane_jako_liczba_tez_dziala(conn):
+    """GUI może przekazać int, jeśli ktoś wpisze same cyfry."""
+    _punkt_z_pni(conn, "231270")
+    assert repo.znajdz_punkt_po_pni(conn, 231270)["nadawca"] == "Żabka"
+
+
+@pytest.mark.parametrize("puste", [None, "", "   "])
+def test_puste_pni_nie_szuka(conn, puste):
+    _punkt_z_pni(conn, "231270")
+    assert repo.znajdz_punkt_po_pni(conn, puste) is None

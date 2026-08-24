@@ -61,13 +61,20 @@ def _rozstrzygnij_punkt(conn, adres, nadawca):
     return kandydaci, punkt_id
 
 
-def dedukuj_wiersz(conn, *, kurier, adres, nadawca=None, ilosc_total=None, ilosc_zpo=None):
+def dedukuj_wiersz(conn, *, kurier, adres, nadawca=None, ilosc_total=None,
+                   ilosc_zpo=None, conn_rejonarz=None):
     """
     Dedukuje nadawcę/PNI/rejon z adresu (przez rozstrzygnięty punkt) i
     aktywność/wartość "w tym ZPO" z Ilości. `kurier` przyjmowany dla
     symetrii sygnatury i przyszłego użycia (wykonawca jest dziś dedukowany
     WYŁĄCZNIE na poziomie nagłówka blankietu, patrz `dedukuj_naglowek` -
     jeden blankiet = jeden kurier = jeden wykonawca, nie osobno per wiersz).
+
+    `conn_rejonarz` (0.1-alpha.3.3, opcjonalne): połączenie do migawki
+    `adres -> rejon` z BaŚKi. **Pominięte albo puste daje zachowanie
+    identyczne z dotychczasowym** - to jest własność celowa, nie
+    przypadkowa: na stacji bez zaimportowanej migawki program ma działać
+    dokładnie tak jak przedtem, a nie inaczej.
     """
     kandydaci_punktow, punkt_id = _rozstrzygnij_punkt(conn, adres, nadawca)
     pola = {}
@@ -115,9 +122,13 @@ def dedukuj_wiersz(conn, *, kurier, adres, nadawca=None, ilosc_total=None, ilosc
     kody = {h["kod"] for h in repo.historia_rejonow_punktu(conn, punkt_id)} \
         if punkt_id is not None else set()
     if len(kody) == 1:
+        # Jednoznaczna historia wygrywa z migawką. Reguły rozstrzygania
+        # kolizji "historia vs rejonarz" to osobna robota (§10 raportu
+        # BaŚKi); do jej wdrożenia migawka WYPEŁNIA LUKĘ, a nie nadpisuje
+        # po cichu wartości, którą użytkownik już widział.
         pola["rejon"] = StanPola(wartosc=next(iter(kody)), stan="zielony", aktywne=False)
     else:
-        pola["rejon"] = StanPola(stan="szary", aktywne=False)
+        pola["rejon"] = _rejon_z_migawki(conn_rejonarz, adres)
 
     # ilosc_zpo: aktywność <- WYŁĄCZNIE czy_nadawca_ma_pni, nigdy nie
     # bramowana przez ilosc_total (patrz docstring modułu) - ilosc_total
@@ -135,6 +146,25 @@ def dedukuj_wiersz(conn, *, kurier, adres, nadawca=None, ilosc_total=None, ilosc
         kandydaci_punktow=tuple(k["id"] for k in kandydaci_punktow),
         pola=pola,
     )
+
+
+def _rejon_z_migawki(conn_rejonarz, adres):
+    """Rejon z migawki rejonarza albo puste pole, dokładnie jak dotąd.
+
+    Import `rejonarz` jest lokalny, żeby moduł dedukcji nie ciągnął za
+    sobą openpyxl przy każdym uruchomieniu - migawka jest opcjonalna,
+    więc jej zależności też powinny być.
+    """
+    if conn_rejonarz is None or not adres:
+        return StanPola(stan="szary", aktywne=False)
+    from zpo_tracker import rejonarz
+
+    if not rejonarz.czy_dostepny(conn_rejonarz):
+        return StanPola(stan="szary", aktywne=False)
+    kod = rejonarz.znajdz_rejon_dla_adresu(conn_rejonarz, adres)
+    if not kod:
+        return StanPola(stan="szary", aktywne=False)
+    return StanPola(wartosc=kod, stan="zielony", aktywne=False)
 
 
 def dedukuj_naglowek(conn, *, kurier, data):

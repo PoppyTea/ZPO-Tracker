@@ -678,6 +678,32 @@ def znajdz_punkty_po_adresie(conn, adres):
     return [dict(r) for r in wszystkie if klucz_rozmyty(r["adres"]) == klucz]
 
 
+def znajdz_punkt_po_pni(conn, pni):
+    """
+    Punkt o podanym PNI albo None. Odwraca dzisiejszy kierunek dedukcji,
+    w której PNI jest WYŁĄCZNIE polem wyjściowym (wyprowadzanym
+    z rozstrzygniętego punktu, patrz `dedukcja.py`) - tutaj jest wejściem.
+
+    Jednoznaczność jest gwarantowana schematem: `punkty.pni_zpo UNIQUE`,
+    więc nie ma tu żadnego rozstrzygania ani zgadywania.
+
+    **Porównanie jest TEKSTOWE, nigdy liczbowe.** PNI to klucz, nie
+    wielkość: "007" i "7" to dwa różne punkty. Zrównanie ich to dokładnie
+    ten błąd koercji, który do `0.1-alpha.3.2` rozdwajał ten sam fizyczny
+    punkt przy round-tripie eksport-import (patrz `eksport.py`).
+    """
+    if pni is None:
+        return None
+    pni = str(pni).strip()
+    if not pni:
+        return None
+    wiersz = conn.execute(
+        "SELECT id, nadawca, adres, pni_zpo FROM punkty WHERE pni_zpo = ?",
+        (pni,),
+    ).fetchone()
+    return dict(wiersz) if wiersz else None
+
+
 def czy_nadawca_ma_pni(conn, nadawca):
     """Rządzi aktywnością pola "w tym ZPO" w trybie auto - wyliczane w
     locie (EXISTS), NIGDY przechowywane, żeby nie mogło się rozjechać."""

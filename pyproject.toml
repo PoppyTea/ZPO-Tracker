@@ -17,6 +17,9 @@ build = ["pyinstaller>=6.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]
+markers = [
+    "slow: testy skali (dziesiątki tysięcy wierszy) - pomijalne przez -m 'not slow'",
+]
 
 [build-system]
 requires = ["hatchling"]
