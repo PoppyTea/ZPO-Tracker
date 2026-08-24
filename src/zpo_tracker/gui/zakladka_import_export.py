@@ -18,6 +18,7 @@ import openpyxl
 from zpo_tracker import eksport, operacje, ustawienia
 from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
+    KLUCZ_NUMERU_WIERSZA,
     zaimportuj,
     znajdz_ostrzezenia_podobienstwa_kurierow,
     znajdz_propozycje_scalenia_kurierow,
@@ -45,7 +46,15 @@ def _wczytaj_surowe_wiersze(sciezka):
     wb = openpyxl.load_workbook(sciezka, data_only=True)
     ws = wb[wb.sheetnames[0]]
     naglowki = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
-    return [dict(zip(naglowki, wiersz)) for wiersz in ws.iter_rows(min_row=2, values_only=True)]
+    # Numer wiersza doklejany od razu przy czytaniu - bez niego raport
+    # odrzuconych mówi "71 wierszy wymagało uwagi" i nie da się z tym nic
+    # zrobić. `_przemapuj` w orchestratorze filtruje po MAPA_NAGLOWKOW,
+    # więc ta metadana nigdy nie dociera do WierszImportu.
+    return [
+        dict(zip(naglowki, wiersz),
+             **{KLUCZ_NUMERU_WIERSZA: numer})
+        for numer, wiersz in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2)
+    ]
 
 
 class DialogKorektyImportu(tk.Toplevel):

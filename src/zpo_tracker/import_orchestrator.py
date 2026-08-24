@@ -53,6 +53,37 @@ def _pierwszy_blad(wyjatek: ValidationError) -> str:
     return f"{pole}: {blad['msg']}"
 
 
+# Metadana transportowa doklejana do surowego wiersza przy czytaniu pliku,
+# żeby dało się wskazać, KTÓRY wiersz źródłowego Excela wymaga poprawki.
+# Nie jest kolumną danych: `_przemapuj` filtruje po MAPA_NAGLOWKOW, więc
+# nigdy nie dociera do WierszImportu.
+KLUCZ_NUMERU_WIERSZA = "__wiersz__"
+
+
+def zbierz_odrzucone(odrzucone, wymagajace_uwagi=()):
+    """
+    Sprowadza dwa różne kształty odrzuceń do jednej listy dla raportu.
+
+    Odrzucenia przychodzą z dwóch etapów i wyglądają inaczej: walidacja
+    oddaje SUROWY dict (i zna numer wiersza), a konflikty duplikatu/PNI
+    wychodzą dopiero przy zapisie i niosą już zwalidowany `WierszImportu`
+    (numeru nie znają). Raport ma pokazać jedno i drugie, bo dla
+    wprowadzającego to ta sama sprawa: "co nie weszło i dlaczego".
+    """
+    pozycje = []
+    for zrodlo in (odrzucone, wymagajace_uwagi):
+        for pozycja in zrodlo:
+            wiersz = pozycja["wiersz"]
+            dane = dict(wiersz) if isinstance(wiersz, dict) else dict(wiersz)
+            numer = dane.pop(KLUCZ_NUMERU_WIERSZA, None)
+            pozycje.append({
+                "numer_wiersza": numer,
+                "powod": pozycja["powod"],
+                "dane": dane,
+            })
+    return pozycje
+
+
 def zwaliduj_wiersze(wiersze_surowe):
     """
     wiersze_surowe: lista dictów nagłówek->wartość (z xlsx, przez openpyxl).

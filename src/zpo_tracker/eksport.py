@@ -193,3 +193,55 @@ def eksportuj_miesiac(conn, rok, miesiac, sciezka):
 
     wb.save(sciezka)
     return len(wiersze)
+
+
+# --- raport odrzuconych wierszy importu (0.1-alpha.3.3) -----------------
+
+NAGLOWEK_NUMERU = "Wiersz w pliku"
+NAGLOWEK_POWODU = "Powód odrzucenia"
+
+
+def zapisz_odrzucone(sciezka, pozycje):
+    """
+    Zapisuje `.xlsx` z wykazem wierszy, które nie weszły do bazy.
+
+    Sens tego pliku: opcja "pomiń niespójności" bez wykazu tego, co
+    pominięto, jest cichą utratą danych z ładniejszą nazwą. Z wykazem -
+    i z NUMEREM WIERSZA - staje się listą zadań do poprawienia
+    w źródłowym Excelu.
+
+    Kolumny: numer wiersza, powód, a dalej oryginalne nagłówki źródła.
+    Kolejność kolumn danych idzie za `NAGLOWKI` (czyli tak jak w pliku
+    źródłowym), a nagłówki spoza tej listy dopisują się na końcu -
+    odrzucenia z dwóch etapów mają różne kształty i raport musi pomieścić
+    oba, nie zgubić kolumn drugiego.
+
+    Plik powstaje także dla pustej listy: "nic nie odrzucono" ma być
+    widocznym artefaktem, nie brakiem pliku, którego nie wiadomo jak
+    zinterpretować. Zwraca liczbę wypisanych wierszy.
+    """
+    kolumny_danych = []
+    for pozycja in pozycje:
+        for klucz in pozycja["dane"]:
+            if klucz not in kolumny_danych:
+                kolumny_danych.append(klucz)
+    kolumny_danych.sort(key=lambda k: (NAGLOWKI.index(k) if k in NAGLOWKI else len(NAGLOWKI)))
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Odrzucone"
+    ws.append([NAGLOWEK_NUMERU, NAGLOWEK_POWODU] + kolumny_danych)
+
+    for pozycja in pozycje:
+        komorki = [pozycja.get("numer_wiersza"), pozycja.get("powod")]
+        for klucz in kolumny_danych:
+            komorki.append(pozycja["dane"].get(klucz))
+        ws.append(komorki)
+        # PNI zostaje TEKSTEM - ta sama pułapka co w eksporcie miesiąca:
+        # "007" rzutowane na liczbę to "7", czyli inny punkt.
+        if "PNI ZPO" in kolumny_danych:
+            kolumna = kolumny_danych.index("PNI ZPO") + 3
+            ws.cell(row=ws.max_row, column=kolumna).number_format = "@"
+
+    wb.save(sciezka)
+    return len(pozycje)
