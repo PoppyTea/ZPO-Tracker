@@ -20,17 +20,19 @@ Modernizacja procesu wprowadzania danych otrzymywanych w formie papierowej + zmi
 
 ## Status i plan
 
-Wydane: **`0.1-alpha.3.1`** — MVP (import/export `.xlsx`, formularz
+Wydane: **`0.1-alpha.4.1`** — MVP (import/export `.xlsx`, formularz
 blankietowy, słowniki, podpowiedzi) plus trwałość danych (transakcje,
 migawki i cofanie operacji, logi diagnostyczne, atrybucja zmian do autora,
-ręczne scalanie dwóch baz) i automatyczna dedukcja pól formularza z bazy:
-po wpisaniu kuriera/daty/adresu/ilości reszta wiersza (nadawca, PNI,
-rejon, wykonawca) wchodzi sama, z kolorowymi wskaźnikami stanu i nawigacją
-Tab/Enter po polach wymagających uwagi.
+ręczne scalanie dwóch baz), automatyczna dedukcja pól formularza z bazy,
+edycja i usuwanie zapisanych transakcji, model zaufania importu (znacznik
+pochodzenia + odcisk SHA-256), rejonarz jako źródło prawdy o rejonach
+(migawka `adres → rejon` z eksportu BaŚKi w osobnym pliku) oraz ciemny
+motyw interfejsu.
 
-Dalej: **`0.1-alpha.4`** przebudowa UI/UX, **`0.1-alpha.5`** tryb pół-auto,
-**`0.1-alpha.6`** automatyczna synchronizacja między stacjami. Pełna
-kolejność i otwarte pytania kierunkowe: `docs/roadmap.md`.
+Dalej: **`0.1-alpha.5`** tryb pół-auto, **`0.1-alpha.6`** automatyczna
+synchronizacja między stacjami. Bieżące zadania, kolejność wersji
+i otwarte decyzje: projekt **ZPO-Tracker** w Linear (patrz
+`docs/proces.md`); uzasadnienia kierunkowe: `docs/roadmap.md`.
 
 ## Szybki start
 
@@ -64,8 +66,11 @@ src/zpo_tracker/
     repo.py                   # dostęp do danych, słowniki, naprawa danych
     dedukcja.py                # dedukcja pól formularza z bazy + kolejność nawigacji
     import_orchestrator.py    # import partii + ekran korekty
-    eksport.py                # export do .xlsx (round-trip ze snapshotem)
+    profil_kolumn.py          # dopasowanie kolumn arkusza po nagłówku, nie po pozycji
+    rejonarz.py               # migawka adres -> rejon z BaŚKi (osobny plik .db)
+    eksport.py                # export do .xlsx + raporty odrzuconych wierszy
     podpowiedzi.py            # silnik podpowiedzi
+    ustawienia.py             # settings.json per stacja (poza bazą, nie wędruje przy scalaniu)
     uzytkownicy.py             # tożsamość osoby wprowadzającej dane (atrybucja)
     scalanie.py                 # ręczne scalanie dwóch baz
     operacje.py / kopie.py / dziennik.py / zrzuty.py / blokada.py

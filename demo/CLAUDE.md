@@ -31,10 +31,13 @@ Jak w całym projekcie — patrz root `CLAUDE.md`.
   tkinter, przeglądarka tylko go pokazuje.
 - `podglad-stylu.py` — ten sam ekran w REALNYM tkinterze, do porównania
   z makietą: `python demo/podglad-stylu.py` (nowy styl) albo z flagą
-  `--bez` (stan obecny). **Jedyny plik w tym katalogu importujący z
-  `src/`** — świadomie, bo jego sensem jest pokazanie rzeczywistego
-  renderingu `gui/styl.py`, nie jego imitacji. Sztywne dane, zero
-  połączenia z bazą.
+  `--bez` (stan obecny). Sztywne dane, zero połączenia z bazą.
+
+**Oba pliki `.py` w tym katalogu importują z `src/`** — świadomie, bo ich
+sensem jest pokazanie RZECZYWISTEGO renderingu `gui/styl.py`
+i `gui/widget_pole.py`, nie jego imitacji. To jedyny dopuszczalny powód,
+żeby prototyp sięgał do kodu produkcyjnego; wszystko inne tutaj ma być
+samodzielne.
 
 ## Work Guidance
 

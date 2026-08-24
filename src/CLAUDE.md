@@ -374,16 +374,20 @@ Warstwa GUI (tkinter, `gui/`) — **zero logiki biznesowej**, tylko zbieranie
 wartości z pól i wywołanie warstwy logiki:
 
 - `styl.py` — JEDYNE miejsce ustalające kolory, odstępy i czcionki
-  (`PALETA`, `ODSTEPY`, `zastosuj_styl(root)`). **Jeszcze NIE wpięty do
-  `app.py`** — czeka na akceptację, makieta i podgląd w `../demo/`.
+  (`PALETA`, `ODSTEPY`, `zastosuj_styl(root)`). **Wpięty do `app.py`**
+  (`0.1-alpha.4`): `zastosuj_styl(self)` wołane RAZ, przed budową
+  zakładek — `theme_use` przebudowuje istniejące widgety, więc kolejność
+  ma znaczenie.
   `theme_use("clam")` jest warunkiem koniecznym, nie estetycznym: `vista`
   (domyślny na Windowsie) ignoruje większość ustawianych kolorów, więc bez
   podmiany motywu reszta konfiguracji nie ma żadnego efektu.
   `KOLORY_STANOW` **jest tym samym obiektem** co `widget_pole.KOLORY`, nie
   kopią — dwie palety wskaźników rozjechałyby się po cichu przy pierwszej
   korekcie jednej z nich (przypięte testem).
-  `PALETA["tekst_slaby"]` ma kontrast 2.85:1 i **nie wolno go użyć jako
-  koloru tekstu** — test `test_tekst_slaby_nie_jest_uzywany_do_tekstu`
+  `PALETA["tekst_slaby"]` ma na ciemnym tle kontrast 3.77:1, czyli
+  wystarcza na grafikę, ale **nie na tekst** (próg 4.5) — i **nie wolno go
+  użyć jako koloru tekstu** (w `PALETA_JASNA` ten sam token ma 2.85:1,
+  czyli nie wyrabia nawet progu graficznego — stąd reguła w ogóle powstała) — test `test_tekst_slaby_nie_jest_uzywany_do_tekstu`
   skanuje źródło i tego pilnuje; etykiety kolumn mówią nietechnicznemu
   użytkownikowi, co ma wpisać, więc to najgorsze miejsce na oszczędzanie
   na czytelności. `wlacz_swiadomosc_dpi()` jest ŚWIADOMIE osobnym
@@ -551,17 +555,13 @@ wartości z pól i wywołanie warstwy logiki:
   użytkownik wszedł w pole. `KOLORY` to re-eksport `styl.KOLORY_STANOW`, nie kopia —
   zależność odwrócona, bo moduł tokenów nie powinien pytać widgetu
   o kolory.
-- `widget_pole.py` (wcześniejszy opis) — `PoleZeWskaznikiem` (`0.1-alpha.3.1`): `tk.Frame`
-  (NIE `ttk.Frame` — `highlightthickness`/`highlightbackground` na
-  obwódkę jest opcją tk-ową) owijający widget pola paskiem koloru stanu
-  (`dedukcja.STANY`) + obwódką: "wymaga uwagi" (2px, wygrywa przy
-  konflikcie) albo "następne w kolejce Tab" (1px, ten sam motyw koloru).
-  Konstruktor bierze FABRYKĘ widgetu (`parent -> widget`), nie gotowy
-  widget — Tk pakuje/griduje widget do jego rzeczywistego rodzica
-  z konstrukcji, więc gotowy widget zbudowany z innym rodzicem
-  wylądowałby jako rodzeństwo wrappera, nie w jego środku (złapane
-  eksperymentalnie przed napisaniem finalnej wersji, patrz historia
-  commitów).
+  Dwie rzeczy niezmienne od `0.1-alpha.3.1`: to `tk.Frame`, NIE
+  `ttk.Frame` (`highlightthickness`/`highlightbackground` są opcjami
+  tk-owymi, a ttk pod niektórymi motywami nie honoruje ich przewidywalnie),
+  a konstruktor bierze **FABRYKĘ** widgetu (`parent -> widget`), nie gotowy
+  widget — Tk griduje widget do rodzica z konstrukcji, więc gotowy widget
+  zbudowany z innym rodzicem wylądowałby jako rodzeństwo wrappera, nie
+  w jego środku (złapane eksperymentalnie).
 
 ## Work Guidance
 

@@ -212,7 +212,7 @@ def test_tekst_slaby_nie_jest_uzywany_do_tekstu():
         tresc = f.read()
     for linia in tresc.splitlines():
         if "foreground=PALETA" in linia:
-            assert "tekst_slaby" not in linia, f"kontrast 2.85:1 w: {linia.strip()}"
+            assert "tekst_slaby" not in linia, f"tekst_slaby nie wyrabia progu 4.5:1 w: {linia.strip()}"
 
 
 @wymaga_gui

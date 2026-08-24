@@ -78,9 +78,13 @@ pytest
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
-540/540 tests currently pass under the pip/system-Python setup above, no
-skips (last run 2026-08-23; verified against a real 1294-row slice of
-source data, both import and export round-trip). `.venv/` must be built by the system Python, not
+734 tests are collected and 733 pass under the pip/system-Python setup
+above, with no skips (last run 2026-08-24). The one deselected test is
+marked `slow` — a scale check that imports tens of thousands of rows; run
+the fast set with `pytest -m "not slow"`. Coverage includes a real
+1294-row slice of source data, both import and export round-trip.
+
+`.venv/` must be built by the system Python, not
 `uv`'s managed one — `uv`'s python-build-standalone binary has a
 reproducible tkinter/X11 SIGABRT on this dev machine, which silently skips
 the GUI tests instead of running them (see `docs/environment.md`). If GUI
@@ -181,14 +185,15 @@ Default section order:
   pytest suite (`src/tests/`)
 - `demo/AGENTS.md` — throwaway HTML UX prototypes, not production code
 - `data/AGENTS.md` — local real-data scratch space, gitignored contract
-- `docs/internal/` — **gitignored, local-only.** BaŚKa / DeliveryPath vendor
+- `docs/internal/baska-rejonarz/AGENTS.md` — **gitignored, local-only.** BaŚKa / DeliveryPath vendor
   docs and our derived applications report (rejon / address / pickup-point
   source of truth). Deliberately outside the repo: this repository is
   public, and the tree carries internal Poczta Polska documentation plus
   internal hostnames and an auth-scheme description. Its `AGENTS.md` is
   untracked too, so it cannot be read from a fresh clone — treat references
   to `docs/internal/…` in other docs as pointers to Papaver's machine, not
-  to repo content.
+  to repo content. The sibling `docs/internal/raports/` holds the derived
+  applications report and has no DOX of its own.
 - Root-owned reference docs, see `docs/`: `proces.md`, `domain-model.md`,
   `tech-decisions.md`, `environment.md`, `ux-ui.md`, `roadmap.md`,
   `normalization-v2.md`, `reference-data-sources.md`
