@@ -11,7 +11,7 @@ wartości z pól, wywołanie i wyświetlenie wyniku.
 from datetime import date
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 import openpyxl
 
@@ -19,6 +19,8 @@ from zpo_tracker import eksport, operacje, ustawienia
 from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
     KLUCZ_NUMERU_WIERSZA,
+    wybierz_niezaimportowane,
+    zbierz_odrzucone,
     zaimportuj,
     znajdz_ostrzezenia_podobienstwa_kurierow,
     znajdz_propozycje_scalenia_kurierow,
@@ -62,7 +64,8 @@ class DialogKorektyImportu(tk.Toplevel):
 
     def __init__(self, parent, conn, katalog_danych, nazwa_pliku, zwalidowane,
                  odrzucone, propozycje, ostrzezenia, on_gotowe,
-                 autor_id=None, sesja_uuid=None, status_zaufania=eksport.PLIK_OBCY):
+                 autor_id=None, sesja_uuid=None, status_zaufania=eksport.PLIK_OBCY,
+                 sciezka_pliku=None, surowe=None):
         super().__init__(parent)
         self.title("Korekta importu")
         self.geometry("640x560")
@@ -82,6 +85,14 @@ class DialogKorektyImportu(tk.Toplevel):
         self.checkbox_wymuszenia = None
         self.zmienne_propozycji = []
         self.mapowanie_z_ostrzezen = {}
+        self.sciezka_pliku = Path(sciezka_pliku) if sciezka_pliku else None
+        self.surowe = surowe or []
+        # Rozstrzygnięcia różnic w zapisie. Klucz to para nazw, wartość -
+        # jawna decyzja użytkownika. "Zostaw obie" MUSI być osobnym
+        # wpisem, nie brakiem wpisu: inaczej "jeszcze się nie zdecydowałem"
+        # i "świadomie zostawiam obie" wyglądają identycznie, a to dwie
+        # zupełnie różne sytuacje.
+        self.rozstrzygniecia = {}
 
         ttk.Label(
             self,
@@ -122,8 +133,9 @@ class DialogKorektyImportu(tk.Toplevel):
             ttk.Label(
                 ramka_o,
                 text="Różnią się tylko wielkością liter/polskimi znakami - NIE scalono "
-                     "automatycznie. Kliknij, która forma ma zostać (druga zostanie do "
-                     "niej scalona), albo zostaw obie i zdecyduj później w Słownikach.",
+                     "automatycznie. Wybierz, która forma ma zostać (druga zostanie do "
+                     "niej scalona), albo kliknij „obie”, jeśli to naprawdę dwie różne "
+                     "osoby. Każda pozycja wymaga decyzji - „obie” też jest decyzją.",
                 wraplength=580, justify="left",
             ).pack(anchor="w", padx=6, pady=6)
             for o in ostrzezenia:
@@ -132,6 +144,9 @@ class DialogKorektyImportu(tk.Toplevel):
         pasek = ttk.Frame(self)
         pasek.pack(fill="x", padx=10, pady=10)
         ttk.Button(pasek, text="Zatwierdź import", command=self._zatwierdz).pack(side="right")
+        ttk.Button(
+            pasek, text="Pomiń niespójności", command=self._pomin_niespojnosci,
+        ).pack(side="right", padx=6)
         ttk.Button(pasek, text="Anuluj", command=self.destroy).pack(side="right", padx=6)
 
     def _zbuduj_panel_zaufania(self):
@@ -196,10 +211,19 @@ class DialogKorektyImportu(tk.Toplevel):
         seg_a, seg_b = segmenty_roznicy(ostrzezenie.a, ostrzezenie.b)
         etykieta_wyniku = ttk.Label(wiersz, text="", foreground="#1e7a3a")
 
+        klucz = (ostrzezenie.a, ostrzezenie.b)
+
         def wybierz(kanoniczny, odrzucony):
             self.mapowanie_z_ostrzezen[odrzucony] = kanoniczny
             self.mapowanie_z_ostrzezen.pop(kanoniczny, None)
+            self.rozstrzygniecia[klucz] = kanoniczny
             etykieta_wyniku.configure(text=f"→ zostaje „{kanoniczny}”")
+
+        def zostaw_obie():
+            self.mapowanie_z_ostrzezen.pop(ostrzezenie.a, None)
+            self.mapowanie_z_ostrzezen.pop(ostrzezenie.b, None)
+            self.rozstrzygniecia[klucz] = None
+            etykieta_wyniku.configure(text="→ zostają obie")
 
         ttk.Button(
             wiersz, text="◄ zostaw", width=8,
@@ -211,9 +235,60 @@ class DialogKorektyImportu(tk.Toplevel):
             wiersz, text="zostaw ►", width=8,
             command=lambda: wybierz(ostrzezenie.b, ostrzezenie.a),
         ).pack(side="left")
+        ttk.Button(
+            wiersz, text="obie", width=6, command=zostaw_obie,
+        ).pack(side="left", padx=(6, 0))
         etykieta_wyniku.pack(side="left", padx=10)
 
+    def nierozstrzygniete(self):
+        """Różnice w zapisie, przy których użytkownik jeszcze nic nie
+        kliknął. „Zostaw obie” liczy się jako rozstrzygnięcie."""
+        return [o for o in self.ostrzezenia
+                if (o.a, o.b) not in self.rozstrzygniecia]
+
     def _zatwierdz(self):
+        """Ścieżka pełna: nie da się jej domknąć z nierozstrzygniętą pozycją.
+
+        Do 0.1-alpha.4 dało się kliknąć „Zatwierdź” z nietkniętymi
+        różnicami i wchodziły one do bazy jako osobni kurierzy - decyzja
+        zapadała przez nieklikanie, czyli najgorszym możliwym sposobem.
+        """
+        brakujace = self.nierozstrzygniete()
+        if brakujace:
+            messagebox.showwarning(
+                "Nierozstrzygnięte różnice",
+                f"Zostało {len(brakujace)} różnic bez decyzji.\n\n"
+                "Przy każdej wybierz, która forma ma zostać, albo kliknij "
+                "„obie”, jeśli to naprawdę dwie różne osoby.\n\n"
+                "Jeśli nie chcesz teraz tego rozstrzygać, użyj przycisku "
+                "„Pomiń niespójności”.",
+                parent=self,
+            )
+            return
+        self._wykonaj_import()
+
+    def _pomin_niespojnosci(self):
+        """Ścieżka druga, jawna: importuj mimo nierozstrzygniętych różnic.
+
+        Osobny przycisk, nie furtka w tamtej - pominięcie ma być
+        widoczną decyzją, a nie skutkiem zniecierpliwienia. Potwierdzenie
+        mówi wprost, ILE zostanie pominięte i że powstanie plik do poprawy.
+        """
+        brakujace = self.nierozstrzygniete()
+        odpowiedz = messagebox.askyesno(
+            "Pominąć niespójności?",
+            f"Nierozstrzygniętych różnic w zapisie: {len(brakujace)}.\n"
+            "Zostaną zaimportowane jako osobni kurierzy - do scalenia "
+            "później w Słownikach.\n\n"
+            "Wiersze, które nie wejdą do bazy (odrzucone przy walidacji, "
+            "duplikaty, konflikty PNI), zapiszę obok pliku źródłowego "
+            "jako osobny plik do poprawy.\n\nKontynuować?",
+            parent=self,
+        )
+        if odpowiedz:
+            self._wykonaj_import()
+
+    def _wykonaj_import(self):
         mapowanie = {p["z"]: p["na"] for p, var in self.zmienne_propozycji if var.get()}
         mapowanie.update(self.mapowanie_z_ostrzezen)
         wynik = operacje.wykonaj(
@@ -224,8 +299,36 @@ class DialogKorektyImportu(tk.Toplevel):
                     "autor_id": self.autor_id, "sesja_uuid": self.sesja_uuid},
             licz_wiersze=lambda w: w["zaimportowano"],
         )
+        wynik["pliki"] = self._zapisz_do_poprawy(wynik)
         self.destroy()
         self.on_gotowe(wynik)
+
+    def _zapisz_do_poprawy(self, wynik):
+        """Zapisuje plik-resztę i wykaz obok pliku ŹRÓDŁOWEGO.
+
+        Obok źródła, nie w katalogu danych aplikacji: użytkownik wie,
+        gdzie położył swój Excel, a `%LOCALAPPDATA%` jest dla niego
+        miejscem, którego nie znajdzie. Zwraca listę ścieżek albo pustą
+        listę, gdy wszystko weszło.
+        """
+        pozycje = zbierz_odrzucone(self.odrzucone, wynik.get("wymagajace_uwagi", []))
+        if not pozycje or self.sciezka_pliku is None:
+            return []
+
+        katalog = self.sciezka_pliku.parent
+        rdzen = self.sciezka_pliku.stem
+        naglowki = list(self.surowe[0]) if self.surowe else []
+        naglowki = [n for n in naglowki if n != KLUCZ_NUMERU_WIERSZA]
+
+        sciezka_reszty = katalog / f"{rdzen}-do-poprawy.xlsx"
+        eksport.zapisz_niezaimportowane(
+            sciezka_reszty, naglowki,
+            wybierz_niezaimportowane(self.surowe, pozycje),
+            powody={p["numer_wiersza"]: p["powod"] for p in pozycje},
+        )
+        sciezka_wykazu = katalog / f"{rdzen}-odrzucone.xlsx"
+        eksport.zapisz_odrzucone(sciezka_wykazu, pozycje)
+        return [sciezka_reszty, sciezka_wykazu]
 
 
 class ZakladkaImportExport(ttk.Frame):
@@ -282,12 +385,16 @@ class ZakladkaImportExport(ttk.Frame):
             on_gotowe=self._po_imporcie,
             autor_id=self.autor_id, sesja_uuid=self.sesja_uuid,
             status_zaufania=eksport.zweryfikuj_plik(sciezka),
+            sciezka_pliku=sciezka, surowe=surowe,
         )
 
     def _po_imporcie(self, wynik):
         tekst = f"Zaimportowano {wynik['zaimportowano']} wierszy."
         if wynik["wymagajace_uwagi"]:
             tekst += f" Do przejrzenia: {len(wynik['wymagajace_uwagi'])} (konflikty PNI/adres, duplikaty)."
+        pliki = wynik.get("pliki") or []
+        if pliki:
+            tekst += f" Plik do poprawy: {pliki[0].name} (obok pliku źródłowego)."
         self.etykieta_import.configure(text=tekst)
         if self.on_zaimportowano:
             self.on_zaimportowano()

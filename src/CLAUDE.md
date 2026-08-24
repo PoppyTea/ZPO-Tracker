@@ -446,6 +446,19 @@ wartości z pól i wywołanie warstwy logiki:
   `settings.json` ma wpis `zaawansowane.pokaz_wymuszenie_zaufania` I plik
   jest `PLIK_OBCY` — dla `PLIK_ZMODYFIKOWANY` nie powstaje w ogóle, więc
   sfałszowanego pliku nie da się odblokować żadną drogą),
+  **`DialogKorektyImportu` od `0.1-alpha.4` wymusza decyzję**: „Zatwierdź
+  import" nie domyka się z nietkniętą różnicą w zapisie nazwiska, bo
+  wcześniej takie różnice wchodziły do bazy jako osobni kurierzy przez
+  samo NIEKLIKANIE — bez śladu i bez sposobu, żeby odróżnić „to dwie
+  różne osoby" od „nie zauważyłem". Stąd trzeci przycisk **„obie"**:
+  zostawienie obu form jest teraz jawnym wpisem w `rozstrzygniecia`, nie
+  brakiem wpisu. Druga ścieżka to osobny przycisk **„Pomiń niespójności"**
+  z własnym potwierdzeniem podającym liczbę — pominięcie ma być widoczną
+  decyzją, nie skutkiem zniecierpliwienia. Obie ścieżki zapisują
+  `<źródło>-do-poprawy.xlsx` i `<źródło>-odrzucone.xlsx` **obok pliku
+  źródłowego**, nie w katalogu danych: użytkownik wie, gdzie położył swój
+  Excel, a `%LOCALAPPDATA%` jest dla niego miejscem, którego nie znajdzie.
+  Pliki nie powstają, gdy wszystko weszło.),
   `zakladka_slowniki.py` (podzakładki kurierzy/punkty ZPO/wykonawcy/
   rejony/firmy ZPO + **„Nadawcy (bez PNI)"** dołożona na KOŃCU listy, żeby
   nie przesunąć istniejących indeksów `_podzakladki[...]`),
