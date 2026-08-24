@@ -115,6 +115,14 @@ def przygas(kolor, ile):
 KOLORY_STANOW_POLPRZYGASZONE = {k: przygas(v, 0.30) for k, v in KOLORY_STANOW.items()}
 KOLORY_STANOW_PRZYGASZONE = {k: przygas(v, 0.58) for k, v in KOLORY_STANOW.items()}
 
+# Box afordancji rozwijanej listy (wariant A2). Uczestniczy w tej samej
+# rampie co obwódka: pole bez kursora ma przygaszoną obwódkę, więc jasny
+# prostokąt obok niej rozbijałby całość na dwa niezależne sygnały.
+STRZALKA_TLO = PALETA["linia_mocna"]
+STRZALKA_TLO_PRZYGASZONE = przygas(PALETA["linia_mocna"], 0.55)
+STRZALKA_ZNAK = PALETA["tekst"]
+STRZALKA_ZNAK_PRZYGASZONY = PALETA["tekst_wyciszony"]
+
 # Jedna skala zamiast czterech rytmów (padx=2/6/8/16) rozsianych dziś po
 # zakladka_wprowadzanie.py.
 ODSTEPY = (4, 8, 12, 16, 24, 32)

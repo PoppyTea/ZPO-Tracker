@@ -453,7 +453,12 @@ wartości z pól i wywołanie warstwy logiki:
   byłoby zapytaniem do bazy. Strzałka pakuje się z `before=widget_pola`,
   bo pole ma `expand=True` i inaczej zabrałoby całą szerokość; jest
   RODZEŃSTWEM pola, nie warstwą pośrednią, więc test struktury zostaje
-  spełniony. `KOLORY` to re-eksport `styl.KOLORY_STANOW`, nie kopia —
+  spełniony. **Box strzałki uczestniczy w tej samej rampie co obwódka**
+  (`styl.STRZALKA_TLO*`): pole bez kursora przygasza się CAŁE, bo jasny
+  prostokąt obok przygaszonej obwódki rozbijałby pole na dwa niezależne
+  sygnały. Kolor odświeża się przy każdej zmianie fokusu, nie tylko przy
+  tworzeniu strzałki — dedukcja potrafi dać warianty już po tym, jak
+  użytkownik wszedł w pole. `KOLORY` to re-eksport `styl.KOLORY_STANOW`, nie kopia —
   zależność odwrócona, bo moduł tokenów nie powinien pytać widgetu
   o kolory.
 - `widget_pole.py` (wcześniejszy opis) — `PoleZeWskaznikiem` (`0.1-alpha.3.1`): `tk.Frame`

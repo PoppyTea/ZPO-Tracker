@@ -58,6 +58,7 @@ class PoleZeWskaznikiem(tk.Frame):
         self._zablokowane = False
         self._ile_wariantow = 0
         self._strzalka = None
+        self._strzalka_etykieta = None
 
         self.pasek = tk.Frame(self, width=4, background=KOLORY["szary"])
         self.pasek.pack(side="left", fill="y")
@@ -127,22 +128,20 @@ class PoleZeWskaznikiem(tk.Frame):
         """
         self._ile_wariantow = ile_wariantow or 0
         if self._ile_wariantow > 0 and self._strzalka is None:
-            self._strzalka = tk.Frame(
-                self, width=SZEROKOSC_STRZALKI, background=styl.PALETA["linia_mocna"])
+            self._strzalka = tk.Frame(self, width=SZEROKOSC_STRZALKI)
             # `before` jest konieczne: widget pola jest spakowany z
             # expand=True, więc bez tego zabrałby całą szerokość, a box
             # spakowany później nie miałby się gdzie zmieścić.
             self._strzalka.pack(side="right", fill="y", before=self.widget_pola)
             self._strzalka.pack_propagate(False)
-            tk.Label(
-                self._strzalka, text=ZNAK_STRZALKI,
-                background=styl.PALETA["linia_mocna"],
-                foreground=styl.PALETA["tekst"],
-                font=("TkDefaultFont", 7),
-            ).pack(expand=True)
+            self._strzalka_etykieta = tk.Label(
+                self._strzalka, text=ZNAK_STRZALKI, font=("TkDefaultFont", 7))
+            self._strzalka_etykieta.pack(expand=True)
+            self._odswiez_strzalke()
         elif self._ile_wariantow == 0 and self._strzalka is not None:
             self._strzalka.destroy()
             self._strzalka = None
+            self._strzalka_etykieta = None
 
     def zablokuj(self, czy):
         """Miejsce na wygląd zablokowanego pola (0.1-alpha.5, kliknięcie
@@ -165,7 +164,18 @@ class PoleZeWskaznikiem(tk.Frame):
             return KOLORY_POLPRZYGASZONE[self._stan]
         return KOLORY_PRZYGASZONE[self._stan]
 
+    def _odswiez_strzalke(self):
+        """Box strzałki dzieli rampę z obwódką - pole bez kursora
+        przygasza się CAŁE, a nie tylko po obwodzie."""
+        if self._strzalka is None:
+            return
+        tlo = styl.STRZALKA_TLO if self._fokus else styl.STRZALKA_TLO_PRZYGASZONE
+        znak = styl.STRZALKA_ZNAK if self._fokus else styl.STRZALKA_ZNAK_PRZYGASZONY
+        self._strzalka.configure(background=tlo)
+        self._strzalka_etykieta.configure(background=tlo, foreground=znak)
+
     def _odswiez_obwodke(self):
+        self._odswiez_strzalke()
         kolor = self._kolor_obwodki()
         self.configure(
             highlightthickness=GRUBOSC_OBWODKI,

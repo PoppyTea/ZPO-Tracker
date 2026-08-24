@@ -199,3 +199,45 @@ def test_wspiera_widget_z_ustaw_stan_pola(root):
     p.ustaw_aktywnosc(True)
     p.ustaw_aktywnosc(False)
     assert p.widget_pola.wolania == [("normal", 1), ("readonly", 0)]
+
+
+# --- strzałka też uczestniczy w rampie ---------------------------------
+#
+# Papaver 2026-08-24: "potrzebna wersja A2 z przygaszoną ramką dla
+# oznaczenia aktywności". Box strzałki nie może świecić tak samo
+# niezależnie od tego, czy pole jest wypełniane - inaczej pole bez
+# kursora ma obwódkę przygaszoną, a obok niej jasny prostokąt, i całość
+# przestaje czytać się jako jeden element.
+
+def test_strzalka_bez_kursora_jest_przygaszona(pole):
+    pole.ustaw_liste(2)
+    assert pole._strzalka.cget("background") == styl.STRZALKA_TLO_PRZYGASZONE
+
+
+def test_strzalka_z_kursorem_ma_pelny_kolor(pole):
+    pole.ustaw_liste(2)
+    pole.ustaw_fokus(True)
+    assert pole._strzalka.cget("background") == styl.STRZALKA_TLO
+
+
+def test_zmiana_fokusu_odswieza_juz_widoczna_strzalke(pole):
+    """Strzałka powstaje raz, a fokus zmienia się wielokrotnie - kolor
+    musi nadążać, a nie zostać z chwili utworzenia."""
+    pole.ustaw_liste(2)
+    pole.ustaw_fokus(True)
+    pole.ustaw_fokus(False)
+    assert pole._strzalka.cget("background") == styl.STRZALKA_TLO_PRZYGASZONE
+
+
+def test_strzalka_utworzona_przy_fokusie_od_razu_jest_pelna(pole):
+    """Kolejność odwrotna: najpierw kursor, potem dedukcja daje warianty."""
+    pole.ustaw_fokus(True)
+    pole.ustaw_liste(3)
+    assert pole._strzalka.cget("background") == styl.STRZALKA_TLO
+
+
+def test_znak_strzalki_tez_sie_przygasza(pole):
+    pole.ustaw_liste(2)
+    bez = pole._strzalka_etykieta.cget("foreground")
+    pole.ustaw_fokus(True)
+    assert pole._strzalka_etykieta.cget("foreground") != bez
