@@ -43,6 +43,10 @@ PROFIL = profil_kolumn.Profil(
         "miejscowosc": ["Miejscowość", "Miasto"],
         "ulica": ["Ulica"],
         "nr": ["Nr", "Nr domu", "Numer domu"],
+        # Rozpoznawany, ale NIE zapisywany - patrz `_do_zapisu`. Jest tu
+        # po to, żeby kolumna lokalu nie wylądowała przypadkiem w innym
+        # polu ani w "nierozpoznane".
+        "lokal": ["Nr lokalu", "Lokal", "Nr mieszkania"],
         "pna": ["PNA", "Kod pocztowy"],
         "wezel": ["Węzeł", "Węzeł oddawczy", "WER"],
         "tk": ["TK", "Typ kier.", "Typ kierowania"],
@@ -234,6 +238,10 @@ def _nasz_wiersz(wiersz) -> bool:
 
 
 def _do_zapisu(wiersz, rejon):
+    # `lokal` jest świadomie POMIJANY. Rejon jest przypisany do budynku
+    # ("rejon per numer budynku"), więc lokal nie wnosi informacji, a
+    # wciągnięty do klucza rozbiłby deduplikację: pięć mieszkań w jednym
+    # budynku dałoby pięć wierszy mówiących dokładnie to samo.
     miejscowosc = _tekst(wiersz.get("miejscowosc"))
     ulica = _tekst(wiersz.get("ulica"))
     nr = _tekst(wiersz.get("nr"))
@@ -288,10 +296,18 @@ def znajdz_rejon(conn, miejscowosc, ulica, nr):
 
 _NUMER_NA_KONCU = re.compile(r"^(?P<ulica>.*?)[\s,]+(?P<nr>\d+[A-Za-z]?(?:/\d+[A-Za-z]?)?)$")
 
+# Jawne znaczniki lokalu. Tylko one rozstrzygają - goły ukośnik NIE, bo
+# w polskim adresowaniu "12/14" bywa podwójnym numerem jednego budynku
+# równie często, co budynkiem z mieszkaniem.
+_LOKAL_NA_KONCU = re.compile(
+    r"^(?P<reszta>.*?)[\s,]+(?:m|lok|mieszk)\.?[\s]+(?P<lokal>\d+[A-Za-z]?)$",
+    re.IGNORECASE)
+
 
 def rozbij_adres(adres):
     """
-    Wolny tekst -> `(miejscowosc | None, ulica, nr)` albo `None`.
+    Wolny tekst -> `(miejscowosc | None, ulica, budynek, lokal | None)`
+    albo `None`.
 
     Rozpoznaje dwa układy spotykane w danych: `"Ulica 12, Miasto"` oraz
     `"Miasto, Ulica 12"` - decyduje o tym, która część kończy się numerem
@@ -301,6 +317,12 @@ def rozbij_adres(adres):
     Brak numeru budynku oznacza `None`: bez niego nie ma czego szukać,
     a zgadywanie rejonu dla samej ulicy byłoby dokładnie tym, co rejonarz
     ma wyeliminować.
+
+    **Lokal odcinają wyłącznie jawne znaczniki** (`m.`, `lok.`, `mieszk.`).
+    Goły ukośnik zostaje częścią numeru budynku, bo `"12/14"` bywa
+    podwójnym numerem JEDNEGO budynku równie często, co budynkiem
+    z mieszkaniem - rozstrzyga dopiero `znajdz_rejon_dla_adresu`,
+    próbując obu odczytów.
     """
     if not adres or not str(adres).strip():
         return None
@@ -308,21 +330,25 @@ def rozbij_adres(adres):
     if not czesci:
         return None
 
-    if len(czesci) == 1:
-        dopasowanie = _NUMER_NA_KONCU.match(czesci[0])
-        if not dopasowanie or not dopasowanie.group("ulica").strip():
-            return None
-        return None, dopasowanie.group("ulica").strip(), dopasowanie.group("nr")
-
     # Część z numerem na końcu to ulica; pozostała - miejscowość.
     for i, czesc in enumerate(czesci):
+        czesc, lokal = _odetnij_lokal(czesc)
         dopasowanie = _NUMER_NA_KONCU.match(czesc)
         if dopasowanie and dopasowanie.group("ulica").strip():
             miejscowosc = ", ".join(czesci[:i] + czesci[i + 1:]).strip() or None
             return (miejscowosc,
                     dopasowanie.group("ulica").strip(),
-                    dopasowanie.group("nr"))
+                    dopasowanie.group("nr"),
+                    lokal)
     return None
+
+
+def _odetnij_lokal(czesc):
+    """`("Marsa 56 m. 3")` -> `("Marsa 56", "3")`. Bez znacznika - bez zmian."""
+    dopasowanie = _LOKAL_NA_KONCU.match(czesc)
+    if not dopasowanie:
+        return czesc, None
+    return dopasowanie.group("reszta").strip(), dopasowanie.group("lokal")
 
 
 def znajdz_rejon_dla_adresu(conn, adres):
@@ -337,9 +363,26 @@ def znajdz_rejon_dla_adresu(conn, adres):
     rozbite = rozbij_adres(adres)
     if rozbite is None:
         return None
-    miejscowosc, ulica, nr = rozbite
-    if miejscowosc:
-        return znajdz_rejon(conn, miejscowosc, ulica, nr)
+    miejscowosc, ulica, budynek, _lokal = rozbite
+
+    # Dosłowny odczyt numeru ma pierwszeństwo; dopiero gdy nie ma go
+    # w migawce, próbujemy odczytu "budynek/lokal" (patrz rozbij_adres).
+    for kandydat in _odczyty_numeru(budynek):
+        kod = (znajdz_rejon(conn, miejscowosc, ulica, kandydat) if miejscowosc
+               else _po_ulicy_i_numerze(conn, ulica, kandydat))
+        if kod:
+            return kod
+    return None
+
+
+def _odczyty_numeru(budynek):
+    """`"12/14"` -> `["12/14", "12"]`; bez ukośnika jeden odczyt."""
+    if "/" in budynek:
+        return [budynek, budynek.split("/", 1)[0]]
+    return [budynek]
+
+
+def _po_ulicy_i_numerze(conn, ulica, nr):
     rejony = conn.execute(
         "SELECT DISTINCT rejon FROM adresy_rejony WHERE klucz_ulica_nr = ?",
         (klucz_ulica_nr(ulica, nr),),

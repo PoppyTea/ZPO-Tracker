@@ -254,10 +254,10 @@ def test_import_duzego_pliku_konczy_sie_w_rozsadnym_czasie(conn, tmp_path):
 # tekst heurystycznie - ale konserwatywnie: przy wątpliwości NIC.
 
 @pytest.mark.parametrize("adres,oczekiwane", [
-    ("Grochowska 214, Warszawa", ("Warszawa", "Grochowska", "214")),
-    ("Ostrobramska 75C, Warszawa", ("Warszawa", "Ostrobramska", "75C")),
-    ("Warszawa, Marsa 56", ("Warszawa", "Marsa", "56")),
-    ("al. Jerozolimskie 12, Warszawa", ("Warszawa", "al. Jerozolimskie", "12")),
+    ("Grochowska 214, Warszawa", ("Warszawa", "Grochowska", "214", None)),
+    ("Ostrobramska 75C, Warszawa", ("Warszawa", "Ostrobramska", "75C", None)),
+    ("Warszawa, Marsa 56", ("Warszawa", "Marsa", "56", None)),
+    ("al. Jerozolimskie 12, Warszawa", ("Warszawa", "al. Jerozolimskie", "12", None)),
 ])
 def test_rozbija_adres_z_miejscowoscia(adres, oczekiwane):
     assert rejonarz.rozbij_adres(adres) == oczekiwane
@@ -265,7 +265,7 @@ def test_rozbija_adres_z_miejscowoscia(adres, oczekiwane):
 
 def test_rozbija_adres_bez_miejscowosci():
     """Realne dane mają mnóstwo takich - 'Odkryta 24' bez miasta."""
-    assert rejonarz.rozbij_adres("Odkryta 24") == (None, "Odkryta", "24")
+    assert rejonarz.rozbij_adres("Odkryta 24") == (None, "Odkryta", "24", None)
 
 
 @pytest.mark.parametrize("adres", [None, "", "   ", "Warszawa", "bez numeru"])
@@ -302,3 +302,91 @@ def test_nie_zgaduje_gdy_ta_sama_ulica_w_dwoch_miastach(conn, tmp_path):
 def test_nierozbijalny_adres_nie_wybucha(conn, tmp_path):
     rejonarz.zaimportuj(conn, zbuduj_xlsx(tmp_path / "r.xlsx", [wiersz()]))
     assert rejonarz.znajdz_rejon_dla_adresu(conn, "cokolwiek bez numeru") is None
+
+
+# --- lokal (0.1-alpha.3.3, uzupełnienie) -------------------------------
+#
+# Papaver 2026-08-24: format adresu to (miejscowość, ulica, budynek,
+# lokal), gdzie lokal jest opcjonalny. Do tej pory parser go nie znał
+# i "Marsa 56 m. 3" rozbijał na ulicę "Marsa 56 m." i budynek "3" -
+# czyli rejonarz milczał dla KAŻDEGO adresu z lokalem.
+
+@pytest.mark.parametrize("adres,budynek,lokal", [
+    ("Marsa 56 m. 3", "56", "3"),
+    ("Marsa 56 m 3", "56", "3"),
+    ("Marsa 56 lok. 3", "56", "3"),
+    ("Marsa 56 lok 3", "56", "3"),
+    ("Marsa 56 mieszk. 3", "56", "3"),
+    ("Marsa 56A m. 12", "56A", "12"),
+])
+def test_jawny_znacznik_lokalu_odcina_go_od_budynku(adres, budynek, lokal):
+    miejscowosc, ulica, b, lok = rejonarz.rozbij_adres(adres)
+    assert (ulica, b, lok) == ("Marsa", budynek, lokal)
+
+
+def test_lokal_dziala_takze_z_miejscowoscia():
+    assert rejonarz.rozbij_adres("Marsa 56 m. 3, Warszawa") == (
+        "Warszawa", "Marsa", "56", "3")
+
+
+def test_ukosnik_zostaje_czescia_numeru_budynku():
+    """W polskim adresowaniu '12/14' bywa PODWÓJNYM numerem jednego
+    budynku, a nie budynkiem z lokalem. Czytamy dosłownie, bo zgadywanie
+    tutaj dałoby ciche pudło - rozstrzyga dopiero wyszukiwanie, które
+    próbuje obu odczytów."""
+    assert rejonarz.rozbij_adres("Marszałkowska 12/14") == (
+        None, "Marszałkowska", "12/14", None)
+
+
+# --- wyszukiwanie a lokal ----------------------------------------------
+
+def test_lokal_nie_wplywa_na_rejon(conn, tmp_path):
+    """Rejon jest przypisany do BUDYNKU, nie do mieszkania - migawka
+    BaŚKi to 'rejon per numer budynku'."""
+    rejonarz.zaimportuj(conn, zbuduj_xlsx(tmp_path / "r.xlsx", [
+        wiersz(miejscowosc="Warszawa", ulica="Marsa", nr="56", rejon="119")]))
+    assert rejonarz.znajdz_rejon_dla_adresu(conn, "Marsa 56 m. 3, Warszawa") == "WA119"
+    assert rejonarz.znajdz_rejon_dla_adresu(conn, "Marsa 56 lok 12") == "WA119"
+
+
+def test_ukosnik_probuje_obu_odczytow(conn, tmp_path):
+    """Gdy '56/3' nie ma w migawce jako numeru budynku, próbujemy jeszcze
+    odczytu 'budynek 56, lokal 3'. Dosłowny odczyt ma pierwszeństwo."""
+    rejonarz.zaimportuj(conn, zbuduj_xlsx(tmp_path / "r.xlsx", [
+        wiersz(miejscowosc="Warszawa", ulica="Marsa", nr="56", rejon="119")]))
+    assert rejonarz.znajdz_rejon_dla_adresu(conn, "Marsa 56/3, Warszawa") == "WA119"
+
+
+def test_doslowny_numer_z_ukosnikiem_wygrywa(conn, tmp_path):
+    """Jeśli migawka ZNA '12/14' jako numer budynku, to on wygrywa -
+    nie schodzimy do '12'."""
+    rejonarz.zaimportuj(conn, zbuduj_xlsx(tmp_path / "r.xlsx", [
+        wiersz(miejscowosc="Warszawa", ulica="Marszalkowska", nr="12/14", rejon="119"),
+        wiersz(miejscowosc="Warszawa", ulica="Marszalkowska", nr="12", rejon="124"),
+    ]))
+    assert rejonarz.znajdz_rejon_dla_adresu(
+        conn, "Marszalkowska 12/14, Warszawa") == "WA119"
+
+
+def test_import_rozpoznaje_kolumne_lokalu(conn, tmp_path):
+    """Kolumna lokalu ma być ROZPOZNANA (żeby nie wylądowała przypadkiem
+    w innym polu), ale nie trafia do migawki - rejon jest per budynek,
+    więc lokal nie wnosi informacji, a rozbiłby deduplikację."""
+    plik = zbuduj_xlsx(
+        tmp_path / "r.xlsx",
+        [["Warszawa", "Marsa", "56", "3", "119"]],
+        naglowki=["Miejscowość", "Ulica", "Nr domu", "Nr lokalu", "Rejon"],
+    )
+    wynik = rejonarz.zaimportuj(conn, plik)
+    assert wynik.zapisane == 1
+    assert rejonarz.znajdz_rejon(conn, "Warszawa", "Marsa", "56") == "WA119"
+
+
+def test_lokale_w_jednym_budynku_nie_mnoza_wierszy(conn, tmp_path):
+    plik = zbuduj_xlsx(
+        tmp_path / "r.xlsx",
+        [["Warszawa", "Marsa", "56", str(i), "119"] for i in range(1, 6)],
+        naglowki=["Miejscowość", "Ulica", "Nr domu", "Nr lokalu", "Rejon"],
+    )
+    rejonarz.zaimportuj(conn, plik)
+    assert rejonarz.policz(conn) == 1

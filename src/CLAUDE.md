@@ -239,6 +239,15 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   samej ulicy i numerze, ale odpowiada **wyłącznie przy jednoznacznym
   trafieniu** — ta sama ulica w dwóch miastach to nie przypadek do
   rozstrzygnięcia losowaniem.
+  **Lokal** (format adresu to miejscowość / ulica / budynek / lokal,
+  lokal opcjonalny): odcinają go WYŁĄCZNIE jawne znaczniki (`m.`, `lok.`,
+  `mieszk.`). Goły ukośnik zostaje częścią numeru budynku, bo `"12/14"`
+  bywa podwójnym numerem JEDNEGO budynku równie często, co budynkiem
+  z mieszkaniem — rozstrzyga dopiero wyszukiwanie, próbując obu odczytów
+  z pierwszeństwem dosłownego. Lokal jest **rozpoznawany przy imporcie,
+  ale nie zapisywany**: rejon jest przypisany do budynku, więc lokal nie
+  wnosi informacji, a w kluczu rozbiłby deduplikację (pięć mieszkań =
+  pięć wierszy mówiących to samo).
 - `podpowiedzi.py` — silnik podpowiedzi (`podpowiedz`,
   `najlepsza_podpowiedz`), źródło kandydatów wstrzykiwane, nie zaszyte.
 - `uzytkownicy.py` — tożsamość osoby wprowadzającej dane. `users.id` to
