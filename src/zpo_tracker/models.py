@@ -37,6 +37,12 @@ class WierszImportu(BaseModel):
     ilosc_automaty: Optional[int] = Field(default=None, ge=0)
     ilosc_kurier48: Optional[int] = Field(default=None, ge=0)
     ilosc_niezrealizowane: Optional[int] = Field(default=None, ge=0)
+    # Pochodzenie, nie dana: numer wiersza w źródłowym arkuszu. Potrzebny,
+    # żeby konflikt wykryty dopiero PRZY ZAPISIE (duplikat, kolizja PNI)
+    # dało się wskazać w pliku i odłożyć do pliku-reszty. Bez tego takie
+    # wiersze przepadałyby po cichu - jako jedyne nie miałyby jak wrócić
+    # do użytkownika.
+    numer_wiersza: Optional[int] = None
 
     @field_validator("data", mode="before")
     @classmethod

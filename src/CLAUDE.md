@@ -248,6 +248,20 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   ale nie zapisywany**: rejon jest przypisany do budynku, więc lokal nie
   wnosi informacji, a w kluczu rozbiłby deduplikację (pięć mieszkań =
   pięć wierszy mówiących to samo).
+- **Dwa artefakty importu do RÓŻNYCH celów** (`0.1-alpha.3.3`), oba
+  w `eksport.py`: `zapisz_odrzucone` to **wykaz do czytania** (numer
+  wiersza + powód + oryginalne kolumny), a `zapisz_niezaimportowane` to
+  **plik do PRACY** — wierna kopia źródła pozbawiona wierszy, które
+  weszły; poprawia się go i importuje ponownie zamiast wyłuskiwać wiersze
+  z wykazu. Powód dopisuje się tam jako OSTATNIA kolumna, bo przy
+  ponownym imporcie i tak zostanie zignorowana (`_przemapuj` filtruje po
+  `MAPA_NAGLOWKOW`). `import_orchestrator.zbierz_odrzucone` sprowadza dwa
+  różne kształty odrzuceń do jednej listy: walidacja oddaje surowy dict
+  z metadaną `KLUCZ_NUMERU_WIERSZA`, a konflikty duplikatu/PNI wychodzą
+  przy zapisie i niosą `WierszImportu`. Stąd **`WierszImportu.numer_wiersza`**
+  — pochodzenie, nie dana: bez niego wiersze odrzucone dopiero przy
+  zapisie nie miałyby jak wrócić do użytkownika i przepadałyby po cichu.
+  Do danych raportu nie wchodzi w żadnej z tych dwóch postaci.
 - `podpowiedzi.py` — silnik podpowiedzi (`podpowiedz`,
   `najlepsza_podpowiedz`), źródło kandydatów wstrzykiwane, nie zaszyte.
 - `uzytkownicy.py` — tożsamość osoby wprowadzającej dane. `users.id` to

@@ -200,3 +200,97 @@ def test_odczyt_pliku_dokleja_numery_wierszy(tmp_path):
     # wiersz 1, więc pierwsze dane są w wierszu 2.
     assert [w[import_orchestrator.KLUCZ_NUMERU_WIERSZA] for w in wiersze] == [2, 3]
     assert wiersze[0]["Kurier"] == "Kowalski Jan"
+
+
+# --- plik-reszta: kopia oryginału bez zaimportowanych wierszy ----------
+#
+# Papaver 2026-08-24: wygodniejsze od raportu, bo nie trzeba wyłuskiwać
+# wierszy - dostajesz ten sam plik, tylko krótszy o to, co weszło.
+# Poprawiasz i importujesz ponownie ten sam plik.
+
+NAGLOWKI_ZRODLA = ["data", "Kurier", " Pełna Nazwa Nadawcy",
+                   "Adres odbioru dla wszystkich nadawców", "Rejon",
+                   " Wpisujemy łączną liczbę odebranych Pocztexów", "PNI ZPO"]
+
+
+def test_reszta_ma_dokladnie_naglowki_zrodla(tmp_path):
+    sciezka = tmp_path / "reszta.xlsx"
+    eksport.zapisz_niezaimportowane(
+        sciezka, NAGLOWKI_ZRODLA, [_surowy(numer=3)], z_powodem=False)
+    naglowki, _ = _wczytaj(sciezka)
+    assert naglowki == NAGLOWKI_ZRODLA
+
+
+def test_reszta_nie_przecieka_metadana_numeru(tmp_path):
+    sciezka = tmp_path / "reszta.xlsx"
+    eksport.zapisz_niezaimportowane(
+        sciezka, NAGLOWKI_ZRODLA, [_surowy(numer=3)], z_powodem=False)
+    naglowki, _ = _wczytaj(sciezka)
+    assert import_orchestrator.KLUCZ_NUMERU_WIERSZA not in naglowki
+
+
+def test_reszta_zachowuje_wartosci(tmp_path):
+    sciezka = tmp_path / "reszta.xlsx"
+    eksport.zapisz_niezaimportowane(
+        sciezka, NAGLOWKI_ZRODLA, [_surowy(numer=3)], z_powodem=False)
+    _, wiersze = _wczytaj(sciezka)
+    assert wiersze[0][" Pełna Nazwa Nadawcy"] == "Żabka"
+    assert wiersze[0]["PNI ZPO"] == "228648"
+
+
+def test_reszta_moze_dopisac_powod_na_koncu(tmp_path):
+    """Domyślnie dopisujemy powód jako OSTATNIĄ kolumnę - przy ponownym
+    imporcie i tak zostanie zignorowana (mapowanie filtruje po znanych
+    nagłówkach), a bez niej użytkownik nie wie, co poprawić."""
+    sciezka = tmp_path / "reszta.xlsx"
+    eksport.zapisz_niezaimportowane(
+        sciezka, NAGLOWKI_ZRODLA, [_surowy(numer=3)], powody={3: "duplikat"})
+    naglowki, wiersze = _wczytaj(sciezka)
+    assert naglowki[-1] == eksport.NAGLOWEK_POWODU
+    assert wiersze[0][eksport.NAGLOWEK_POWODU] == "duplikat"
+
+
+def test_wybiera_tylko_niezaimportowane():
+    surowe = [_surowy(numer=2), _surowy(numer=3), _surowy(numer=4)]
+    pozycje = [{"numer_wiersza": 3, "powod": "x", "dane": {}}]
+    reszta = import_orchestrator.wybierz_niezaimportowane(surowe, pozycje)
+    assert [w[import_orchestrator.KLUCZ_NUMERU_WIERSZA] for w in reszta] == [3]
+
+
+def test_konflikt_przy_zapisie_tez_trafia_do_reszty():
+    """Duplikaty wychodzą dopiero przy zapisie i niosą WierszImportu -
+    numer wiersza musi przez niego przejść, inaczej te wiersze zniknęłyby
+    z pliku-reszty, czyli po cichu przepadły."""
+    surowe = [_surowy(numer=2), _surowy(numer=5)]
+    zwalidowane, _ = import_orchestrator.zwaliduj_wiersze(surowe)
+    pozycje = import_orchestrator.zbierz_odrzucone(
+        [], [{"wiersz": zwalidowane[1], "powod": "duplikat"}])
+    assert pozycje[0]["numer_wiersza"] == 5
+    reszta = import_orchestrator.wybierz_niezaimportowane(surowe, pozycje)
+    assert len(reszta) == 1
+
+
+def test_numer_wiersza_nie_wchodzi_do_danych_raportu():
+    surowe = [_surowy(numer=5)]
+    zwalidowane, _ = import_orchestrator.zwaliduj_wiersze(surowe)
+    pozycje = import_orchestrator.zbierz_odrzucone(
+        [], [{"wiersz": zwalidowane[0], "powod": "duplikat"}])
+    assert "numer_wiersza" not in pozycje[0]["dane"]
+
+
+def test_plik_reszta_daje_sie_zaimportowac_ponownie(tmp_path):
+    """Zamknięcie pętli: poprawiasz plik-resztę i wrzucasz go z powrotem.
+    Gdyby kolumny albo typy się rozjechały, ta ścieżka by tego nie
+    przeżyła - a to jest dokładnie ten scenariusz, dla którego plik
+    powstaje."""
+    from zpo_tracker.gui.zakladka_import_export import _wczytaj_surowe_wiersze
+
+    sciezka = tmp_path / "reszta.xlsx"
+    eksport.zapisz_niezaimportowane(
+        sciezka, NAGLOWKI_ZRODLA, [_surowy(numer=3)], powody={3: "duplikat"})
+
+    ponownie = _wczytaj_surowe_wiersze(sciezka)
+    zwalidowane, odrzucone = import_orchestrator.zwaliduj_wiersze(ponownie)
+    assert not odrzucone
+    assert zwalidowane[0].kurier == "Kowalski Jan"
+    assert zwalidowane[0].pni_zpo == "228648"

@@ -245,3 +245,43 @@ def zapisz_odrzucone(sciezka, pozycje):
 
     wb.save(sciezka)
     return len(pozycje)
+
+
+def zapisz_niezaimportowane(sciezka, naglowki, wiersze, powody=None, z_powodem=True):
+    """
+    Zapisuje kopię pliku źródłowego POZBAWIONĄ wierszy, które weszły.
+
+    Inny artefakt niż `zapisz_odrzucone` i do innego celu: tamten jest
+    wykazem do czytania, ten jest plikiem do PRACY. Poprawia się go
+    i importuje ponownie, zamiast wyłuskiwać wiersze z raportu.
+
+    Dlatego struktura jest wierna oryginałowi: te same nagłówki, ta sama
+    kolejność, te same wartości. `powody` (numer wiersza -> tekst) dopisują
+    się jako OSTATNIA kolumna - przy ponownym imporcie i tak zostanie
+    zignorowana, bo mapowanie filtruje po znanych nagłówkach, a bez niej
+    użytkownik nie wie, co właściwie ma poprawić. `z_powodem=False` daje
+    kopię co do kolumny.
+    """
+    from zpo_tracker.import_orchestrator import KLUCZ_NUMERU_WIERSZA
+
+    powody = powody or {}
+    kolumny = list(naglowki)
+    if z_powodem:
+        kolumny.append(NAGLOWEK_POWODU)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Do poprawy"
+    ws.append(kolumny)
+
+    for wiersz in wiersze:
+        komorki = [wiersz.get(naglowek) for naglowek in naglowki]
+        if z_powodem:
+            komorki.append(powody.get(wiersz.get(KLUCZ_NUMERU_WIERSZA)))
+        ws.append(komorki)
+        if "PNI ZPO" in naglowki:
+            kolumna = naglowki.index("PNI ZPO") + 1
+            ws.cell(row=ws.max_row, column=kolumna).number_format = "@"
+
+    wb.save(sciezka)
+    return len(wiersze)

@@ -44,7 +44,10 @@ MAPA_NAGLOWKOW = {
 
 
 def _przemapuj(surowy):
-    return {MAPA_NAGLOWKOW[k]: v for k, v in surowy.items() if k in MAPA_NAGLOWKOW}
+    przemapowane = {MAPA_NAGLOWKOW[k]: v for k, v in surowy.items() if k in MAPA_NAGLOWKOW}
+    if KLUCZ_NUMERU_WIERSZA in surowy:
+        przemapowane["numer_wiersza"] = surowy[KLUCZ_NUMERU_WIERSZA]
+    return przemapowane
 
 
 def _pierwszy_blad(wyjatek: ValidationError) -> str:
@@ -74,14 +77,32 @@ def zbierz_odrzucone(odrzucone, wymagajace_uwagi=()):
     for zrodlo in (odrzucone, wymagajace_uwagi):
         for pozycja in zrodlo:
             wiersz = pozycja["wiersz"]
-            dane = dict(wiersz) if isinstance(wiersz, dict) else dict(wiersz)
+            dane = dict(wiersz)
+            # Numer siedzi pod inną nazwą zależnie od etapu: w surowym
+            # wierszu to metadana `__wiersz__`, w zwalidowanym obiekcie
+            # zwykłe pole. Do danych raportu nie wchodzi ani w jednej,
+            # ani w drugiej postaci.
             numer = dane.pop(KLUCZ_NUMERU_WIERSZA, None)
+            numer = dane.pop("numer_wiersza", None) if numer is None else numer
             pozycje.append({
                 "numer_wiersza": numer,
                 "powod": pozycja["powod"],
                 "dane": dane,
             })
     return pozycje
+
+
+def wybierz_niezaimportowane(wiersze_surowe, pozycje):
+    """
+    SUROWE wiersze, które nie trafiły do bazy - w postaci, w jakiej
+    przyszły z pliku.
+
+    Podstawa pliku-reszty: kopii oryginału pozbawionej wierszy, które
+    weszły. Wygodniejsze od raportu, bo poprawia się i importuje ten sam
+    plik, zamiast wyłuskiwać wiersze z wykazu.
+    """
+    numery = {p["numer_wiersza"] for p in pozycje if p["numer_wiersza"] is not None}
+    return [w for w in wiersze_surowe if w.get(KLUCZ_NUMERU_WIERSZA) in numery]
 
 
 def zwaliduj_wiersze(wiersze_surowe):
