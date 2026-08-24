@@ -12,25 +12,23 @@ nie honoruje jej tak samo przewidywalnie.
 """
 import tkinter as tk
 
-# Przestrojone pod CIEMNE tło (2026-08-24) - poprzedni zestaw
-# (#888888/#1e7a3a/#b35c00/#c0392b) był dobrany pod jasne i na ciemnym
-# schodził poniżej progu czytelności: sam zielony miał tam ok. 1.6:1.
-# Wartości niżej mają na `styl.PALETA["tlo"]` od 5.5:1 do 7.0:1, co
-# pilnuje test_kolory_stanow_widoczne_na_tle. Zielony i czerwony trafiają
-# dodatkowo na etykietę statusu jako TEKST, więc dla nich obowiązuje
-# ostrzejszy próg 4.5:1, nie 3:1 jak dla paska wskaźnika.
-#
-# To JEDYNE źródło tych czterech barw w projekcie - `styl.KOLORY_STANOW`
-# jest tym samym obiektem, nie kopią (przypięte testem tożsamości).
-KOLORY = {
-    "szary": "#8b95a5",
-    "zielony": "#4caf6a",
-    "pomaranczowy": "#e0913c",
-    "czerwony": "#e4695c",
-}
+from zpo_tracker.gui import styl
 
-GRUBOSC_AKTYWNE = 2
-GRUBOSC_NASTEPNE = 1
+# Re-eksport, NIE kopia - jedno źródło prawdy siedzi w styl.py, patrz
+# tamtejszy docstring. Nazwa `KOLORY` zostaje dla zgodności z istniejącym
+# kodem (zakladka_wprowadzanie importuje ją stąd).
+KOLORY = styl.KOLORY_STANOW
+KOLORY_POLPRZYGASZONE = styl.KOLORY_STANOW_POLPRZYGASZONE
+KOLORY_PRZYGASZONE = styl.KOLORY_STANOW_PRZYGASZONE
+
+# Grubość jest STAŁA. Wcześniej przełączała się między 0, 1 i 2 px, a to
+# zmienia żądany rozmiar widgetu o 2*grubość na stronę - przez co
+# zawartość komórek siatki skakała przy każdej dedukcji. Sygnał niesie
+# teraz wyłącznie kolor (rampa niżej).
+GRUBOSC_OBWODKI = 1
+
+SZEROKOSC_STRZALKI = 16
+ZNAK_STRZALKI = "▾"
 
 
 class PoleZeWskaznikiem(tk.Frame):
@@ -56,13 +54,23 @@ class PoleZeWskaznikiem(tk.Frame):
         self._stan = "szary"
         self._aktywne = False
         self._nastepne = False
+        self._fokus = False
         self._zablokowane = False
+        self._ile_wariantow = 0
+        self._strzalka = None
 
         self.pasek = tk.Frame(self, width=4, background=KOLORY["szary"])
         self.pasek.pack(side="left", fill="y")
         self.pasek.pack_propagate(False)
         self.widget_pola = fabryka_widgetu_pola(self)
         self.widget_pola.pack(side="left", fill="both", expand=True)
+
+        # add="+" - nie kasujemy bindingów, które widget pola mógł już
+        # mieć (EntryZPodpowiedzia wiesza własne na FocusIn).
+        ogniskowalny = self._widget_ogniskowalny()
+        ogniskowalny.bind("<FocusIn>", lambda e: self.ustaw_fokus(True), add="+")
+        ogniskowalny.bind("<FocusOut>", lambda e: self.ustaw_fokus(False), add="+")
+        self._odswiez_obwodke()
 
     def ustaw_stan(self, stan):
         """stan: jeden z dedukcja.STANY."""
@@ -72,12 +80,14 @@ class PoleZeWskaznikiem(tk.Frame):
 
     def ustaw_aktywnosc(self, aktywne):
         """
-        aktywne=True: pole edytowalne, osiągalne Tabem, dostaje trwałą
-        obwódkę w kolorze bieżącego stanu (aktywne pole zawsze wymaga
-        uwagi - patrz dedukcja.sprawdz_niezmienniki).
+        aktywne=True: pole edytowalne i osiągalne Tabem.
         aktywne=False: readonly (zaznaczalne, ale nieedytowalne) +
         takefocus=0 - dopiero ta kombinacja pomija pole w nawigacji Tab
         (zweryfikowane empirycznie: samo readonly nie wystarcza).
+
+        UWAGA: "aktywne" to NIE to samo co "ma kursor". Od 2026-08-24
+        wyglądem obwódki rządzi fokus (patrz `ustaw_fokus`), a nie ta
+        flaga - pole edytowalne, ale nietknięte, ma być spokojne.
         """
         self._aktywne = aktywne
         stan_tk = "normal" if aktywne else "readonly"
@@ -88,28 +98,77 @@ class PoleZeWskaznikiem(tk.Frame):
             self.widget_pola.configure(state=stan_tk, takefocus=takefocus)
         self._odswiez_obwodke()
 
+    def ustaw_fokus(self, czy):
+        """Pole jest właśnie wypełniane (ma kursor) - pełny kolor stanu.
+
+        Wywoływane samo, z bindingów `<FocusIn>`/`<FocusOut>`; publiczne,
+        żeby dało się je przetestować bez symulowania zdarzeń Tk.
+        """
+        self._fokus = czy
+        self._odswiez_obwodke()
+
     def ustaw_nastepne(self, czy):
-        """Podświetla pole jako NASTĘPNE w kolejności nawigacji - ten sam
-        motyw (kolor) co pole aktywne, cieńsza obwódka. `aktywne` ma
-        pierwszeństwo: pole jednocześnie aktywne i następne pokazuje
-        grubszą obwódkę, nie cichą nadpisankę."""
+        """Pole, na które doprowadzi kolejny Tab. Środkowy stopień rampy -
+        widoczne, ale nie krzyczy jak pole z kursorem."""
         self._nastepne = czy
         self._odswiez_obwodke()
 
+    def ustaw_liste(self, ile_wariantow):
+        """
+        Pokazuje (albo chowa) afordancję rozwijanej listy - wariant A2,
+        czyli szary box z trójkątem po prawej.
+
+        Widget sam nie wie, ile jest kandydatów: `dedukcja.StanPola`
+        rozpakowuje warstwa wyżej, a pytanie dziecka przy każdym renderze
+        oznaczałoby zapytanie do bazy. Stąd jawny argument.
+
+        Do 2026-08-24 pole z listą i pole bez były wizualnie
+        nierozróżnialne, a lista wyskakiwała dopiero po wpisaniu znaku.
+        """
+        self._ile_wariantow = ile_wariantow or 0
+        if self._ile_wariantow > 0 and self._strzalka is None:
+            self._strzalka = tk.Frame(
+                self, width=SZEROKOSC_STRZALKI, background=styl.PALETA["linia_mocna"])
+            # `before` jest konieczne: widget pola jest spakowany z
+            # expand=True, więc bez tego zabrałby całą szerokość, a box
+            # spakowany później nie miałby się gdzie zmieścić.
+            self._strzalka.pack(side="right", fill="y", before=self.widget_pola)
+            self._strzalka.pack_propagate(False)
+            tk.Label(
+                self._strzalka, text=ZNAK_STRZALKI,
+                background=styl.PALETA["linia_mocna"],
+                foreground=styl.PALETA["tekst"],
+                font=("TkDefaultFont", 7),
+            ).pack(expand=True)
+        elif self._ile_wariantow == 0 and self._strzalka is not None:
+            self._strzalka.destroy()
+            self._strzalka = None
+
     def zablokuj(self, czy):
-        """Miejsce na wygląd zablokowanego pola (0.1-alpha.3.2, kliknięcie
+        """Miejsce na wygląd zablokowanego pola (0.1-alpha.5, kliknięcie
         wskaźnika) - nikt jeszcze tego nie ustawia."""
         self._zablokowane = czy
 
+    def _widget_ogniskowalny(self):
+        """EntryZPodpowiedzia trzyma prawdziwy Entry w `.entry`; zwykły
+        ttk.Entry jest sam sobie polem."""
+        return getattr(self.widget_pola, "entry", self.widget_pola)
+
+    def _kolor_obwodki(self):
+        """Trzystopniowa rampa na barwie stanu, zamiast trzech grubości:
+        pełny (kursor tutaj) -> półprzygaszony (tu doprowadzi Tab) ->
+        przygaszony (spokojne). Decyzja Papavera 2026-08-24: W2 dla pola
+        wypełnianego, W3 dla reszty."""
+        if self._fokus:
+            return KOLORY[self._stan]
+        if self._nastepne:
+            return KOLORY_POLPRZYGASZONE[self._stan]
+        return KOLORY_PRZYGASZONE[self._stan]
+
     def _odswiez_obwodke(self):
-        if self._aktywne:
-            grubosc = GRUBOSC_AKTYWNE
-        elif self._nastepne:
-            grubosc = GRUBOSC_NASTEPNE
-        else:
-            grubosc = 0
+        kolor = self._kolor_obwodki()
         self.configure(
-            highlightthickness=grubosc,
-            highlightbackground=KOLORY[self._stan],
-            highlightcolor=KOLORY[self._stan],
+            highlightthickness=GRUBOSC_OBWODKI,
+            highlightbackground=kolor,
+            highlightcolor=kolor,
         )

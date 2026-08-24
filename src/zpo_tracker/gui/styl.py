@@ -7,16 +7,16 @@ o nawigacji (patrz src/CLAUDE.md - "jeśli widget zaczyna decydować... to
 kod należy do modułu logiki"). Zmiana czegokolwiek tutaj nie ma prawa
 zmienić zachowania aplikacji.
 
-Kolory wskaźników stanu pól NIE są tu zdublowane - `KOLORY_STANOW` jest
-tym samym obiektem co `widget_pole.KOLORY`. Dwie kopie tej samej palety
-rozjeżdżają się po cichu przy pierwszej korekcie jednej z nich.
+Kolory wskaźników stanu pól mieszkają TUTAJ - `widget_pole.KOLORY` to
+re-eksport tego samego obiektu, nie kopia. Zależność szła kiedyś odwrotnie
+(styl importował z widgetu), co było przekręcone: moduł tokenów wyglądu
+nie powinien pytać widgetu o kolory.
 """
 import platform
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 
-from zpo_tracker.gui.widget_pole import KOLORY as KOLORY_STANOW
 
 def luminancja(kolor):
     """Względna luminancja wg WCAG 2.1 dla `#rrggbb`."""
@@ -86,6 +86,34 @@ PALETA_JASNA = {
     "akcent_tlo": "#e7edf5",
     "akcent_tekst": "#ffffff",
 }
+
+# Wskaźniki stanu pola (dedukcja.STANY). Przestrojone pod ciemne tło -
+# poprzedni zestaw był dobrany pod jasne i na ciemnym schodził poniżej
+# progu czytelności. Progi pilnuje test_kolory_stanow_widoczne_na_tle.
+KOLORY_STANOW = {
+    "szary": "#8b95a5",
+    "zielony": "#4caf6a",
+    "pomaranczowy": "#e0913c",
+    "czerwony": "#e4695c",
+}
+
+
+def przygas(kolor, ile):
+    """Miesza kolor z tłem. `ile=0` to kolor pełny, `ile=1` to samo tło."""
+    k = kolor.lstrip("#")
+    t = PALETA["tlo"].lstrip("#")
+    return "#%02x%02x%02x" % tuple(
+        round(int(k[i:i + 2], 16) * (1 - ile) + int(t[i:i + 2], 16) * ile)
+        for i in (0, 2, 4)
+    )
+
+
+# Trzystopniowa rampa na tej samej barwie zastępuje trzy różne grubości
+# obwódki (decyzja Papavera 2026-08-24). Grubość jest teraz stała, bo jej
+# przełączanie zmieniało rozmiar widgetu i zawartość komórek skakała przy
+# każdej dedukcji.
+KOLORY_STANOW_POLPRZYGASZONE = {k: przygas(v, 0.30) for k, v in KOLORY_STANOW.items()}
+KOLORY_STANOW_PRZYGASZONE = {k: przygas(v, 0.58) for k, v in KOLORY_STANOW.items()}
 
 # Jedna skala zamiast czterech rytmów (padx=2/6/8/16) rozsianych dziś po
 # zakladka_wprowadzanie.py.

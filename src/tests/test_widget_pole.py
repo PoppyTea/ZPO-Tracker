@@ -10,7 +10,11 @@ import tkinter as tk
 
 import pytest
 
-from zpo_tracker.gui.widget_pole import GRUBOSC_AKTYWNE, GRUBOSC_NASTEPNE, KOLORY, PoleZeWskaznikiem
+from zpo_tracker.gui import styl
+from zpo_tracker.gui.widget_pole import (
+    GRUBOSC_OBWODKI, KOLORY, KOLORY_POLPRZYGASZONE, KOLORY_PRZYGASZONE,
+    PoleZeWskaznikiem,
+)
 
 
 def _ma_display():
@@ -76,39 +80,102 @@ def test_ustaw_aktywnosc_false_readonly_i_pomija_tabem(pole):
     assert int(pole.widget_pola.cget("takefocus")) == 0
 
 
-def test_pole_aktywne_dostaje_grubsza_obwodke_w_kolorze_stanu(pole):
+# --- obwódka: stała grubość, sygnał niesie kolor -----------------------
+#
+# Kontrakt zmieniony 2026-08-24 decyzją Papavera: wariant obwódki zależy
+# od FOKUSU (czy pole jest właśnie wypełniane), nie od tego, czy jest
+# edytowalne. W2 (pełny kolor) dla pola z kursorem, W3 (przygaszony)
+# dla reszty.
+
+@pytest.mark.parametrize("aktywne,nastepne,fokus", [
+    (False, False, False), (True, False, False), (False, True, False),
+    (True, True, True), (True, False, True),
+])
+def test_grubosc_obwodki_jest_stala_w_kazdej_kombinacji(pole, aktywne, nastepne, fokus):
+    """Anty-regresja na realny błąd: grubość przełączana między 0, 1 i 2 px
+    zmienia żądany rozmiar widgetu, więc zawartość komórek siatki skakała
+    przy każdej dedukcji."""
+    pole.ustaw_stan("pomaranczowy")
+    pole.ustaw_aktywnosc(aktywne)
+    pole.ustaw_nastepne(nastepne)
+    pole.ustaw_fokus(fokus)
+    assert int(pole.cget("highlightthickness")) == GRUBOSC_OBWODKI
+
+
+def test_pole_bez_kursora_ma_obwodke_przygaszona(pole):
+    pole.ustaw_stan("zielony")
+    pole.ustaw_aktywnosc(True)
+    assert pole.cget("highlightbackground") == KOLORY_PRZYGASZONE["zielony"]
+
+
+def test_pole_z_kursorem_ma_pelny_kolor_stanu(pole):
     pole.ustaw_stan("pomaranczowy")
     pole.ustaw_aktywnosc(True)
-    assert int(pole.cget("highlightthickness")) == GRUBOSC_AKTYWNE
+    pole.ustaw_fokus(True)
     assert pole.cget("highlightbackground") == KOLORY["pomaranczowy"]
 
 
-def test_pole_nieaktywne_bez_obwodki(pole):
-    pole.ustaw_stan("zielony")
-    pole.ustaw_aktywnosc(False)
-    assert int(pole.cget("highlightthickness")) == 0
-
-
-def test_ustaw_nastepne_daje_cienszy_motyw_niz_aktywne(pole):
-    pole.ustaw_stan("zielony")
-    pole.ustaw_nastepne(True)
-    assert int(pole.cget("highlightthickness")) == GRUBOSC_NASTEPNE
-    assert pole.cget("highlightbackground") == KOLORY["zielony"]
-
-
-def test_aktywne_wygrywa_nad_nastepne(pole):
-    # pole może być JEDNOCZEŚNIE "wymaga uwagi" i "następne w kolejce Tab" -
-    # grubsza obwódka (uwaga) ma priorytet, nie ma cichej nadpisywalności
+def test_nastepne_w_kolejce_jest_posrodku_rampy(pole):
     pole.ustaw_stan("czerwony")
     pole.ustaw_nastepne(True)
-    pole.ustaw_aktywnosc(True)
-    assert int(pole.cget("highlightthickness")) == GRUBOSC_AKTYWNE
+    assert pole.cget("highlightbackground") == KOLORY_POLPRZYGASZONE["czerwony"]
 
 
-def test_wylaczenie_nastepne_zdejmuje_obwodke(pole):
+def test_kursor_wygrywa_nad_nastepnym(pole):
+    """Pole może być jednocześnie wypełniane i następne w kolejce -
+    kursor jest silniejszym sygnałem."""
+    pole.ustaw_stan("czerwony")
     pole.ustaw_nastepne(True)
-    pole.ustaw_nastepne(False)
-    assert int(pole.cget("highlightthickness")) == 0
+    pole.ustaw_fokus(True)
+    assert pole.cget("highlightbackground") == KOLORY["czerwony"]
+
+
+def test_utrata_kursora_wraca_do_przygaszonego(pole):
+    pole.ustaw_stan("zielony")
+    pole.ustaw_fokus(True)
+    pole.ustaw_fokus(False)
+    assert pole.cget("highlightbackground") == KOLORY_PRZYGASZONE["zielony"]
+
+
+@pytest.mark.parametrize("stan", ["szary", "zielony", "pomaranczowy", "czerwony"])
+def test_rampa_jest_monotoniczna(stan):
+    """Trzy stopnie muszą różnić się na tyle, żeby dało się je odróżnić -
+    inaczej rampa jest ozdobą, nie sygnałem."""
+    tlo = styl.PALETA["tlo"]
+    k = [styl.kontrast(m[stan], tlo)
+         for m in (KOLORY_PRZYGASZONE, KOLORY_POLPRZYGASZONE, KOLORY)]
+    assert k[0] < k[1] < k[2]
+    assert k[2] / k[0] > 1.5
+
+
+# --- afordancja rozwijanej listy (wariant A2) --------------------------
+
+def test_bez_wariantow_nie_ma_strzalki(pole):
+    """Pole bez listy ma wyglądać jak zwykłe pole - dokładanie strzałki
+    wszędzie zabiłoby cały sens tego rozróżnienia."""
+    pole.ustaw_liste(0)
+    assert pole._strzalka is None
+
+
+def test_warianty_pokazuja_strzalke(pole):
+    pole.ustaw_liste(2)
+    assert pole._strzalka is not None
+    assert pole._strzalka in pole.winfo_children()
+
+
+def test_zejscie_do_zera_chowa_strzalke(pole):
+    """Dedukcja potrafi przejść z niejednoznacznego w jednoznaczne -
+    strzałka musi wtedy zniknąć, nie zostać sierotą."""
+    pole.ustaw_liste(3)
+    pole.ustaw_liste(0)
+    assert pole._strzalka is None
+
+
+def test_strzalka_nie_rozwala_struktury_widgetu(pole):
+    """Testy nawigacji polegają na tym, że widget pola jest BEZPOŚREDNIM
+    dzieckiem wrappera - strzałka jest rodzeństwem, nie warstwą pośrednią."""
+    pole.ustaw_liste(2)
+    assert pole.widget_pola.winfo_parent() == str(pole)
 
 
 def test_zablokuj_nie_wybucha_i_nic_jeszcze_nie_robi(pole):

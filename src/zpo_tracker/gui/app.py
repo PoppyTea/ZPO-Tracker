@@ -12,6 +12,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from zpo_tracker import blokada, dziennik, kopie, operacje, repo, ustawienia, uzytkownicy, zrzuty
+from zpo_tracker.gui import styl
 from zpo_tracker.gui.dialog_uzytkownika import DialogUzytkownika, DialogWyboruUzytkownika
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
@@ -114,6 +115,10 @@ class Aplikacja(tk.Tk):
         super().__init__()
         self.title("ZPO Tracker")
         self.geometry("1000x700")
+        # Wygląd ustawiany RAZ, przed budową zakładek - wszystkie widgety
+        # ttk podchwytują to bez zmian w ich kodzie. Musi być przed
+        # konstrukcją, bo `theme_use` przebudowuje istniejące widgety.
+        styl.zastosuj_styl(self)
 
         self.sciezka_bazy = sciezka_bazy or _domyslna_sciezka_bazy()
         self.conn = repo.polacz(self.sciezka_bazy)
