@@ -90,6 +90,13 @@ class WierszWidget:
         self._pobierz_nadawcow = pobierz_nadawcow
         self._ustawiam_programowo = False
         self._ilosc_zpo_aktywne = False
+        # Czy wartość w "w tym ZPO" pochodzi od CZŁOWIEKA. Do 0.1-alpha.4.1
+        # rozpoznawaliśmy to po pustości pola - a to przestaje być prawdą
+        # w chwili, gdy autouzupełnienie zadziała pierwszy raz (AID-119).
+        # Pustość nie odróżnia "użytkownik jeszcze nie tknął" od "sami tu
+        # przed chwilą wpisaliśmy", więc pochodzenie musi być śledzone,
+        # a nie zgadywane z wartości.
+        self._zpo_wpisane_recznie = False
         self.ostatni_wynik = None  # dedukcja.WynikWiersza - potrzebne kolejnosc_pol
 
         self.var_rejon = tk.StringVar()
@@ -146,6 +153,7 @@ class WierszWidget:
         # innych pól, patrz dedukcja.py); bramowane wynikiem OSTATNIEJ
         # dedukcji (_ilosc_zpo_aktywne), nie ręcznie wpisanym PNI
         self.var_ilosc_total.trace_add("write", self._uzupelnij_ilosc_zpo)
+        self.var_ilosc_zpo.trace_add("write", self._zapamietaj_pochodzenie_zpo)
 
     def grid(self, wiersz):
         self.pole_rejon.grid(row=wiersz, column=0, padx=2, pady=1, sticky="ew")
@@ -169,11 +177,46 @@ class WierszWidget:
             return
         self.on_zmiana(self)
 
-    def _uzupelnij_ilosc_zpo(self, *_):
+    def _zapamietaj_pochodzenie_zpo(self, *_):
+        """Odróżnia wpis człowieka od naszego autouzupełnienia.
+
+        Nasze zapisy idą przez `_ustaw_zpo`, który podnosi
+        `_ustawiam_programowo` - więc tutaj docierają WYŁĄCZNIE zmiany
+        zrobione z klawiatury.
+
+        Wyczyszczenie pola wraca do trybu automatycznego: "nie chcę tu
+        własnej wartości" to sensowny gest, a bez tego jedna pomyłkowa
+        cyfra blokowałaby automat do końca życia wiersza.
+        """
         if self._ustawiam_programowo:
             return
-        if self._ilosc_zpo_aktywne and not self.var_ilosc_zpo.get().strip():
-            self.var_ilosc_zpo.set(self.var_ilosc_total.get())
+        self._zpo_wpisane_recznie = bool(self.var_ilosc_zpo.get().strip())
+
+    def _ustaw_zpo(self, wartosc):
+        """Zapis programowy - nie może zostać wzięty za wpis człowieka.
+
+        Zagnieżdżenie jest bezpieczne (zapamiętuje poprzedni stan flagi),
+        bo ta metoda bywa wołana także z `zastosuj_dedukcje`, które samo
+        już flagę podniosło.
+        """
+        poprzednio = self._ustawiam_programowo
+        self._ustawiam_programowo = True
+        try:
+            self.var_ilosc_zpo.set(wartosc)
+        finally:
+            self._ustawiam_programowo = poprzednio
+
+    def _uzupelnij_ilosc_zpo(self, *_):
+        """Wyrównuje "w tym ZPO" do "Ilości" przy KAŻDEJ zmianie tej drugiej.
+
+        Wyczyszczenie "Ilości" czyści też to pole - zostawienie sieroty po
+        skasowanej liczbie byłoby gorsze od nieuzupełniania w ogóle.
+        """
+        if self._ustawiam_programowo:
+            return
+        if not self._ilosc_zpo_aktywne or self._zpo_wpisane_recznie:
+            return
+        self._ustaw_zpo(self.var_ilosc_total.get())
 
     def zastosuj_dedukcje(self, wynik):
         """wynik: dedukcja.WynikWiersza. Wypełnia pola dedukowane
@@ -213,8 +256,8 @@ class WierszWidget:
             self._ilosc_zpo_aktywne = stan_zpo.aktywne
             self.pole_ilosc_zpo.ustaw_stan(stan_zpo.stan)
             self.pole_ilosc_zpo.ustaw_aktywnosc(stan_zpo.aktywne)
-            if stan_zpo.wartosc is not None and not self.var_ilosc_zpo.get().strip():
-                self.var_ilosc_zpo.set(str(stan_zpo.wartosc))
+            if stan_zpo.wartosc is not None and not self._zpo_wpisane_recznie:
+                self._ustaw_zpo(str(stan_zpo.wartosc))
         finally:
             self._ustawiam_programowo = False
 
