@@ -193,6 +193,12 @@ class WierszWidget:
                 pole = self._pola[klucz]
                 pole.ustaw_stan(stan.stan)
                 pole.ustaw_aktywnosc(stan.aktywne)
+                # Afordancja rozwijanej listy (A2): pokazujemy strzałkę
+                # WYŁĄCZNIE gdy dedukcja realnie dała warianty do wyboru.
+                # Doklejenie jej wszędzie, gdzie technicznie jest
+                # EntryZPodpowiedzia, zabiłoby sens rozróżnienia - rejon
+                # też jest tym widgetem, a listy nie ma nigdy.
+                pole.ustaw_liste(len(stan.kandydaci or ()))
                 widget = pole.widget_pola
                 if not hasattr(widget, "ustaw_zrodlo_kandydatow"):
                     continue
@@ -398,6 +404,7 @@ class ZakladkaWprowadzanie(ttk.Frame):
                 self.var_wykonawca.set(stan.wartosc)
             self.pole_wykonawca.ustaw_stan(stan.stan)
             self.pole_wykonawca.ustaw_aktywnosc(stan.aktywne)
+            self.pole_wykonawca.ustaw_liste(len(stan.kandydaci or ()))
             self.pole_wykonawca.widget_pola.ustaw_zrodlo_kandydatow(
                 (lambda k=stan.kandydaci: list(k)) if stan.kandydaci else (lambda: []))
         finally:

@@ -436,7 +436,32 @@ wartości z pól i wywołanie warstwy logiki:
   widgetu, ale WYŁĄCZNIE jako prezentacja dedukcji (puste źródło
   kandydatów) — od `0.1-alpha.3.2` nie jest już ręcznie edytowalne, patrz
   `dedukcja.py` niżej.
-- `widget_pole.py` — `PoleZeWskaznikiem` (`0.1-alpha.3.1`): `tk.Frame`
+- `widget_pole.py` — **przebudowany 2026-08-24** (decyzja Papavera po
+  obejrzeniu siatki wariantów). Trzy zmiany kontraktu:
+  (1) **grubość obwódki jest STAŁA** (`GRUBOSC_OBWODKI = 1`); wcześniej
+  przełączała się 0/1/2 px, co zmienia żądany rozmiar widgetu i zawartość
+  komórek skakała przy każdej dedukcji — sygnał niesie teraz wyłącznie
+  kolor. (2) **Wyglądem rządzi FOKUS, nie `aktywne`**: pole z kursorem
+  dostaje pełny kolor stanu (wariant W2), pole bez kursora przygaszony
+  (W3), a „następne w kolejce Tab" trafia w środek rampy. `aktywne`
+  zostaje wyłącznie tym, czym było zawsze — edytowalność i obecność
+  w nawigacji. `ustaw_fokus` jest publiczne mimo automatycznych bindingów
+  `<FocusIn>`/`<FocusOut>`, żeby dało się je testować bez symulowania
+  zdarzeń Tk. (3) **`ustaw_liste(ile)`** — afordancja rozwijanej listy
+  (wariant A2, szary box z `▾`). Widget nie zna liczby kandydatów sam:
+  `StanPola` rozpakowuje warstwa wyżej, a pytanie dziecka przy renderze
+  byłoby zapytaniem do bazy. Strzałka pakuje się z `before=widget_pola`,
+  bo pole ma `expand=True` i inaczej zabrałoby całą szerokość; jest
+  RODZEŃSTWEM pola, nie warstwą pośrednią, więc test struktury zostaje
+  spełniony. **Box strzałki uczestniczy w tej samej rampie co obwódka**
+  (`styl.STRZALKA_TLO*`): pole bez kursora przygasza się CAŁE, bo jasny
+  prostokąt obok przygaszonej obwódki rozbijałby pole na dwa niezależne
+  sygnały. Kolor odświeża się przy każdej zmianie fokusu, nie tylko przy
+  tworzeniu strzałki — dedukcja potrafi dać warianty już po tym, jak
+  użytkownik wszedł w pole. `KOLORY` to re-eksport `styl.KOLORY_STANOW`, nie kopia —
+  zależność odwrócona, bo moduł tokenów nie powinien pytać widgetu
+  o kolory.
+- `widget_pole.py` (wcześniejszy opis) — `PoleZeWskaznikiem` (`0.1-alpha.3.1`): `tk.Frame`
   (NIE `ttk.Frame` — `highlightthickness`/`highlightbackground` na
   obwódkę jest opcją tk-ową) owijający widget pola paskiem koloru stanu
   (`dedukcja.STANY`) + obwódką: "wymaga uwagi" (2px, wygrywa przy

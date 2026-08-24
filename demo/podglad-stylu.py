@@ -42,12 +42,14 @@ PODGLAD = [
 ]
 
 
-def pole(rodzic, wartosc, stan, aktywne, szerokosc):
+def pole(rodzic, wartosc, stan, aktywne, szerokosc, warianty=0, fokus=False):
     var = tk.StringVar(value=wartosc)
     p = PoleZeWskaznikiem(
         rodzic, lambda r: ttk.Entry(r, textvariable=var, width=szerokosc))
     p.ustaw_stan(stan)
     p.ustaw_aktywnosc(aktywne)
+    p.ustaw_liste(warianty)
+    p.ustaw_fokus(fokus)
     p._var = var  # utrzymuje referencję, żeby GC nie zjadł StringVar
     return p
 
@@ -112,7 +114,12 @@ def main():
             row=0, column=kol, padx=2, sticky="ew", pady=(0, 2))
     for nr, (*wartosci, stany, aktywne) in enumerate(WIERSZE, start=1):
         for kol, (wart, stan, akt, s) in enumerate(zip(wartosci, stany, aktywne, szerokosci)):
-            pole(siatka, wart, stan, akt, s).grid(row=nr, column=kol, padx=2, pady=2, sticky="ew")
+            # Drugi wiersz pokazuje oba nowe sygnały naraz: nadawca ma
+            # listę wariantów (strzałka) i trzyma kursor (pełny kolor).
+            warianty = 2 if (nr == 2 and kol in (1, 3)) else 0
+            fokus = (nr == 2 and kol == 1)
+            pole(siatka, wart, stan, akt, s, warianty, fokus).grid(
+                row=nr, column=kol, padx=2, pady=2, sticky="ew")
 
     akcje = ttk.Frame(dol)
     akcje.pack(fill="x", pady=(odstep, 0))
