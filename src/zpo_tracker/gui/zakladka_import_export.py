@@ -15,7 +15,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import openpyxl
 
-from zpo_tracker import eksport, operacje, ustawienia
+from zpo_tracker import eksport, operacje, rejonarz, ustawienia
 from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
     KLUCZ_NUMERU_WIERSZA,
@@ -333,9 +333,10 @@ class DialogKorektyImportu(tk.Toplevel):
 
 class ZakladkaImportExport(ttk.Frame):
     def __init__(self, parent, conn, katalog_danych, on_zaimportowano=None,
-                 autor_id=None, sesja_uuid=None):
+                 autor_id=None, sesja_uuid=None, conn_rejonarz=None):
         super().__init__(parent)
         self.conn = conn
+        self.conn_rejonarz = conn_rejonarz
         self.katalog_danych = katalog_danych
         self.on_zaimportowano = on_zaimportowano
         self.autor_id = autor_id
@@ -346,6 +347,17 @@ class ZakladkaImportExport(ttk.Frame):
         ttk.Button(ramka_import, text="Wybierz plik i importuj", command=self.importuj).pack(anchor="w")
         self.etykieta_import = ttk.Label(ramka_import, text="")
         self.etykieta_import.pack(anchor="w", pady=(6, 0))
+
+        ramka_rejonarz = ttk.LabelFrame(
+            self, text="Rejonarz (BaŚKa) - słownik adres → rejon", padding=10)
+        ramka_rejonarz.pack(fill="x", padx=10, pady=(0, 10))
+        ttk.Button(
+            ramka_rejonarz, text="Wczytaj eksport z BaŚKi...",
+            command=self.importuj_rejonarz,
+        ).pack(anchor="w")
+        self.etykieta_rejonarz = ttk.Label(ramka_rejonarz, text="")
+        self.etykieta_rejonarz.pack(anchor="w", pady=(6, 0))
+        self._odswiez_stan_rejonarza()
 
         ramka_export = ttk.LabelFrame(self, text="Export do .xlsx", padding=10)
         ramka_export.pack(fill="x", padx=10, pady=10)
@@ -398,6 +410,47 @@ class ZakladkaImportExport(ttk.Frame):
         self.etykieta_import.configure(text=tekst)
         if self.on_zaimportowano:
             self.on_zaimportowano()
+
+    def _odswiez_stan_rejonarza(self):
+        if self.conn_rejonarz is None:
+            self.etykieta_rejonarz.configure(text="Niedostępny w tej sesji.")
+            return
+        ile = rejonarz.policz(self.conn_rejonarz)
+        self.etykieta_rejonarz.configure(
+            text=f"Wczytanych adresów: {ile}." if ile
+            else "Brak wczytanego rejonarza - rejon będzie zostawał jako „???”.")
+
+    def importuj_rejonarz(self):
+        """Wczytuje eksport `.xlsx` z BaŚKi do migawki adres → rejon.
+
+        Import PODMIENIA całą migawkę, więc wczytanie kawałka pliku
+        zastępuje to, co było - to jest migawka stanu, nie dziennik
+        przyrostowy (patrz rejonarz.zaimportuj).
+        """
+        if self.conn_rejonarz is None:
+            return
+        sciezka = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")])
+        if not sciezka:
+            return
+        try:
+            wynik = rejonarz.zaimportuj(self.conn_rejonarz, sciezka)
+        except rejonarz.NiezgodnyArkusz as e:
+            # Nazwy kolumn w eksporcie mogą się różnić od tych, których
+            # się spodziewamy - komunikat mówi WPROST czego zabrakło,
+            # zamiast zostawiać użytkownika z "nie zadziałało".
+            messagebox.showerror("Nie rozpoznano arkusza", str(e), parent=self)
+            self.etykieta_rejonarz.configure(text="Nie wczytano - patrz komunikat.")
+            return
+
+        czesci = [f"Wczytano {wynik.zapisane} adresów"]
+        if wynik.pominiete:
+            czesci.append(f"pominięto {wynik.pominiete} spoza węzła "
+                          f"{rejonarz.WEZEL_ZPO}/typu {rejonarz.TYP_KIEROWANIA_ZPO}")
+        if wynik.bez_rejonu:
+            czesci.append(f"{wynik.bez_rejonu} bez rejonu")
+        if wynik.bez_filtrowania:
+            czesci.append("UWAGA: arkusz bez kolumn Węzeł/TK - wzięto wszystko")
+        self.etykieta_rejonarz.configure(text=", ".join(czesci) + ".")
 
     def eksportuj(self):
         try:

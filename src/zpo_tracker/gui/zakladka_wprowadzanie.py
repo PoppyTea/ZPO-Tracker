@@ -230,10 +230,14 @@ class WierszWidget:
 
 
 class ZakladkaWprowadzanie(ttk.Frame):
-    def __init__(self, parent, conn, katalog_danych, on_zapisano=None, sesja_uuid=None):
+    def __init__(self, parent, conn, katalog_danych, on_zapisano=None, sesja_uuid=None,
+                 conn_rejonarz=None):
         super().__init__(parent)
         self.conn = conn
         self.katalog_danych = katalog_danych
+        # Opcjonalne: bez migawki rejonarza dedukcja działa dokładnie tak
+        # jak przedtem (przypięte testem w obie strony).
+        self.conn_rejonarz = conn_rejonarz
         self.on_zapisano = on_zapisano
         # 0.1-alpha.3.2: grupuje wiersze zapisane w tym uruchomieniu
         # aplikacji - mintowane raz w gui/app.py, patrz repo.zapisz_blankiet.
@@ -365,7 +369,8 @@ class ZakladkaWprowadzanie(ttk.Frame):
             self._idz_dalej_wiersz, self._idz_wstecz_wiersz,
         )
         self.wiersze.append(wiersz)
-        wiersz.zastosuj_dedukcje(dedukcja.dedukuj_wiersz(self.conn, kurier="", adres=""))
+        wiersz.zastosuj_dedukcje(dedukcja.dedukuj_wiersz(
+            self.conn, kurier="", adres="", conn_rejonarz=self.conn_rejonarz))
         self._bind_fokus_wiersza(wiersz)
         self._przelicz_wiersze_siatki()
         self._odswiez_kolejnosc()
@@ -415,7 +420,9 @@ class ZakladkaWprowadzanie(ttk.Frame):
         kurier = self.var_kurier.get().strip()
         adres = wiersz.var_adres.get().strip()
         nadawca = wiersz.var_nadawca.get().strip() or None
-        wynik = dedukcja.dedukuj_wiersz(self.conn, kurier=kurier, adres=adres, nadawca=nadawca)
+        wynik = dedukcja.dedukuj_wiersz(
+            self.conn, kurier=kurier, adres=adres, nadawca=nadawca,
+            conn_rejonarz=self.conn_rejonarz)
         wiersz.zastosuj_dedukcje(wynik)
         self._odswiez_kolejnosc()
 

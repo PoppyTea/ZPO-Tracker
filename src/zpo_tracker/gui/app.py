@@ -12,6 +12,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from zpo_tracker import blokada, dziennik, kopie, operacje, repo, ustawienia, uzytkownicy, zrzuty
+from zpo_tracker import rejonarz
 from zpo_tracker.gui import styl
 from zpo_tracker.gui.dialog_uzytkownika import DialogUzytkownika, DialogWyboruUzytkownika
 from zpo_tracker.gui.zakladka_przeglad import ZakladkaPrzeglad
@@ -133,6 +134,12 @@ class Aplikacja(tk.Tk):
         # haki muszą wisieć na instancji Tk: sys.excepthook NIE łapie
         # wyjątków z callbacków widgetów (patrz dziennik.py)
         self.katalog_danych = _katalog_logow(sciezka_bazy)
+        # Migawka rejonarza w OSOBNYM pliku obok bazy. Otwierana zawsze,
+        # nawet pusta - dzięki temu przycisk importu ma dokąd pisać, a
+        # dedukcja i tak zachowuje się identycznie jak bez niej, dopóki
+        # nie ma w niej wierszy (patrz rejonarz.czy_dostepny).
+        self.conn_rejonarz = rejonarz.polacz(
+            rejonarz.sciezka_domyslna(self.katalog_danych))
         dziennik.skonfiguruj(self.katalog_danych)
         dziennik.zainstaluj_haki(self, katalog=self.katalog_danych)
 
@@ -191,13 +198,13 @@ class Aplikacja(tk.Tk):
 
         self.zakladka_wprowadzanie = ZakladkaWprowadzanie(
             self.notebook, self.conn, self.katalog_danych, on_zapisano=odswiez_po_zmianie,
-            sesja_uuid=self.sesja_uuid,
+            sesja_uuid=self.sesja_uuid, conn_rejonarz=self.conn_rejonarz,
         )
         self.notebook.add(self.zakladka_wprowadzanie, text="Wprowadzanie")
 
         self.zakladka_import_export = ZakladkaImportExport(
             self.notebook, self.conn, self.katalog_danych, on_zaimportowano=odswiez_po_zmianie,
-            sesja_uuid=self.sesja_uuid,
+            sesja_uuid=self.sesja_uuid, conn_rejonarz=self.conn_rejonarz,
         )
         self.notebook.add(self.zakladka_import_export, text="Import / Export")
 
