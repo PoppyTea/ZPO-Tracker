@@ -58,6 +58,12 @@ _WARTOWNICY_BASKI = frozenset({"*up", "zpo", "up", "ap", "fup"})
 
 _GOLY_NUMER = re.compile(r"^\d+[A-Za-z]?$")
 _Z_PREFIKSEM = re.compile(r"^[A-Za-z]{1,3}\d+[A-Za-z]?$")
+# Kody czysto literowe (MIG, POU, PP, RDH, WER, WRC, WRT) - potwierdzone
+# w realnym eksporcie "WW - WER Ciemne", gdzie stoją w liście rejonów na
+# równi z numerycznymi, a RDH niesie realne adresy. Granica 2-4 liter
+# wzięta z tego samego zbioru; luźniejszy wzorzec zacząłby przepuszczać
+# nazwy miejscowości.
+_CZYSTO_LITEROWY = re.compile(r"^[A-Za-z]{2,4}$")
 
 
 def normalizuj_rejon_baska(kod: str | None) -> str:
@@ -79,9 +85,17 @@ def normalizuj_rejon_baska(kod: str | None) -> str:
     Filtrowanie po węźle i typie kierowania NIE należy tutaj - to zadanie
     warstwy importu, która widzi cały wiersz, nie samą wartość rejonu.
 
-    Kod z innym prefiksem literowym (`ND1`, `L11`, `Z3` - z wcześniejszej
-    epoki danych) zostaje nietknięty poza podniesieniem wielkości liter;
-    doklejenie `WA` dałoby `WAND1`, czyli gorzej niż zostawienie jak jest.
+    Kod z innym prefiksem literowym (`ND1`, `L11`, `Z3`) zostaje nietknięty
+    poza podniesieniem wielkości liter; doklejenie `WA` dałoby `WAND1`,
+    czyli gorzej niż zostawienie jak jest. Potwierdzone realnym eksportem
+    „WW - WER Ciemne": pod JEDNYM węzłem współistnieją kody gołe (`87`,
+    `106`) i literowe (`K1`, `L11`, `Z3`), a w naszej bazie żyją zarówno
+    `WA87`, jak i `Z3` - czyli reguła jest zgodna z danymi.
+
+    Kody CZYSTO LITEROWE (`PP`, `WER`, `RDH`) też są prawidłowymi
+    rejonami. Nie da się ich odróżnić kształtem od wartowników (`UP`,
+    `AP`, `FUP`) - dlatego lista wartowników jest jawna i sprawdzana
+    PRZED regułą kształtu, a nie wyprowadzana z niej.
     """
     if kod is None:
         return REJON_NIEZNANY
@@ -96,7 +110,7 @@ def normalizuj_rejon_baska(kod: str | None) -> str:
         return REJON_NIEZNANY
     if _GOLY_NUMER.match(kod):
         return PREFIKS_REJONU_WARSZAWA + kod.upper()
-    if _Z_PREFIKSEM.match(kod):
+    if _Z_PREFIKSEM.match(kod) or _CZYSTO_LITEROWY.match(kod):
         return kod.upper()
     # Wszystko inne to najczęściej ścieżka częściowa ("PO-1----") albo
     # kształt, którego nie rozpoznajemy. Zgadywanie tutaj byłoby dokładnie

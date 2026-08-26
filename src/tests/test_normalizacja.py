@@ -203,3 +203,36 @@ def test_smieci_lapia_sie_tak_samo_jak_w_starej_regule(smiec):
 
 def test_prefiks_jest_stala_nie_literalem_w_kodzie():
     assert normalizacja.PREFIKS_REJONU_WARSZAWA == "WA"
+
+
+# --- kody czysto literowe: znalezisko z realnego eksportu WER Ciemne ---
+#
+# Plik "WW - WER Ciemne" ma 219 arkuszy, po jednym na rejon. Nasza reguła
+# odrzucała z nich SIEDEM, bo wzorzec wymagał cyfry: MIG, POU, PP, RDH,
+# WER, WRC, WRT. RDH niesie realne adresy, więc było to ciche gubienie
+# danych. Pozostałe sześć jest dziś puste, ale to kwestia szczęścia,
+# nie poprawności - w liście rejonów BaŚKi stoją na równi z resztą.
+
+@pytest.mark.parametrize("kod", ["MIG", "POU", "PP", "RDH", "WER", "WRC", "WRT"])
+def test_kod_czysto_literowy_jest_prawidlowym_rejonem(kod):
+    assert normalizacja.normalizuj_rejon_baska(kod) == kod
+
+
+def test_kod_czysto_literowy_dostaje_wielkie_litery():
+    assert normalizacja.normalizuj_rejon_baska("rdh") == "RDH"
+
+
+@pytest.mark.parametrize("wartownik", ["UP", "AP", "FUP", "ZPO"])
+def test_wartownicy_nadal_wygrywaja_z_regula_literowa(wartownik):
+    """Krytyczne rozróżnienie: `PP` i `WER` to rejony, a `UP`, `AP`, `FUP`
+    i `ZPO` to wartownicy - mimo że wszystkie są czysto literowe. Nie da
+    się ich odróżnić kształtem, więc lista wartowników musi być jawna
+    i sprawdzana PRZED regułą kształtu."""
+    assert normalizacja.normalizuj_rejon_baska(wartownik) == normalizacja.REJON_NIEZNANY
+
+
+@pytest.mark.parametrize("smiec", ["ABCDE", "A", "Warszawa"])
+def test_zbyt_dlugie_i_zbyt_krotkie_nadal_odrzucane(smiec):
+    """Poluzowanie nie może zamienić się w przyjmowanie czegokolwiek -
+    realne kody mają od dwóch do czterech liter."""
+    assert normalizacja.normalizuj_rejon_baska(smiec) == normalizacja.REJON_NIEZNANY
