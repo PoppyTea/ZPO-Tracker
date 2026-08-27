@@ -39,6 +39,13 @@ docs/internal/**/*
 **/AliasyPNA.xls*
 **/AliasyPNA.csv
 **/*exporty*.zip
+**/sierpienzpoposklejane*
+**/sierpien-zpo-posklejane*
+### Realny miesiąc wpisany przez SZEŚĆ osób - materiał do case study
+### i testów parsera. Najbrudniejsze dane, jakie mamy: różne konwencje
+### zapisu, różne pomysły na nazwy. Nazwa pilnowana niezależnie od
+### katalogu, bo pliki przychodzą przez przeglądarkę i lądują tam, gdzie
+### wskaże okno zapisu.
 **/*WER_Ciemne*
 **/WW__WER*
 docs/internal/baska-rejonarz/AGENTS.md
