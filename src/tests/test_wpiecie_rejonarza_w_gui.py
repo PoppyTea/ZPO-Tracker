@@ -171,3 +171,24 @@ def test_ostrzezenie_gdy_eksport_nie_dal_sie_przefiltrowac():
     tekst = _podsumowanie_wczytania(
         rejonarz.WynikWczytania(rejonarz.RODZAJ_PUNKTY_ZPO, wynik))
     assert "UWAGA" in tekst and "CAŁY plik" in tekst
+
+
+def test_komunikaty_nie_uzywaja_zargonu_bez_wyjasnienia():
+    """
+    Papaver nie zrozumiał komunikatu „arkusz bez kolumn Węzeł/TK - wzięto
+    wszystko" — i to jest wystarczający dowód, że był zły. Program ma być
+    odporny na pomyłkę, a nie wymagać znajomości nazw kolumn w eksporcie
+    BaŚKi, żeby wiedzieć, czy właśnie stało się coś złego.
+
+    Komunikat musi powiedzieć KONSEKWENCJĘ („w słowniku znajdą się cudze
+    rejony"), a nie przyczynę techniczną. Skrót `TK` bez rozwinięcia nie
+    ma prawa się w nim pojawić.
+    """
+    from zpo_tracker.gui.zakladka_import_export import _podsumowanie_wczytania
+
+    tekst = _podsumowanie_wczytania(rejonarz.WynikWczytania(
+        rejonarz.RODZAJ_REJONARZ,
+        rejonarz.WynikImportu(zapisane=100, bez_filtrowania=True)))
+
+    assert "TK" not in tekst
+    assert "cudze rejony" in tekst

@@ -57,18 +57,20 @@ def _podsumowanie_wczytania(wczytane):
     if wczytane.rodzaj == rejonarz.RODZAJ_PUNKTY_ZPO:
         czesci = [f"Punkty ZPO: wczytano {w.zapisane}"]
         if w.pominiete:
-            czesci.append(f"pominięto {w.pominiete} spoza węzłów "
-                          f"{'/'.join(sorted(rejonarz.WEZLY_PUNKTOW))}")
+            czesci.append(f"pominięto {w.pominiete} punktów spoza naszych "
+                          f"placówek ({', '.join(sorted(rejonarz.WEZLY_PUNKTOW))}) "
+                          f"- tak ma być, plik jest ogólnopolski")
         if w.bez_pni:
             czesci.append(f"{w.bez_pni} bez PNI")
         if w.bez_filtrowania:
-            czesci.append("UWAGA: eksport bez kolumny węzła - wzięto CAŁY plik")
+            czesci.append("UWAGA: ten eksport nie mówi, z której placówki są "
+                          "punkty, więc wzięto CAŁY plik ogólnopolski")
         return ", ".join(czesci) + "."
 
     czesci = [f"Rejonarz: wczytano {w.zapisane} adresów"]
     if w.pominiete:
-        czesci.append(f"pominięto {w.pominiete} spoza węzła "
-                      f"{rejonarz.WEZEL_ZPO}/typu {rejonarz.TYP_KIEROWANIA_ZPO}")
+        czesci.append(f"pominięto {w.pominiete} adresów spoza naszej "
+                      f"placówki ({rejonarz.WEZEL_ZPO}) - tak ma być")
     if w.bez_rejonu:
         czesci.append(f"{w.bez_rejonu} bez rejonu")
     if w.arkusze_pominiete:
@@ -80,9 +82,15 @@ def _podsumowanie_wczytania(wczytane):
         # brakiem byłoby myleniem normalnego kształtu pliku z usterką.
         # Ryzyko jest inne i konkretne: to może być eksport CUDZEGO węzła.
         czesci.append(f"rejon wzięty z nazw arkuszy - upewnij się, że to "
-                      f"eksport węzła {rejonarz.WEZEL_ZPO}")
+                      f"eksport NASZEJ placówki ({rejonarz.WEZEL_ZPO}), "
+                      f"bo plik sam tego nie mówi")
     elif w.bez_filtrowania:
-        czesci.append("UWAGA: arkusz bez kolumn Węzeł/TK - wzięto wszystko")
+        # Nie "brak kolumn Węzeł/TK" - to nazywa PRZYCZYNĘ techniczną
+        # i nie mówi nic o tym, co z tym zrobić. Użytkownik ma wiedzieć,
+        # co mu grozi: podpowiedziany rejon z cudzej placówki.
+        czesci.append("UWAGA: ten eksport nie mówi, z której placówki są "
+                      "adresy, więc wzięto wszystkie - jeśli obejmuje inne "
+                      "WER-y, w słowniku znajdą się cudze rejony")
     return ", ".join(czesci) + "."
 
 
