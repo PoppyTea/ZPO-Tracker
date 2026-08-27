@@ -65,7 +65,7 @@ class DialogKorektyImportu(tk.Toplevel):
     def __init__(self, parent, conn, katalog_danych, nazwa_pliku, zwalidowane,
                  odrzucone, propozycje, ostrzezenia, on_gotowe,
                  autor_id=None, sesja_uuid=None, status_zaufania=eksport.PLIK_OBCY,
-                 sciezka_pliku=None, surowe=None):
+                 sciezka_pliku=None, surowe=None, szukaj_rejonarza=None):
         super().__init__(parent)
         self.title("Korekta importu")
         self.geometry("640x560")
@@ -76,6 +76,7 @@ class DialogKorektyImportu(tk.Toplevel):
         self.odrzucone = odrzucone
         self.ostrzezenia = ostrzezenia
         self.on_gotowe = on_gotowe
+        self.szukaj_rejonarza = szukaj_rejonarza
         # 0.1-alpha.3.2: atrybucja i sesja dla wierszy z importu - dotąd
         # import nie pisał żadnej z nich, patrz import_orchestrator.zaimportuj.
         self.autor_id = autor_id
@@ -296,7 +297,11 @@ class DialogKorektyImportu(tk.Toplevel):
             etykieta=self.nazwa_pliku,
             funkcja=zaimportuj, args=(self.zwalidowane,),
             kwargs={"mapowanie_scalen": mapowanie, "zaufany": self.czy_zaufany(),
-                    "autor_id": self.autor_id, "sesja_uuid": self.sesja_uuid},
+                    "autor_id": self.autor_id, "sesja_uuid": self.sesja_uuid,
+                    # Bez tego kaskada dedukcji miejscowości nie ma migawki
+                    # i zachowuje się tak, jakby jej nie było - a to ona
+                    # domyka 75% adresów zamiast 19%.
+                    "szukaj": self.szukaj_rejonarza},
             licz_wiersze=lambda w: w["zaimportowano"],
         )
         wynik["pliki"] = self._zapisz_do_poprawy(wynik)
@@ -398,6 +403,7 @@ class ZakladkaImportExport(ttk.Frame):
             autor_id=self.autor_id, sesja_uuid=self.sesja_uuid,
             status_zaufania=eksport.zweryfikuj_plik(sciezka),
             sciezka_pliku=sciezka, surowe=surowe,
+            szukaj_rejonarza=self._szukaj_rejonarza(),
         )
 
     def _po_imporcie(self, wynik):
@@ -410,6 +416,21 @@ class ZakladkaImportExport(ttk.Frame):
         self.etykieta_import.configure(text=tekst)
         if self.on_zaimportowano:
             self.on_zaimportowano()
+
+    def _szukaj_rejonarza(self):
+        """
+        Migawka jako wstrzykiwana zależność kaskady dedukcji miejscowości.
+
+        `None` zarówno gdy migawki nie ma, jak i gdy jest PUSTA - dla
+        dedukcji to ta sama sytuacja, a rozróżnianie ich dawałoby ciche
+        różnice zachowania między stacją bez importu a stacją, na której
+        import wczytał pusty plik.
+        """
+        if self.conn_rejonarz is None:
+            return None
+        if not rejonarz.czy_dostepny(self.conn_rejonarz):
+            return None
+        return rejonarz.zbuduj_szukaj(self.conn_rejonarz)
 
     def _odswiez_stan_rejonarza(self):
         if self.conn_rejonarz is None:

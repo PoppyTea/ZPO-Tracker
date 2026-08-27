@@ -202,7 +202,8 @@ def get_or_create_adres(conn, surowy, *, szukaj=None, rejon=None,
     return cur.lastrowid
 
 
-def get_or_create_punkt(conn, nadawca, adres, pni_zpo):
+def get_or_create_punkt(conn, nadawca, adres, pni_zpo, *, szukaj=None,
+                        rejon=None, miejscowosci_dnia=()):
     """
     Zwraca (punkt_id, lista_ostrzezen).
 
@@ -241,7 +242,8 @@ def get_or_create_punkt(conn, nadawca, adres, pni_zpo):
             return punkt_id, ostrzezenia
 
         nadawca_id = get_or_create_nadawca(conn, nadawca, liczy_zpo=True)
-        adres_id = get_or_create_adres(conn, adres)
+        adres_id = get_or_create_adres(conn, adres, szukaj=szukaj, rejon=rejon,
+                                 miejscowosci_dnia=miejscowosci_dnia)
         # Ten sam nadawca pod tym samym adresem może już istnieć BEZ PNI:
         # PNI zdobywa się później (z paragonu), a UNIQUE(nadawca_id, adres_id)
         # mówi wprost, że to jeden i ten sam punkt. Dopisujemy więc PNI do
@@ -273,7 +275,8 @@ def get_or_create_punkt(conn, nadawca, adres, pni_zpo):
         return cur.lastrowid, ostrzezenia
 
     nadawca_id = get_or_create_nadawca(conn, nadawca)
-    adres_id = get_or_create_adres(conn, adres)
+    adres_id = get_or_create_adres(conn, adres, szukaj=szukaj, rejon=rejon,
+                                 miejscowosci_dnia=miejscowosci_dnia)
     # Bez predykatu `AND pni_zpo IS NULL`, który miała wersja v3: pod tą samą
     # parą (nadawca, adres) v4 dopuszcza JEDEN punkt, więc wiersz bez PNI
     # trafia w istniejący punkt ZPO zamiast zakładać jego bliźniaka - ta sama
@@ -291,7 +294,8 @@ def get_or_create_punkt(conn, nadawca, adres, pni_zpo):
     return cur.lastrowid, ostrzezenia
 
 
-def znajdz_lub_utworz_punkt_niezaufany(conn, nadawca, adres):
+def znajdz_lub_utworz_punkt_niezaufany(conn, nadawca, adres, *, szukaj=None,
+                                       rejon=None, miejscowosci_dnia=()):
     """
     Punkt dla wiersza z NIEZAUFANEGO pliku (0.1-alpha.3.2): kluczem jest
     wyłącznie (nadawca, adres), bo PNI z takiego źródła jest odrzucane
@@ -354,7 +358,8 @@ def znajdz_lub_utworz_punkt_niezaufany(conn, nadawca, adres):
     # pole "w tym ZPO" na podstawie danych, którym z założenia nie ufamy.
     cur = conn.execute(
         "INSERT INTO punkty (nadawca_id, adres_id, pni_zpo) VALUES (?, ?, NULL)",
-        (get_or_create_nadawca(conn, nadawca), get_or_create_adres(conn, adres)),
+        (get_or_create_nadawca(conn, nadawca), get_or_create_adres(conn, adres, szukaj=szukaj, rejon=rejon,
+                                 miejscowosci_dnia=miejscowosci_dnia)),
     )
     return cur.lastrowid, ostrzezenia
 

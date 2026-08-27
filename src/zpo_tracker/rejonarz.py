@@ -269,6 +269,27 @@ def _zapisz_partie(conn, partia) -> int:
 
 # --- odczyt -------------------------------------------------------------
 
+def zbuduj_szukaj(conn):
+    """
+    Fabryka wstrzykiwanej zależności dla `dedukcja_miejscowosci.dedukuj`.
+
+    Kaskada nie zna SQLite i nie ma go poznać - dostaje callable
+    `klucz_ulica_nr -> wiersze`. Dzięki temu jej testy nie stawiają
+    migawki, a to samo callable obsłuży kiedyś inne źródło (np. API),
+    bez ruszania reguł.
+
+    Pusta migawka oddaje pustą listę, czyli to samo co brak migawki -
+    "zaimportowałem, ale plik był pusty" nie może zachowywać się inaczej
+    niż "nie zaimportowałem".
+    """
+    def szukaj(klucz):
+        return conn.execute(
+            "SELECT miejscowosc, rejon FROM adresy_rejony WHERE klucz_ulica_nr = ?",
+            (klucz,),
+        ).fetchall()
+    return szukaj
+
+
 def znajdz_rejon(conn, miejscowosc, ulica, nr):
     """
     Rejon dla adresu albo `None`.

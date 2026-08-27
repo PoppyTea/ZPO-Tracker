@@ -11,6 +11,7 @@ scalenia w ekranie korekty, ale można je odznaczyć przed zatwierdzeniem
 importu, zamiast scalać na pewno i cofać później.
 """
 import sqlite3
+from collections import defaultdict
 import uuid
 from datetime import datetime
 
@@ -158,7 +159,7 @@ def znajdz_ostrzezenia_podobienstwa_kurierow(zwalidowane):
 
 
 def zaimportuj(conn, zwalidowane, mapowanie_scalen=None, *, zaufany=False,
-                autor_id=None, sesja_uuid=None, teraz=None):
+                autor_id=None, sesja_uuid=None, teraz=None, szukaj=None):
     """
     Zapisuje zwalidowane wiersze do bazy, stosując mapowanie_scalen
     (surowy kurier -> kanoniczny, tylko zaakceptowane w ekranie korekty)
@@ -193,6 +194,13 @@ def zaimportuj(conn, zwalidowane, mapowanie_scalen=None, *, zaufany=False,
     zrodlo = "import_zaufany" if zaufany else "import"
     zaimportowano = 0
     wymagajace_uwagi = []
+    # Miejscowości ustalone już dla tej pary (kurier, dzień) - wejście dla
+    # reguły 4 kaskady. Kurier w ciągu dnia nie krąży po całym WER-ze
+    # (zmierzone: 86% par mieści się w jednej gminie), więc adres
+    # dwuznaczny sam w sobie bywa rozstrzygalny przez sąsiedztwo w trasie.
+    # Klucz jest PARĄ, nie samą partią importu: zlanie wszystkiego dałoby
+    # regule przesłanki z tras, których ten kurier tego dnia nie jechał.
+    kontekst_dnia = defaultdict(set)
 
     for w in zwalidowane:
         kurier_nazwa = mapowanie_scalen.get(w.kurier, w.kurier)
@@ -201,11 +209,30 @@ def zaimportuj(conn, zwalidowane, mapowanie_scalen=None, *, zaufany=False,
         # PNI -> całkowicie pominięte (osobna ścieżka podpinania punktu)
         rejon_id = get_or_create_rejon(conn, w.rejon if zaufany else None)
         wykonawca_id = get_or_create_wykonawca(conn, w.wykonawca)
+        klucz_dnia = (kurier_nazwa, w.data)
+        # Rejon podajemy kaskadzie tylko z pliku ZAUFANEGO - to ta sama
+        # granica, co przy `rejon_id` wyżej. Rejon z papieru bywa zakłamany,
+        # a tutaj wpływałby na to, jaką miejscowość wpiszemy do słownika.
+        kontekst = dict(
+            szukaj=szukaj,
+            rejon=w.rejon if zaufany else None,
+            miejscowosci_dnia=tuple(kontekst_dnia[klucz_dnia]),
+        )
         if zaufany:
-            punkt_id, ostrzezenia = get_or_create_punkt(conn, w.nadawca, w.adres, w.pni_zpo)
+            punkt_id, ostrzezenia = get_or_create_punkt(
+                conn, w.nadawca, w.adres, w.pni_zpo, **kontekst)
         else:
             punkt_id, ostrzezenia = znajdz_lub_utworz_punkt_niezaufany(
-                conn, w.nadawca, w.adres)
+                conn, w.nadawca, w.adres, **kontekst)
+
+        miejscowosc = conn.execute(
+            """SELECT m.nazwa FROM punkty p
+               JOIN adresy a ON a.id = p.adres_id
+               JOIN ulice u ON u.id = a.ulica_id
+               JOIN miejscowosci m ON m.id = u.miejscowosc_id
+               WHERE p.id = ?""", (punkt_id,)).fetchone()
+        if miejscowosc:
+            kontekst_dnia[klucz_dnia].add(miejscowosc[0])
         if ostrzezenia:
             wymagajace_uwagi.append({"wiersz": w, "powod": "; ".join(ostrzezenia)})
 
