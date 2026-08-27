@@ -276,7 +276,8 @@ class Aplikacja(tk.Tk):
         # zostało wywołane, zostawiając zakładki bez autora
         self.zakladka_wprowadzanie.autor_id = self.autor_id
         self.zakladka_import_export.autor_id = self.autor_id
-        if uzytkownicy.wymaga_uzupelnienia(self.conn, self.login_aktywny):
+        if uzytkownicy.czy_pytac_o_dane(
+                self.conn, self.login_aktywny, dane_ustawien):
             # after_idle: okno główne musi być już narysowane, inaczej
             # modal wisi nad pustym prostokątem
             self.after_idle(self._popros_o_dane_uzytkownika)

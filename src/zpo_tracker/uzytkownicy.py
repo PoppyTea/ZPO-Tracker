@@ -110,6 +110,38 @@ def wymaga_uzupelnienia(conn, login):
     return not wiersz["alias"]
 
 
+# Proces logowania jest ŚWIADOMIE WSTRZYMANY. Powód: pracownicy nie mają
+# jeszcze numerów kadrowych, a cała ścieżka tożsamości czeka na
+# rozstrzygnięcie. Dopóki czeka, program nie wita użytkownika okienkiem,
+# którego nie da się sensownie wypełnić.
+#
+# To NIE jest usunięcie funkcji: dialog zostaje osiągalny z menu
+# („Zmień użytkownika…"), a `autor_id` i tak powstaje z loginu Windows,
+# więc atrybucja wpisów działa bez pytania o cokolwiek. Wstrzymane jest
+# wyłącznie zaczepianie człowieka przy starcie.
+LOGOWANIE_WSTRZYMANE = True
+
+
+def czy_pytac_o_dane(conn, login, dane_ustawien=None) -> bool:
+    """
+    Czy pokazać dialog uzupełnienia danych przy starcie.
+
+    Rozdzielone od `wymaga_uzupelnienia` celowo. Tamto jest predykatem
+    o STANIE DANYCH („alias jest pusty") i ma dalej odpowiadać zgodnie
+    z prawdą — na nim stoją inne ścieżki. Wstrzymana jest DECYZJA
+    o pokazaniu okna, a to dwie różne rzeczy i zlanie ich w jedną
+    kazałoby kłamać predykatowi.
+
+    Wznowienie nie wymaga nowego `.exe`: wystarczy wpis
+    `zaawansowane.pytaj_o_dane_uzytkownika` w `settings.json`.
+    """
+    wznowione = bool(
+        (dane_ustawien or {}).get("zaawansowane", {}).get("pytaj_o_dane_uzytkownika"))
+    if LOGOWANIE_WSTRZYMANE and not wznowione:
+        return False
+    return wymaga_uzupelnienia(conn, login)
+
+
 def ostrzezenia_tozsamosci(conn, login, nr_kadrowy):
     """
     Kontrola krzyżowa UUID <-> nr kadrowy. **Miękkie ostrzeżenia, nie
