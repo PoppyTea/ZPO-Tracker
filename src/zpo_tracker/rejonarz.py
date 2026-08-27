@@ -20,12 +20,11 @@ Reszta importów materializuje cały arkusz do listy dictów, co przy
 """
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-import openpyxl
 
-from zpo_tracker import normalizacja, profil_kolumn
+from zpo_tracker import arkusze, normalizacja, profil_kolumn
 
 WERSJA_SCHEMATU = 1
 NAZWA_PLIKU = "rejonarz.db"
@@ -53,6 +52,15 @@ PROFIL = profil_kolumn.Profil(
         "rejon": ["Rejon", "Rejon doręczeń"],
     },
     wymagane=frozenset({"miejscowosc", "nr", "rejon"}),
+)
+
+# Ten sam profil, ale BEZ wymaganego rejonu - dla eksportu, w którym rejon
+# jest nazwą arkusza, a nie kolumną. Osobna stała, nie mutacja tamtej:
+# dwa kształty eksportu przychodzą z BaŚKi naprzemiennie i oba muszą dać
+# się rozpoznać w tym samym przebiegu.
+PROFIL_BEZ_REJONU = profil_kolumn.Profil(
+    pola=PROFIL.pola,
+    wymagane=frozenset({"miejscowosc", "nr"}),
 )
 
 _DDL = """
@@ -91,6 +99,11 @@ class WynikImportu:
     pominiete: int = 0        # inny węzeł albo inny typ kierowania
     bez_rejonu: int = 0       # wartownik albo śmieć w kolumnie rejonu
     bez_filtrowania: bool = False   # arkusz nie miał kolumn Węzeł/TK
+    # Arkusze, z których nie dało się nic wziąć. JAWNIE, nie po cichu:
+    # eksport bywa sklejany z kilku i arkusz "Podsumowanie" jest realny,
+    # ale gdyby znikał bez śladu, tak samo zniknąłby arkusz z literówką
+    # w nazwie rejonu - czyli realna strata danych.
+    arkusze_pominiete: list = field(default_factory=list)
 
 
 # --- schemat i połączenie -----------------------------------------------
@@ -165,66 +178,111 @@ def _tekst(wartosc) -> str:
 
 def zaimportuj(conn, sciezka, rozmiar_partii=ROZMIAR_PARTII) -> WynikImportu:
     """
-    Wczytuje eksport `.xlsx` i PODMIENIA całą migawkę.
+    Wczytuje eksport z BaŚKi i PODMIENIA całą migawkę.
 
     Podmiana, nie dopisanie: to jest migawka stanu, nie dziennik
     przyrostowy. Gdyby import dopisywał, adresy wycofane z BaŚKi
     zostawałyby u nas na zawsze i to właśnie one byłyby najbardziej
     mylące, bo wyglądałyby na potwierdzone.
+
+    Obsługiwane są DWA kształty eksportu, bo oba przychodzą z BaŚKi:
+
+    * jednoarkuszowy z kolumną `Rejon`,
+    * **per-arkusz, gdzie rejon jest NAZWĄ ZAKŁADKI** a w środku stoi samo
+      `Miejscowość | Ulica | Nr | PNA` (tak wygląda realny eksport
+      „WW - WER Ciemne": 219 arkuszy, 277 tys. adresów).
+
+    Kolumna ma pierwszeństwo przed nazwą arkusza. Odwrotna kolejność
+    psułaby eksport jednoarkuszowy o przypadkowej nazwie („Arkusz1"),
+    nadpisując poprawne dane etykietą zakładki.
+
+    Format pliku (`.xls` / `.xlsx`) rozpoznaje `arkusze.otworz` po
+    zawartości - patrz tamten moduł.
     """
-    wb = openpyxl.load_workbook(sciezka, read_only=True, data_only=True)
     wynik = WynikImportu()
-    try:
-        ws = wb[wb.sheetnames[0]]
-        iterator = ws.iter_rows(values_only=True)
-        try:
-            naglowki = list(next(iterator))
-        except StopIteration:
-            naglowki = []
-
-        dopasowanie = profil_kolumn.dopasuj_kolumny(naglowki, PROFIL)
-        if not dopasowanie.kompletne:
-            raise NiezgodnyArkusz(
-                "arkusz nie ma wymaganych kolumn: "
-                + ", ".join(dopasowanie.braki)
-                + f" (rozpoznane: {sorted(set(dopasowanie.mapowanie.values())) or 'brak'})"
-            )
-
-        umie_filtrowac = _umie_filtrowac(dopasowanie)
-        wynik.bez_filtrowania = not umie_filtrowac
-
+    with arkusze.otworz(sciezka) as skoroszyt:
+        nazwy = skoroszyt.nazwy_arkuszy()
         with conn:
             conn.execute("BEGIN")
             conn.execute("DELETE FROM adresy_rejony")
-            partia = []
-            for surowy in iterator:
-                wiersz = profil_kolumn.wyodrebnij(
-                    dict(zip(naglowki, surowy)), dopasowanie)
-                if not any(_tekst(w) for w in wiersz.values()):
-                    continue          # pusty wiersz na końcu arkusza
-                wynik.wczytane += 1
-
-                if umie_filtrowac and not _nasz_wiersz(wiersz):
-                    wynik.pominiete += 1
-                    continue
-
-                rejon = normalizacja.normalizuj_rejon_baska(_tekst(wiersz.get("rejon")))
-                if rejon == normalizacja.REJON_NIEZNANY:
-                    # Wartownik zapisany do migawki sprawiłby, że dedukcja
-                    # odpowiadałaby "???" zamiast milczeć. To dwie różne
-                    # rzeczy: "wiem, że nie wiem" kontra "nie mam wpisu".
-                    wynik.bez_rejonu += 1
-                    continue
-
-                partia.append(_do_zapisu(wiersz, rejon))
-                if len(partia) >= rozmiar_partii:
-                    wynik.zapisane += _zapisz_partie(conn, partia)
-                    partia = []
-            if partia:
-                wynik.zapisane += _zapisz_partie(conn, partia)
-    finally:
-        wb.close()
+            uzyte = 0
+            for nazwa in nazwy:
+                if _wczytaj_arkusz(conn, skoroszyt, nazwa, wynik, rozmiar_partii):
+                    uzyte += 1
+                else:
+                    wynik.arkusze_pominiete.append(nazwa)
+            if not uzyte:
+                # Wyjątek LECI W ŚRODKU transakcji, żeby `DELETE` wyżej
+                # został wycofany. Inaczej nieudany import kasowałby
+                # działającą migawkę i zostawiał użytkownika z niczym.
+                raise NiezgodnyArkusz(
+                    "Żaden arkusz nie nadaje się do wczytania. Sprawdzone: "
+                    + ", ".join(nazwy)
+                    + ". Arkusz musi mieć kolumny "
+                    + ", ".join(sorted(PROFIL_BEZ_REJONU.wymagane))
+                    + " oraz rejon - w kolumnie `Rejon` albo w nazwie zakładki."
+                )
     return wynik
+
+
+def _wczytaj_arkusz(conn, skoroszyt, nazwa, wynik, rozmiar_partii) -> bool:
+    """
+    Wciąga jeden arkusz. `False`, gdy nie da się z niego nic wziąć.
+
+    Zwrócenie `False` zamiast wyjątku jest celowe: jeden nieużyteczny
+    arkusz nie może przewrócić importu 219 pozostałych, a jego nazwa
+    i tak trafia do `WynikImportu.arkusze_pominiete`.
+    """
+    iterator = skoroszyt.wiersze(nazwa)
+    try:
+        naglowki = list(next(iterator))
+    except StopIteration:
+        return False                      # pusty arkusz
+
+    dopasowanie = profil_kolumn.dopasuj_kolumny(naglowki, PROFIL)
+    rejon_arkusza = None
+    if not dopasowanie.kompletne:
+        dopasowanie = profil_kolumn.dopasuj_kolumny(naglowki, PROFIL_BEZ_REJONU)
+        if not dopasowanie.kompletne:
+            iterator.close()
+            return False
+        rejon_arkusza = normalizacja.normalizuj_rejon_baska(nazwa)
+        if rejon_arkusza == normalizacja.REJON_NIEZNANY:
+            # Nazwa zakładki nie jest kodem rejonu (np. "Podsumowanie")
+            # ani jest wartownikiem ("ZPO", "*UP") - nie ma czego przypisać.
+            iterator.close()
+            return False
+
+    if not _umie_filtrowac(dopasowanie):
+        wynik.bez_filtrowania = True
+
+    partia = []
+    for surowy in iterator:
+        wiersz = profil_kolumn.wyodrebnij(dict(zip(naglowki, surowy)), dopasowanie)
+        if not any(_tekst(w) for w in wiersz.values()):
+            continue                      # pusty wiersz na końcu arkusza
+        wynik.wczytane += 1
+
+        if _umie_filtrowac(dopasowanie) and not _nasz_wiersz(wiersz):
+            wynik.pominiete += 1
+            continue
+
+        rejon = rejon_arkusza or normalizacja.normalizuj_rejon_baska(
+            _tekst(wiersz.get("rejon")))
+        if rejon == normalizacja.REJON_NIEZNANY:
+            # Wartownik zapisany do migawki sprawiłby, że dedukcja
+            # odpowiadałaby "???" zamiast milczeć. To dwie różne rzeczy:
+            # "wiem, że nie wiem" kontra "nie mam wpisu".
+            wynik.bez_rejonu += 1
+            continue
+
+        partia.append(_do_zapisu(wiersz, rejon))
+        if len(partia) >= rozmiar_partii:
+            wynik.zapisane += _zapisz_partie(conn, partia)
+            partia = []
+    if partia:
+        wynik.zapisane += _zapisz_partie(conn, partia)
+    return True
 
 
 def _umie_filtrowac(dopasowanie) -> bool:
