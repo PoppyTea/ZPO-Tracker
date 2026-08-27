@@ -6,13 +6,21 @@ requires-python = ">=3.11"
 dependencies = [
     "openpyxl>=3.1",
     "pydantic>=2.0",
+    # Eksporty z BaŚKi przychodzą w starym formacie .xls (OLE2), którego
+    # openpyxl nie otwiera W OGÓLE - to inny format pliku, nie kwestia
+    # wersji. xlrd 2.x obsługuje wyłącznie .xls, więc nie ma ryzyka, że
+    # przejmie obsługę .xlsx. Patrz src/zpo_tracker/arkusze.py.
+    "xlrd>=2.0",
 ]
 
 [project.scripts]
 zpo-tracker = "zpo_tracker.gui.app:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+# xlwt tylko do testów: xlrd wyłącznie CZYTA, więc bez zapisu
+# nie dałoby się WYTWORZYĆ pliku .xls i testy sprawdzałyby
+# podłożony artefakt zamiast realnego kształtu formatu.
+dev = ["pytest>=8.0", "xlwt>=1.3"]
 build = ["pyinstaller>=6.0"]
 
 [tool.pytest.ini_options]
