@@ -576,8 +576,26 @@ def test_cofnij_wybrany_pokazuje_dialog_alternatyw_gdy_migawka_zniknela(tmp_path
         app.zakladka_historia._cofnij_wybrany()
         app.update()
 
-        toplevele = [w for w in app.winfo_children() if isinstance(w, tk.Toplevel)]
-        assert len(toplevele) == 1
+        # Szukamy dialogu PO TYPIE i w CAŁYM drzewie widgetów, nie przez
+        # liczenie okien pod `app`. Poprzednia wersja liczyła
+        # `app.winfo_children()`, a `DialogAlternatywnychMigawek` powstaje
+        # z rodzicem ZAKŁADKI, nie aplikacji - więc nigdy go tam nie było.
+        # Test przechodził, bo naliczał okno logowania, które faktycznie
+        # jest dzieckiem `app`. Sprawdzał więc coś zupełnie innego, niż ma
+        # w nazwie, i wyszło to dopiero po wstrzymaniu logowania.
+        from zpo_tracker.gui.zakladka_historia import DialogAlternatywnychMigawek
+
+        def wszystkie_okna(widget):
+            for dziecko in widget.winfo_children():
+                if isinstance(dziecko, tk.Toplevel):
+                    yield dziecko
+                yield from wszystkie_okna(dziecko)
+
+        toplevele = [w for w in wszystkie_okna(app)
+                     if isinstance(w, DialogAlternatywnychMigawek)]
+        assert len(toplevele) == 1, (
+            "dialog alternatywnych migawek się nie pojawił; znalezione okna: "
+            + repr([type(w).__name__ for w in wszystkie_okna(app)]))
     finally:
         app.destroy()
         dziennik.odepnij()
