@@ -95,15 +95,20 @@ def test_nowy_adres_tworzy_punkt_bez_pni_i_bez_ostrzezen(conn):
     id_nowy, ostrzezenia = znajdz_lub_utworz_punkt_niezaufany(conn, "ZUS", "Senatorska 6/8")
 
     wiersz = conn.execute(
-        "SELECT pni_zpo, firma_zpo_id FROM punkty WHERE id = ?", (id_nowy,)).fetchone()
+        """SELECT p.pni_zpo, n.liczy_zpo FROM punkty p
+           JOIN nadawcy n ON n.id = p.nadawca_id WHERE p.id = ?""",
+        (id_nowy,)).fetchone()
     assert wiersz["pni_zpo"] is None
-    assert wiersz["firma_zpo_id"] is None
+    assert wiersz["liczy_zpo"] == 0
     assert ostrzezenia == []
 
 
-def test_niezaufany_punkt_nigdy_nie_zaklada_wpisu_w_firmy_zpo(conn):
+def test_niezaufany_punkt_nigdy_nie_zapala_flagi_liczy_zpo(conn):
+    # PNI z niezaufanego pliku jest odrzucane w całości, więc nadawca stamtąd
+    # nie ma prawa otworzyć pola "w tym ZPO" - ani wprost, ani bokiem
     znajdz_lub_utworz_punkt_niezaufany(conn, "Żabka", "Odkryta 24")
-    assert conn.execute("SELECT COUNT(*) FROM firmy_zpo").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT liczy_zpo FROM nadawcy WHERE nazwa = 'Żabka'").fetchone()[0] == 0
 
 
 # --- zaimportuj: ścieżka niezaufana ---
@@ -137,11 +142,13 @@ def test_import_niezaufany_wciaz_wnosi_kuriera_adres_i_ilosci(conn):
 
     assert wynik["zaimportowano"] == 1
     wiersz = conn.execute(
-        """SELECT k.imie_nazwisko AS kurier, p.nadawca, p.adres, t.ilosc_total,
-                  w.nazwa AS wykonawca
+        """SELECT k.imie_nazwisko AS kurier, n.nazwa AS nadawca,
+                  a.surowy AS adres, t.ilosc_total, w.nazwa AS wykonawca
            FROM transakcje t
            JOIN kurierzy k ON k.id = t.kurier_id
            JOIN punkty p ON p.id = t.punkt_id
+           JOIN nadawcy n ON n.id = p.nadawca_id
+           JOIN adresy a ON a.id = p.adres_id
            LEFT JOIN wykonawcy w ON w.id = t.wykonawca_id"""
     ).fetchone()
     assert wiersz["kurier"] == "Kowalski Jan"
@@ -169,21 +176,45 @@ def test_import_zaufany_ustawia_zrodlo_import_zaufany_i_zachowuje_pni(conn):
 
 
 def test_import_niezaufany_nie_aktywuje_pola_w_tym_zpo(conn):
-    # czy_nadawca_ma_pni to JEDYNA brama pola "w tym ZPO" (dedukcja.py) -
+    # czy_nadawca_liczy_zpo to JEDYNA brama pola "w tym ZPO" (dedukcja.py) -
     # niezaufany import konstrukcyjnie nie może jej otworzyć
     zwalidowane, _ = zwaliduj_wiersze([_surowy(**{"PNI ZPO": "228648"})])
 
     zaimportuj(conn, zwalidowane, zaufany=False)
 
-    assert repo.czy_nadawca_ma_pni(conn, "Żabka") is False
+    assert repo.czy_nadawca_liczy_zpo(conn, "Żabka") is False
 
 
-def test_import_niezaufany_nie_zasmieca_slownika_firm(conn):
-    zwalidowane, _ = zwaliduj_wiersze([_surowy(**{"PNI ZPO": "228648"})])
+def test_import_niezaufany_wnosi_adres_do_slownika_bo_TEKSTOWI_adresu_ufamy(conn):
+    """
+    Granica zaufania przebiega po KOLUMNACH, nie po pliku. Niezaufany plik
+    nie wnosi PNI ani rejonu, bo tych nie da się zweryfikować ani poprawić
+    okiem. Adres jest inny: człowiek go czyta, rozpoznaje i poprawia, więc
+    wchodzi normalnie - razem z miejscowością i ulicą, jeśli parser je
+    rozłożył. Ta asymetria jest decyzją, nie przeoczeniem, i dlatego ma
+    własny test.
+    """
+    zwalidowane, _ = zwaliduj_wiersze([_surowy(**{
+        "Adres odbioru dla wszystkich nadawców": "Piaseczno, Kwiatowa 8"})])
 
     zaimportuj(conn, zwalidowane, zaufany=False)
 
-    assert conn.execute("SELECT COUNT(*) FROM firmy_zpo").fetchone()[0] == 0
+    assert [r[0] for r in conn.execute("SELECT nazwa FROM miejscowosci")] == ["Piaseczno"]
+    assert [r[0] for r in conn.execute("SELECT nazwa FROM ulice")] == ["Kwiatowa"]
+
+
+def test_import_nierozstrzygnietego_adresu_nie_zaklada_slownika(conn):
+    # ochrona słownika z `importer.get_or_create_adres` obowiązuje tak samo
+    # na ścieżce importu - to nie jest wyjątek, przez który śmieć wchodzi
+    # bokiem. "Metro Ratusz" nie ma numeru, więc parser go nie rozkłada.
+    zwalidowane, _ = zwaliduj_wiersze([_surowy(**{
+        "Adres odbioru dla wszystkich nadawców": "Metro Ratusz"})])
+
+    zaimportuj(conn, zwalidowane, zaufany=False)
+
+    assert conn.execute("SELECT surowy FROM adresy").fetchone()[0] == "Metro Ratusz"
+    assert conn.execute("SELECT COUNT(*) FROM miejscowosci").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM ulice").fetchone()[0] == 0
 
 
 def test_import_niezaufany_nie_dubluje_punktu_istniejacego_z_pni(conn):

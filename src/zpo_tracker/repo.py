@@ -14,8 +14,9 @@ from datetime import datetime
 from pathlib import Path
 
 from zpo_tracker.importer import (
-    get_or_create_firma_zpo,
+    get_or_create_adres,
     get_or_create_kurier,
+    get_or_create_nadawca,
     get_or_create_punkt,
     get_or_create_rejon,
     get_or_create_wykonawca,
@@ -42,7 +43,7 @@ def _resolve_schema_path(frozen=None, meipass=None):
 SCHEMA_PATH = _resolve_schema_path()
 
 # Musi być zgodna z `PRAGMA user_version` na końcu schema.sql - patrz tam.
-WERSJA_SCHEMATU = 3
+WERSJA_SCHEMATU = 4
 
 _licznik_savepointow = itertools.count()
 
@@ -52,7 +53,7 @@ _TABELE_PROSTE = {
     "kurierzy": "imie_nazwisko",
     "wykonawcy": "nazwa",
     "rejony": "kod",
-    "firmy_zpo": "nazwa",
+    "nadawcy": "nazwa",
 }
 
 
@@ -120,6 +121,57 @@ _KOLUMNY_SESJI = {
     "zrodlo": "TEXT",
 }
 
+# Tabele dołożone w `0.1-alpha.4` (schemat v4: adres strukturalny + jedna
+# tabela nadawców). Powtórzone tutaj z `schema.sql` z tego samego powodu co
+# `_DDL_USERS` niżej: `migruj` dokłada brakujące obiekty do ISTNIEJĄCEJ bazy,
+# a `utworz_schemat` wykonałby cały skrypt i wywalił się na pierwszej tabeli,
+# która już jest.
+#
+# Lista instrukcji, a NIE jeden skrypt dla `executescript`: ten robi
+# niejawny COMMIT przed wykonaniem, co zwalnia otwarty SAVEPOINT i wywala
+# `transakcja(conn)` na "no such savepoint" (złapane testem migracji).
+_DDL_V4_SLOWNIKI = ("""
+CREATE TABLE IF NOT EXISTS miejscowosci (
+    id      INTEGER PRIMARY KEY,
+    nazwa   TEXT NOT NULL UNIQUE,
+    gmina   TEXT
+)""", """
+CREATE TABLE IF NOT EXISTS ulice (
+    id              INTEGER PRIMARY KEY,
+    nazwa           TEXT NOT NULL,
+    typ             TEXT,
+    miejscowosc_id  INTEGER NOT NULL REFERENCES miejscowosci(id),
+    UNIQUE(nazwa, miejscowosc_id)
+)""", """
+CREATE TABLE IF NOT EXISTS adresy (
+    id                  INTEGER PRIMARY KEY,
+    surowy              TEXT NOT NULL UNIQUE,
+    ulica_id            INTEGER REFERENCES ulice(id),
+    nr_budynku          TEXT,
+    nr_lokalu           TEXT,
+    pna                 TEXT,
+    stan                TEXT NOT NULL DEFAULT 'surowy',
+    zrodlo_miejscowosci TEXT,
+    rejon_baska         TEXT,
+    rejon_potwierdzony  TEXT
+)""", """
+CREATE INDEX IF NOT EXISTS idx_adresy_ulica ON adresy(ulica_id)""", """
+CREATE TABLE IF NOT EXISTS nadawcy (
+    id          INTEGER PRIMARY KEY,
+    nazwa       TEXT NOT NULL UNIQUE,
+    liczy_zpo   INTEGER NOT NULL DEFAULT 0
+)""")
+
+_DDL_PUNKTY_V4 = """
+CREATE TABLE punkty (
+    id          INTEGER PRIMARY KEY,
+    nadawca_id  INTEGER NOT NULL REFERENCES nadawcy(id),
+    adres_id    INTEGER NOT NULL REFERENCES adresy(id),
+    pni_zpo     TEXT UNIQUE,
+    UNIQUE(nadawca_id, adres_id)
+)
+"""
+
 _DDL_USERS = """
 CREATE TABLE users (
     id          TEXT PRIMARY KEY,
@@ -143,8 +195,20 @@ def migruj(conn):
     Dzięki temu przeżywa też bazy w stanie pośrednim (np. z przerwanej
     wcześniej aktualizacji), które numerowana migracja by pominęła.
 
-    Nie rusza danych - wyłącznie struktura.
+    Struktura, nie dane - z JEDNYM wyjątkiem: przejście na schemat v4
+    przenosi `punkty.nadawca`/`punkty.adres` z tekstu na klucze obce
+    (`_przebuduj_punkty_do_v4`). Tej zmiany nie da się wyrazić dokładaniem
+    kolumn, a wystemplowanie bazy w kształcie v3 numerem v4 byłoby gorsze
+    niż brak migracji: program czytałby wtedy kolumny, których tam nie ma,
+    już po nadpisaniu dobrych danych migawką.
+
+    Przebudowa idzie PIERWSZA i w osobnej transakcji, bo kolejne kroki
+    zakładają kształt v4 (indeks po `punkty.adres_id`). Awaria między
+    krokami zostawia `user_version` niepodniesioną, więc następny start
+    powtarza całość - dokładnie po to ta funkcja jest idempotentna.
     """
+    _przebuduj_punkty_do_v4(conn)
+
     with transakcja(conn):
         if not _istnieje_tabela(conn, "users"):
             conn.execute(_DDL_USERS)
@@ -164,7 +228,9 @@ def migruj(conn):
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_transakcje_kurier ON transakcje(kurier_id)")
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_punkty_adres ON punkty(adres)")
+            "CREATE INDEX IF NOT EXISTS idx_punkty_adres ON punkty(adres_id)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_punkty_nadawca ON punkty(nadawca_id)")
 
         # 0.1-alpha.3.2: sesja_uuid + zrodlo (dołożone niezależnie od
         # _KOLUMNY_ATRYBUCJI, żeby baza w stanie pośrednim - np. tylko
@@ -179,11 +245,108 @@ def migruj(conn):
         conn.execute(f"PRAGMA user_version = {WERSJA_SCHEMATU}")
 
 
+def _przebuduj_punkty_do_v4(conn):
+    """
+    v3 -> v4: `punkty.nadawca`/`punkty.adres` (tekst) na klucze obce do
+    `nadawcy` i `adresy`. No-op dla bazy, która już ma kształt v4.
+
+    `punkty.id` jest ZACHOWYWANE, bo `transakcje.punkt_id` na nie wskazuje -
+    przenumerowanie punktów oznaczałoby przepisanie całego dziennika
+    transakcji, czyli tę jedną tabelę, której nie wolno ruszyć.
+
+    Dwa wiersze v3 mogły opisywać ten sam punkt: v3 NIE miało
+    `UNIQUE(nadawca, adres)`, więc wiersz z PNI potrafił powstać obok
+    identycznego bez PNI. Takie pary zlepiają się teraz w jeden punkt,
+    a ich transakcje przepina `_scal_punkty` - przy kolizji
+    `UNIQUE(data, kurier, punkt)` rzuca `KolizjaTransakcji` i wycofuje
+    całość, zamiast po cichu wyrzucić wiersz.
+
+    PRAGMA foreign_keys jest ignorowana WEWNĄTRZ transakcji, więc
+    przełączamy ją przed SAVEPOINT-em. `legacy_alter_table` jest tu
+    konieczne razem z nią: bez niego `ALTER TABLE ... RENAME` przepisuje
+    klauzulę REFERENCES w `transakcje` na nową nazwę tabeli i dziennik
+    zostaje przypięty do tabeli, którą za chwilę kasujemy (sprawdzone
+    empirycznie - `PRAGMA foreign_key_check` pokazuje wtedy każdy wiersz).
+    """
+    if not _istnieje_tabela(conn, "punkty") or "nadawca_id" in _kolumny(conn, "punkty"):
+        return
+    if conn.in_transaction:
+        raise RuntimeError(
+            "_przebuduj_punkty_do_v4 wymaga połączenia poza transakcją - "
+            "PRAGMA foreign_keys nie działa w jej środku, a bez niej "
+            "podmiana tabeli `punkty` rozpina dziennik transakcji.")
+
+    fk_bylo_wlaczone = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute("PRAGMA legacy_alter_table = ON")
+    try:
+        with transakcja(conn):
+            for instrukcja in _DDL_V4_SLOWNIKI:
+                conn.execute(instrukcja)
+            _przenies_firmy_zpo_do_nadawcow(conn)
+            stare = conn.execute(
+                "SELECT id, nadawca, adres, pni_zpo FROM punkty ORDER BY id").fetchall()
+            conn.execute("ALTER TABLE punkty RENAME TO punkty_v3")
+            conn.execute(_DDL_PUNKTY_V4)
+            for stary in stare:
+                _przenies_punkt_do_v4(conn, stary)
+            conn.execute("DROP TABLE punkty_v3")
+            if _istnieje_tabela(conn, "firmy_zpo"):
+                conn.execute("DROP TABLE firmy_zpo")
+    finally:
+        conn.execute("PRAGMA legacy_alter_table = OFF")
+        conn.execute(f"PRAGMA foreign_keys = {'ON' if fk_bylo_wlaczone else 'OFF'}")
+
+
+def _przenies_firmy_zpo_do_nadawcow(conn):
+    """
+    `firmy_zpo` trzymała nazwy sieci - czyli dokładnie tych nadawców, dla
+    których wypełnia się "w tym ZPO". Wpis mógł tam powstać ręcznie w
+    Słownikach, zanim powstał pierwszy punkt, więc przepisujemy CAŁĄ tabelę,
+    nie tylko nazwy używane przez punkty.
+    """
+    if not _istnieje_tabela(conn, "firmy_zpo"):
+        return
+    for firma in conn.execute("SELECT nazwa FROM firmy_zpo").fetchall():
+        get_or_create_nadawca(conn, firma["nazwa"], liczy_zpo=True)
+
+
+def _przenies_punkt_do_v4(conn, stary):
+    nadawca_id = get_or_create_nadawca(
+        conn, stary["nadawca"], liczy_zpo=bool(stary["pni_zpo"]))
+    adres_id = get_or_create_adres(conn, stary["adres"])
+    istniejacy = conn.execute(
+        "SELECT id, pni_zpo FROM punkty WHERE nadawca_id = ? AND adres_id = ?",
+        (nadawca_id, adres_id),
+    ).fetchone()
+    if istniejacy is None:
+        conn.execute(
+            "INSERT INTO punkty (id, nadawca_id, adres_id, pni_zpo) VALUES (?, ?, ?, ?)",
+            (stary["id"], nadawca_id, adres_id, stary["pni_zpo"]),
+        )
+        return
+
+    if stary["pni_zpo"] and istniejacy["pni_zpo"] is None:
+        conn.execute(
+            "UPDATE punkty SET pni_zpo = ? WHERE id = ?",
+            (stary["pni_zpo"], istniejacy["id"]))
+    elif stary["pni_zpo"] and istniejacy["pni_zpo"] != stary["pni_zpo"]:
+        # dwa PNI na tę samą parę nadawca+adres - v4 dopuszcza tam jeden
+        # punkt, więc jedno z nich musi odpaść. NIE po cichu: to jedyna
+        # informacja, która na tej ścieżce faktycznie ginie.
+        logging.getLogger("zpo_tracker").warning(
+            "migracja v4: punkty %s i %s to ta sama para nadawca+adres, ale "
+            "mają różne PNI ZPO (%r vs %r) - zachowano pierwsze, drugie "
+            "przepadło; wymaga człowieka",
+            istniejacy["id"], stary["id"], istniejacy["pni_zpo"], stary["pni_zpo"])
+    _scal_punkty(conn, stary["id"], istniejacy["id"],
+                 powod="przy przejściu na schemat v4")
+
+
 def napraw_dane(conn):
     """
-    Naprawa rozjazdów danych sprzed reguły "???" (rejony) i sprzed poprawki
-    firmy_zpo/punkty.nadawca (patrz importer.py, zmien_nazwe_w_slowniku) -
-    BEZWARUNKOWA i idempotentna jak `migruj`, ale CELOWO POZA `migruj`:
+    Naprawa rozjazdów danych sprzed reguły "???" (rejony) - BEZWARUNKOWA
+    i idempotentna jak `migruj`, ale CELOWO POZA `migruj`:
 
     - `migruj` biegnie w konstruktorze `Aplikacja.__init__`, a `main()`
       łapie wyłącznie `NiezgodnaWersjaSchematu` - każdy inny wyjątek w
@@ -192,8 +355,8 @@ def napraw_dane(conn):
       konsoli. Naprawa danych ma więcej sposobów, żeby pójść nie tak, niż
       dodanie kolumny - nie może dzielić z migracją struktury tego samego,
       nieprzepuszczającego błędów miejsca w kodzie.
-    - `migruj` deklaruje wprost "Nie rusza danych - wyłącznie struktura"
-      (patrz wyżej) - to nie jest miejsce na naprawę danych.
+    - `migruj` deklaruje strukturę, nie dane (patrz wyżej) - to nie jest
+      miejsce na naprawę danych.
     - Naprawa w `migruj` odpaliłaby się raz (bramkowana numerem wersji) -
       po scaleniu (`scalanie.py`) z bazą, która sama tej naprawy jeszcze
       nie przeszła, rozjazd wróciłby i nic by go już nie naprawiło.
@@ -202,10 +365,17 @@ def napraw_dane(conn):
     (przez `operacje.wykonaj` - to największa jednorazowa mutacja danych
     w tym wydaniu) i za degradację "nie naprawiono, pracuj dalej" przy
     wyjątku - nie za przerwanie startu aplikacji.
+
+    ZOSTAŁ TU JUŻ TYLKO JEDEN KROK, i to jest cel schematu v4, nie skutek
+    uboczny. Drugim była naprawa rozjazdu `firmy_zpo.nazwa` z
+    `punkty.nadawca`: nazwa nadawcy żyła w dwóch miejscach naraz, więc
+    dawała się rozjechać, a naprawa musiała zgadywać, która kopia jest
+    prawdziwa (i przy okazji robiła z samodzielnego sklepu jednoelementową
+    sieć). W v4 nazwa istnieje w jednym miejscu - `nadawcy.nazwa` - i ten
+    rozjazd nie ma jak powstać. Usunięto problem, nie obudowano go.
     """
     with transakcja(conn):
         _napraw_rejony(conn)
-        _napraw_firmy_zpo(conn)
 
 
 def _napraw_rejony(conn):
@@ -221,67 +391,6 @@ def _napraw_rejony(conn):
             conn.execute("DELETE FROM rejony WHERE id = ?", (row["id"],))
     conn.execute(
         "UPDATE transakcje SET rejon_id = ? WHERE rejon_id IS NULL", (kanoniczny_id,))
-
-
-def _napraw_firmy_zpo(conn):
-    # 1. punkty z PNI bez firma_zpo_id - prawdopodobnie no-op już dziś
-    # (get_or_create_punkt zawsze go ustawia, gdy PNI jest niepuste), ale
-    # tania i bezpieczna gwarancja na wypadek stanu z innej ścieżki zapisu
-    for p in conn.execute(
-        "SELECT id, nadawca FROM punkty WHERE pni_zpo IS NOT NULL AND firma_zpo_id IS NULL"
-    ).fetchall():
-        firma_id = get_or_create_firma_zpo(conn, p["nadawca"])
-        conn.execute("UPDATE punkty SET firma_zpo_id = ? WHERE id = ?", (firma_id, p["id"]))
-
-    # 2. rozjazd nazwa firmy <-> nadawca jej punktów (bug naprawiony w
-    # importer.py/repo.zmien_nazwe_w_slowniku - to naprawa STARYCH danych)
-    for firma in conn.execute("SELECT id, nazwa FROM firmy_zpo").fetchall():
-        nadawcy = [r[0] for r in conn.execute(
-            "SELECT DISTINCT nadawca FROM punkty WHERE firma_zpo_id = ?", (firma["id"],)
-        ).fetchall()]
-        if len(nadawcy) == 1 and nadawcy[0] != firma["nazwa"]:
-            _przemianuj_lub_scal_firme(conn, firma["id"], nadawcy[0])
-        elif len(nadawcy) > 1:
-            logging.getLogger("zpo_tracker").warning(
-                "napraw_dane: firma_zpo id=%s (%r) ma punkty z %d różnymi "
-                "nadawcami %r - nie rozstrzygnięto automatycznie, wymaga człowieka",
-                firma["id"], firma["nazwa"], len(nadawcy), nadawcy,
-            )
-
-    # 3. osierocone firmy (żaden punkt) - kasujemy TYLKO gdy nazwa po
-    # klucz_rozmyty pokrywa się z inną, UŻYWANĄ firmą (artefakt literówki
-    # z importu); o unikalnej nazwie mogła zostać dodana ręcznie w
-    # Słownikach zanim powstał pierwszy punkt - tej nie ruszamy
-    wszystkie = conn.execute("SELECT id, nazwa FROM firmy_zpo").fetchall()
-    uzywane_id = {
-        r[0] for r in conn.execute(
-            "SELECT DISTINCT firma_zpo_id FROM punkty WHERE firma_zpo_id IS NOT NULL"
-        ).fetchall()
-    }
-    uzywane_klucze = {
-        klucz_rozmyty(nazwa) for id_, nazwa in wszystkie if id_ in uzywane_id
-    }
-    for id_, nazwa in wszystkie:
-        if id_ not in uzywane_id and klucz_rozmyty(nazwa) in uzywane_klucze:
-            conn.execute("DELETE FROM firmy_zpo WHERE id = ?", (id_,))
-
-
-def _przemianuj_lub_scal_firme(conn, firma_id, nowa_nazwa):
-    kolizja = conn.execute(
-        "SELECT id FROM firmy_zpo WHERE nazwa = ? AND id != ?", (nowa_nazwa, firma_id)
-    ).fetchone()
-    if kolizja is None:
-        conn.execute("UPDATE firmy_zpo SET nazwa = ? WHERE id = ?", (nowa_nazwa, firma_id))
-        return
-    # kolizja UNIQUE: NAJPIERW przepnij FK punktów na wygrywający wiersz,
-    # DOPIERO POTEM usuń przegrywający - odwrotna kolejność łamie FK
-    # (PRAGMA foreign_keys = ON)
-    wygrywajacy_id = kolizja[0]
-    conn.execute(
-        "UPDATE punkty SET firma_zpo_id = ? WHERE firma_zpo_id = ?",
-        (wygrywajacy_id, firma_id),
-    )
-    conn.execute("DELETE FROM firmy_zpo WHERE id = ?", (firma_id,))
 
 
 def sprawdz_zgodnosc_wersji(conn):
@@ -440,10 +549,10 @@ def dodaj_do_slownika(conn, tabela, nazwa):
 
 def zmien_nazwe_w_slowniku(conn, tabela, wpis_id, nowa_nazwa):
     """
-    `firmy_zpo` wymaga dodatkowej propagacji: w odróżnieniu od pozostałych
-    słowników (referencowanych wyłącznie przez FK) nazwa sieci istnieje
-    DRUGI raz jako tekst w `punkty.nadawca`. Bez tego rename w Słownikach
-    rozjeżdżał obie kopie na stałe i nic tego nie naprawiało.
+    Zwykły UPDATE jednego wiersza dla KAŻDEGO słownika, łącznie z `nadawcy`.
+    Do v3 `firmy_zpo` wymagała tu dodatkowej propagacji, bo nazwa sieci
+    istniała drugi raz jako tekst w `punkty.nadawca` - w v4 drugiej kopii
+    nie ma, więc nie ma czego propagować ani czemu się rozjechać.
 
     `rejony`: kanoniczny wpis REJON_NIEZNANY nie może zostać przemianowany -
     to punkt zbiorczy dla wszystkich pustych/śmieciowych rejonów, zmiana
@@ -459,11 +568,6 @@ def zmien_nazwe_w_slowniku(conn, tabela, wpis_id, nowa_nazwa):
             f"UPDATE {tabela} SET {kolumna} = ? WHERE id = ?",
             (nowa_nazwa, wpis_id),
         )
-        if tabela == "firmy_zpo":
-            conn.execute(
-                "UPDATE punkty SET nadawca = ? WHERE firma_zpo_id = ?",
-                (nowa_nazwa, wpis_id),
-            )
 
 
 def usun_z_slownika(conn, tabela, wpis_id):
@@ -491,76 +595,118 @@ def scal_kurierow(conn, id_z, id_do):
 
 
 def pobierz_unikalne_nadawcow(conn):
-    """Kandydaci do podpowiedzi w polu 'nadawca' (widget_autocomplete)."""
+    """
+    Kandydaci do podpowiedzi w polu 'nadawca' (widget_autocomplete).
+
+    Prosto ze słownika, bez DISTINCT po punktach: `nadawcy.nazwa` jest
+    UNIQUE, więc powtórek nie ma z definicji. Wchodzą tu też nadawcy dodani
+    ręcznie w Słownikach, którzy nie mają jeszcze żadnego punktu - a to jest
+    dokładnie moment, w którym podpowiedź jest najbardziej potrzebna.
+    """
     return [
-        r[0] for r in conn.execute(
-            "SELECT DISTINCT nadawca FROM punkty ORDER BY nadawca"
-        ).fetchall()
+        r[0] for r in conn.execute("SELECT nazwa FROM nadawcy ORDER BY nazwa").fetchall()
     ]
 
 
 def pobierz_unikalne_adresy(conn):
-    """Kandydaci do podpowiedzi w polu 'adres' (widget_autocomplete)."""
+    """Kandydaci do podpowiedzi w polu 'adres' (widget_autocomplete).
+    `adresy.surowy` jest UNIQUE, więc bez DISTINCT - patrz wyżej."""
     return [
-        r[0] for r in conn.execute(
-            "SELECT DISTINCT adres FROM punkty ORDER BY adres"
-        ).fetchall()
+        r[0] for r in conn.execute("SELECT surowy FROM adresy ORDER BY surowy").fetchall()
     ]
 
 
 def pobierz_nadawcow_bez_pni(conn):
     """
-    Nadawcy BEZ PNI (ZUS, PKO, Kruk...) - istnieją WYŁĄCZNIE jako
-    `punkty.nadawca` (`firma_zpo_id IS NULL`), nigdy jako wiersz w
-    `firmy_zpo` (patrz `importer.get_or_create_punkt` - ten wpis powstaje
-    TYLKO w gałęzi z PNI). Do podzakładki „Nadawcy (bez PNI)" w Słownikach -
-    `firmy_zpo` sama w sobie pokazuje tylko sieci z PNI, nie pełny zbiór.
+    Nadawcy, dla których NIE wypełnia się "w tym ZPO" (ZUS, PKO, Kruk...),
+    razem z liczbą ich punktów - do podzakładki „Nadawcy (bez PNI)".
+
+    ZBIÓR JEST WĘŻSZY NIŻ W v3 i to jest zmiana, nie przeoczenie. W v3
+    predykat (`firma_zpo_id IS NULL`) działał NA POZIOMIE PUNKTU, więc sieć,
+    dla której znaliśmy PNI tylko jednego z dwóch sklepów, pokazywała się tu
+    z tym drugim - mimo że była siecią ZPO. W v4 `liczy_zpo` opisuje
+    NADAWCĘ, a nie jego pojedynczy punkt, więc taki nadawca znika z listy
+    w całości i to jest poprawne: "w tym ZPO" wypełnia się dla niego wszędzie.
+
+    INNER JOIN, a nie LEFT: nadawca dodany ręcznie w Słownikach, bez ani
+    jednego punktu, tu nie wchodzi. Ta podzakładka służy poprawianiu nazw,
+    które przyszły z danych, i pokazuje przy nich liczbę dotkniętych punktów -
+    wiersz z "0 pkt." nie niósłby żadnej informacji. Pełną listę nadawców,
+    razem z takimi wpisami, daje `pobierz_slownik(conn, "nadawcy")`.
     """
     wiersze = conn.execute(
-        """SELECT nadawca AS nazwa, COUNT(*) AS liczba_punktow
-           FROM punkty WHERE firma_zpo_id IS NULL
-           GROUP BY nadawca ORDER BY nadawca"""
+        """SELECT n.nazwa AS nazwa, COUNT(p.id) AS liczba_punktow
+           FROM nadawcy n JOIN punkty p ON p.nadawca_id = n.id
+           WHERE n.liczy_zpo = 0
+           GROUP BY n.id ORDER BY n.nazwa"""
     ).fetchall()
     return [dict(w) for w in wiersze]
 
 
 def zmien_nadawce_bez_pni(conn, stara, nowa):
     """
-    Zmienia nazwę nadawcy bez PNI wszędzie, gdzie występuje - naprawa
-    literówek (ZUS/PKO/Kruk...), dotąd nienaprawialnych w aplikacji (patrz
-    `pobierz_nadawcow_bez_pni`). Atomowe.
+    Zmienia nazwę nadawcy bez PNI - naprawa literówek (ZUS/PKO/Kruk...).
+    Atomowe.
 
-    Po zmianie różne punkty mogą stać się identyczne pod (nadawca, adres) -
-    schemat NIE ma na to UNIQUE (tylko `get_or_create_punkt` sam dba o
-    deduplikację PRZY ZAPISIE, nie przy rename). Takie zlepienia scalamy:
-    wygrywa punkt o najniższym id (najstarszy), transakcje przegrywającego
-    przepinamy na niego i przegrywający usuwamy - wzorzec
-    `_przemianuj_lub_scal_firme`. Kolizja `UNIQUE(data,kurier_id,punkt_id)`
-    przy przepinaniu (oba punkty mają transakcję tego samego dnia/kuriera)
-    rzuca `KolizjaTransakcji` i wycofuje CAŁOŚĆ - konflikt nigdy nie jest
-    rozstrzygany po cichu (reguła projektu, patrz repo.KolizjaTransakcji).
+    Po v4 to NIE jest już jedyna droga do zmiany nazwy nadawcy: `nadawcy`
+    jest zwykłym słownikiem, więc `zmien_nazwe_w_slowniku` też to potrafi.
+    Ta funkcja istnieje dla jednej rzeczy, której tamta nie robi - rename na
+    nazwę JUŻ ZAJĘTĄ przez innego nadawcę traktuje jako SCALENIE, nie jako
+    błąd. Literówka i jej poprawna forma to dwa wiersze opisujące tę samą
+    firmę, a `nadawcy.nazwa` jest UNIQUE, więc gołe UPDATE rzuciłoby
+    `IntegrityError` dokładnie w najczęstszym przypadku użycia.
+
+    Nadawca DOCELOWY celowo nie jest filtrowany po `liczy_zpo`: jeśli
+    człowiek mówi, że "Zabka" to literówka od "Żabka", to jest to ta sama
+    firma i punkty mają trafić pod nią razem z jej flagą. Flaga może się tak
+    tylko zapalić, nigdy zgasnąć - ta sama asymetria co w
+    `importer.get_or_create_nadawca` i z tego samego powodu.
+
+    Po scaleniu dwa punkty tego samego nadawcy mogą wskazywać ten sam adres,
+    czego zabrania `UNIQUE(nadawca_id, adres_id)` - dlatego kolizję wykrywamy
+    PRZED przepięciem, nie łapiemy po fakcie. Wygrywa punkt o najniższym id
+    (najstarszy), transakcje przegrywającego lądują na nim. Kolizja
+    `UNIQUE(data, kurier_id, punkt_id)` przy przepinaniu (oba punkty mają
+    transakcję tego samego dnia/kuriera) rzuca `KolizjaTransakcji` i wycofuje
+    CAŁOŚĆ - konflikt nigdy nie jest rozstrzygany po cichu (reguła projektu,
+    patrz repo.KolizjaTransakcji).
     """
     with transakcja(conn):
-        conn.execute(
-            "UPDATE punkty SET nadawca = ? WHERE nadawca = ? AND firma_zpo_id IS NULL",
-            (nowa, stara),
-        )
-        punkty = conn.execute(
-            "SELECT id, adres FROM punkty WHERE nadawca = ? AND firma_zpo_id IS NULL"
-            " ORDER BY id", (nowa,),
-        ).fetchall()
-        po_adresie = {}
-        for p in punkty:
-            po_adresie.setdefault(p["adres"], []).append(p["id"])
-        for ids in po_adresie.values():
-            if len(ids) < 2:
-                continue
-            wygrywajacy, *przegrywajacy = ids
-            for id_przegrywajacy in przegrywajacy:
-                _scal_punkty(conn, id_przegrywajacy, wygrywajacy)
+        zrodlowy = conn.execute(
+            "SELECT id FROM nadawcy WHERE nazwa = ? AND liczy_zpo = 0", (stara,)
+        ).fetchone()
+        if zrodlowy is None:
+            return
+        docelowy = conn.execute(
+            "SELECT id FROM nadawcy WHERE nazwa = ? AND id != ?", (nowa, zrodlowy["id"])
+        ).fetchone()
+        if docelowy is None:
+            conn.execute(
+                "UPDATE nadawcy SET nazwa = ? WHERE id = ?", (nowa, zrodlowy["id"]))
+            return
+        _scal_nadawcow(conn, zrodlowy["id"], docelowy["id"])
 
 
-def _scal_punkty(conn, punkt_zrodlowy, punkt_docelowy):
+def _scal_nadawcow(conn, id_zrodlowy, id_docelowy):
+    """Przepina punkty i usuwa nadawcę źródłowego - patrz
+    `zmien_nadawce_bez_pni`, jedyny wołający."""
+    for p in conn.execute(
+        "SELECT id, adres_id FROM punkty WHERE nadawca_id = ? ORDER BY id",
+        (id_zrodlowy,),
+    ).fetchall():
+        zajety = conn.execute(
+            "SELECT id FROM punkty WHERE nadawca_id = ? AND adres_id = ?",
+            (id_docelowy, p["adres_id"]),
+        ).fetchone()
+        if zajety is None:
+            conn.execute(
+                "UPDATE punkty SET nadawca_id = ? WHERE id = ?", (id_docelowy, p["id"]))
+        else:
+            _scal_punkty(conn, p["id"], zajety["id"])
+    conn.execute("DELETE FROM nadawcy WHERE id = ?", (id_zrodlowy,))
+
+
+def _scal_punkty(conn, punkt_zrodlowy, punkt_docelowy, powod="po zmianie nazwy nadawcy"):
     kolidujaca = conn.execute(
         """SELECT z.id FROM transakcje z
            JOIN transakcje d ON d.data = z.data AND d.kurier_id = z.kurier_id
@@ -569,7 +715,7 @@ def _scal_punkty(conn, punkt_zrodlowy, punkt_docelowy):
     ).fetchone()
     if kolidujaca:
         raise KolizjaTransakcji(
-            "Nie można scalić punktów po zmianie nazwy nadawcy - " +
+            f"Nie można scalić punktów {powod} - " +
             _opisz_transakcje(conn, kolidujaca["id"]) +
             " koliduje z transakcją drugiego punktu tego samego dnia/kuriera.")
     conn.execute(
@@ -579,12 +725,18 @@ def _scal_punkty(conn, punkt_zrodlowy, punkt_docelowy):
 
 
 def pobierz_punkty(conn):
-    """Lista punktów z nazwą firmy ZPO (jeśli ma PNI), do zakładki słowników."""
+    """
+    Lista punktów do zakładki Słowniki. Kolumny „nadawca" i „firma ZPO"
+    zlały się w jedną razem z tabelami: w v4 nazwa nadawcy jest jedna,
+    a to, czy liczy się dla niego ZPO, mówi osobna flaga `liczy_zpo`.
+    """
     wiersze = conn.execute(
-        """SELECT p.id, p.nadawca, p.adres, p.pni_zpo, f.nazwa AS firma_zpo
+        """SELECT p.id, n.nazwa AS nadawca, a.surowy AS adres, p.pni_zpo,
+                  n.liczy_zpo
            FROM punkty p
-           LEFT JOIN firmy_zpo f ON f.id = p.firma_zpo_id
-           ORDER BY p.nadawca, p.adres"""
+           JOIN nadawcy n ON n.id = p.nadawca_id
+           JOIN adresy a ON a.id = p.adres_id
+           ORDER BY n.nazwa, a.surowy"""
     ).fetchall()
     return [dict(w) for w in wiersze]
 
@@ -632,20 +784,22 @@ def pobierz_transakcje(conn, limit=200, *, kurier=None, data_od=None, data_do=No
         # tekst to wejście użytkownika, nie wzorzec LIKE - "%"/"_" muszą
         # szukać dosłownego znaku, więc escapujemy je PRZED doklejeniem
         # otaczających "%" i mówimy SQLite, że "\" jest znakiem ucieczki
-        warunki.append("(p.nadawca LIKE ? ESCAPE '\\' OR p.adres LIKE ? ESCAPE '\\')")
+        warunki.append("(n.nazwa LIKE ? ESCAPE '\\' OR a.surowy LIKE ? ESCAPE '\\')")
         tekst_escapowany = tekst.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         wzorzec = f"%{tekst_escapowany}%"
         parametry.extend([wzorzec, wzorzec])
 
     gdzie = f"WHERE {' AND '.join(warunki)}" if warunki else ""
     wiersze = conn.execute(
-        f"""SELECT t.id, t.data, k.imie_nazwisko AS kurier, p.nadawca,
-                   p.adres, r.kod AS rejon, w.nazwa AS wykonawca,
+        f"""SELECT t.id, t.data, k.imie_nazwisko AS kurier, n.nazwa AS nadawca,
+                   a.surowy AS adres, r.kod AS rejon, w.nazwa AS wykonawca,
                    t.ilosc_total, t.ilosc_zpo, t.komentarz,
                    t.uuid, t.utworzono, t.sesja_uuid, t.zrodlo
             FROM transakcje t
             JOIN kurierzy k ON k.id = t.kurier_id
             JOIN punkty p ON p.id = t.punkt_id
+            JOIN nadawcy n ON n.id = p.nadawca_id
+            JOIN adresy a ON a.id = p.adres_id
             LEFT JOIN rejony r ON r.id = t.rejon_id
             LEFT JOIN wykonawcy w ON w.id = t.wykonawca_id
             {gdzie}
@@ -658,23 +812,35 @@ def pobierz_transakcje(conn, limit=200, *, kurier=None, data_od=None, data_do=No
 
 # --- zapytania dedukcyjne dla formularza wprowadzania (dedukcja.py) ---
 
+# Punkt w postaci, jakiej oczekuje `dedukcja.py`: nadawca i adres jako TEKST,
+# nie jako klucze obce. Warstwa dedukcji pracuje na tym, co człowiek wpisuje
+# w formularzu, więc rozbicie adresu na miejscowość/ulicę jest tam bez
+# znaczenia - stąd jeden wspólny SELECT zamiast powtarzania joinów.
+_SQL_PUNKT_Z_NAZWAMI = """
+    SELECT p.id, n.nazwa AS nadawca, a.surowy AS adres, p.pni_zpo
+    FROM punkty p
+    JOIN nadawcy n ON n.id = p.nadawca_id
+    JOIN adresy a ON a.id = p.adres_id
+"""
+
 def znajdz_punkty_po_adresie(conn, adres):
     """
     Kandydaci punktów dla adresu wpisanego w formularzu - z preferencją
-    trafienia DOKŁADNEGO (po indeksie `idx_punkty_adres`) nad rozmytym.
+    trafienia DOKŁADNEGO (po `adresy.surowy UNIQUE`) nad rozmytym.
     Punkty w bazie są znormalizowane (`models.py`: `klucz_bialych_znakow`),
     a to, co wpisuje człowiek, nie musi być - bez fuzzy fallbacku
     "odkryta  24" dałoby zero trafień, a przy zapisie zduplikowany punkt.
+
+    Porównanie idzie po `adresy.surowy`, nie po strukturze: dopasowanie ma
+    działać tak samo dla adresu, którego parser nie rozłożył (`ulica_id`
+    puste), a tych jest w danych realnie dużo.
     """
-    dokladne = conn.execute(
-        "SELECT id, nadawca, adres, pni_zpo FROM punkty WHERE adres = ?",
-        (adres,),
-    ).fetchall()
+    dokladne = conn.execute(_SQL_PUNKT_Z_NAZWAMI + " WHERE a.surowy = ?", (adres,)).fetchall()
     if dokladne:
         return [dict(r) for r in dokladne]
 
     klucz = klucz_rozmyty(adres)
-    wszystkie = conn.execute("SELECT id, nadawca, adres, pni_zpo FROM punkty").fetchall()
+    wszystkie = conn.execute(_SQL_PUNKT_Z_NAZWAMI).fetchall()
     return [dict(r) for r in wszystkie if klucz_rozmyty(r["adres"]) == klucz]
 
 
@@ -698,19 +864,24 @@ def znajdz_punkt_po_pni(conn, pni):
     if not pni:
         return None
     wiersz = conn.execute(
-        "SELECT id, nadawca, adres, pni_zpo FROM punkty WHERE pni_zpo = ?",
-        (pni,),
-    ).fetchone()
+        _SQL_PUNKT_Z_NAZWAMI + " WHERE p.pni_zpo = ?", (pni,)).fetchone()
     return dict(wiersz) if wiersz else None
 
 
-def czy_nadawca_ma_pni(conn, nadawca):
-    """Rządzi aktywnością pola "w tym ZPO" w trybie auto - wyliczane w
-    locie (EXISTS), NIGDY przechowywane, żeby nie mogło się rozjechać."""
-    return bool(conn.execute(
-        "SELECT EXISTS(SELECT 1 FROM punkty WHERE nadawca = ? AND pni_zpo IS NOT NULL)",
-        (nadawca,),
-    ).fetchone()[0])
+def czy_nadawca_liczy_zpo(conn, nadawca):
+    """
+    Rządzi aktywnością pola "w tym ZPO" w trybie auto.
+
+    Do v3 pytaliśmy, czy nadawca ma JAKIŚ punkt z PNI - i to było błędne
+    dokładnie w przypadku, który zdarza się najczęściej: punkt JEST ZPO,
+    ale PNI dopiero trzeba zdobyć z paragonu, więc pole było wygaszone
+    i nie dało się wpisać liczby, którą kurier miał na kartce. W v4
+    odpowiada na to jawna flaga `nadawcy.liczy_zpo` (patrz schema.sql),
+    niezależna od tego, czy PNI już znamy.
+    """
+    wiersz = conn.execute(
+        "SELECT liczy_zpo FROM nadawcy WHERE nazwa = ?", (nadawca,)).fetchone()
+    return bool(wiersz[0]) if wiersz else False
 
 
 def historia_rejonow_punktu(conn, punkt_id):
@@ -754,11 +925,13 @@ class KolizjaTransakcji(Exception):
 
 def _opisz_transakcje(conn, transakcja_id):
     w = conn.execute(
-        """SELECT t.data, k.imie_nazwisko AS kurier, p.nadawca, p.adres,
-                  t.ilosc_total, t.ilosc_zpo
+        """SELECT t.data, k.imie_nazwisko AS kurier, n.nazwa AS nadawca,
+                  a.surowy AS adres, t.ilosc_total, t.ilosc_zpo
            FROM transakcje t
            JOIN kurierzy k ON k.id = t.kurier_id
            JOIN punkty p ON p.id = t.punkt_id
+           JOIN nadawcy n ON n.id = p.nadawca_id
+           JOIN adresy a ON a.id = p.adres_id
            WHERE t.id = ?""",
         (transakcja_id,),
     ).fetchone()

@@ -18,6 +18,32 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
 - `importer.py` — najniższy poziom: `parse_quantity`, `get_or_create_*`,
   `import_row` (jeden wiersz `.xlsx` → SQLite). Reużywane przez
   `repo.py` i `import_orchestrator.py`, nie duplikować.
+  **`get_or_create_adres` — OCHRONA SŁOWNIKA, najdroższa reguła całej
+  normalizacji v4.** Wpis w `miejscowosci`/`ulice` powstaje WYŁĄCZNIE dla
+  adresu, który parser rozłożył (`adresy.rozbij` → `pewnosc != 'brak'`).
+  Zła interpretacja adresu zakłada w słowniku byt, do którego podepną się
+  potem kolejne adresy — i śmieć przestaje być usterką jednego wiersza,
+  a staje się usterką słownika, sprzątaną scalaniem wpisów zamiast edycją
+  pola. Adres nierozstrzygnięty zapisuje się z samym `surowy`; nic nie
+  przepada, bo `surowy` jest tożsamością adresu (UNIQUE) i parser
+  przepuści go ponownie, kiedy dorośnie do przypadku. **Bez miejscowości
+  nie ma też ulicy** (`ulice.miejscowosc_id` NOT NULL, a domyślenie miasta
+  to `dedukcja_miejscowosci.py`, nie zadanie parsera) — taki adres dostaje
+  numer budynku/lokalu, bo te nie zakładają niczego w słowniku, a
+  `ulica_id` zostaje puste. Granica zaufania biegnie po KOLUMNACH, nie po
+  pliku: adres z niezaufanego importu wchodzi do słownika normalnie, bo
+  człowiek go czyta i poprawia — inaczej niż PNI i rejon.
+  **`get_or_create_nadawca(conn, nazwa, liczy_zpo=False)`** — flaga jest
+  wyłącznie PODNOSZONA, nigdy opuszczana: jeden wiersz bez PNI nie dowodzi,
+  że nadawca przestał być punktem ZPO, a zgaszona flaga wygasza pole
+  „w tym ZPO", czego użytkownik nie ma jak zauważyć. Zapalona nadmiarowo
+  jest widoczna i naprawialna w Słownikach. Ta sama asymetria obowiązuje
+  w `scalanie._przenies_flage_liczy_zpo`.
+  `get_or_create_punkt` w gałęzi z PNI **dopisuje PNI do istniejącego
+  punktu** `(nadawca, adres)` zamiast zakładać drugi — `UNIQUE(nadawca_id,
+  adres_id)` mówi, że to ta sama lokalizacja, a PNI zdobywa się później
+  (z paragonu). Dwa różne PNI na jedną parę dają ostrzeżenie, nigdy cichą
+  podmianę klucza.
   **`znajdz_lub_utworz_punkt_niezaufany`** (`0.1-alpha.3.2`) — OSOBNA
   funkcja od `get_or_create_punkt`, nie flaga w tamtej: tamta obsługuje
   ścieżkę zaufaną ORAZ scalanie baz (gdzie źródłem jest nasza własna baza)
@@ -55,10 +81,10 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   testem `test_wbudowane_with_conn_nic_nie_wycofuje`). Złapany
   `IntegrityError` NIE unieważnia transakcji, więc per-wierszowe `except`
   w `zapisz_blankiet`/`zaimportuj` działają wewnątrz bez zmian.
-  `WERSJA_SCHEMATU` (**2** od `0.1-alpha.3.1` — dwa indeksy,
-  `idx_transakcje_kurier`/`idx_punkty_adres`, dla zapytań dedukcyjnych
-  niżej; jedyny uprawniony powód bumpa — sama naprawa danych wersji NIE
-  podbija, bo nie zmienia struktury) + `wersja_schematu`/
+  `WERSJA_SCHEMATU` (**4** od `0.1-alpha.4` — adres strukturalny
+  (`miejscowosci`/`ulice`/`adresy`) i `nadawcy` zamiast `firmy_zpo`;
+  jedyny uprawniony powód bumpa to zmiana struktury — sama naprawa danych
+  wersji NIE podbija) + `wersja_schematu`/
   `sprawdz_zgodnosc_wersji`/`wymaga_migracji`/`migruj` — musi zgadzać się
   z `PRAGMA user_version` na końcu `schema.sql`. **`migruj` jest
   addytywna i idempotentna** (sprawdza obecność każdego obiektu zamiast
@@ -75,22 +101,29 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   dalej" — `main()` łapie wyłącznie `NiezgodnaWersjaSchematu`, więc każdy
   inny wyjątek w naprawie zablokowałby start aplikacji NA STAŁE u
   użytkownika bez admina i konsoli. Sprząta rejony spoza
-  `normalizacja.REJON_NIEZNANY` i rozjazd `firmy_zpo.nazwa`/
-  `punkty.nadawca` (patrz `importer.py` niżej).
+  `normalizacja.REJON_NIEZNANY` — i **nic więcej**. Drugi krok (rozjazd
+  `firmy_zpo.nazwa` z `punkty.nadawca`) zniknął w v4 razem z drugą kopią
+  nazwy: nadawca ma jedną nazwę w `nadawcy.nazwa`, więc nie ma czego
+  naprawiać. To jest cel schematu v4, nie skutek uboczny.
   Dostęp do danych: `zapisz_blankiet` (formularz → transakcje,
   **atomowy**, `rejon_id` liczone PER WIERSZ od `0.1-alpha.3.1` — rejon
   zszedł z bloku do wiersza, `zapisz_bloki` zniknęło), słowniki proste
   (`pobierz_slownik`/`dodaj_do_slownika`/`zmien_nazwe_w_slowniku`/
-  `usun_z_slownika` — rename `firmy_zpo` propaguje do `punkty.nadawca`,
-  kanoniczny wiersz `???` nie da się zmienić/skasować),
-  **`pobierz_nadawcow_bez_pni`/`zmien_nadawce_bez_pni`** (`0.1-alpha.3.2` —
-  nadawcy bez PNI istnieją WYŁĄCZNIE jako `punkty.nadawca` z
-  `firma_zpo_id IS NULL`, bo `firmy_zpo` powstaje tylko w gałęzi z PNI
-  `get_or_create_punkt`; do 3.2 literówka w ZUS/PKO/Kruk była
-  nienaprawialna w aplikacji. Rename może zlepić punkty identyczne pod
-  `(nadawca, adres)` — schemat NIE ma na to UNIQUE — więc scalamy je:
-  wygrywa najniższe id, transakcje przegrywającego przepinamy, kolizja
-  `UNIQUE(data,kurier,punkt)` rzuca `KolizjaTransakcji` i wycofuje CAŁOŚĆ),
+  `usun_z_slownika` — od v4 zwykły UPDATE dla KAŻDEGO słownika, łącznie
+  z `nadawcy`; propagacja do `punkty.nadawca` zniknęła razem z drugą kopią
+  nazwy. Kanoniczny wiersz `???` nie da się zmienić/skasować),
+  **`pobierz_nadawcow_bez_pni`/`zmien_nadawce_bez_pni`** (nadawcy
+  z `liczy_zpo = 0`, podzakładka „Popraw / scal nadawcę". Po v4 to NIE jest
+  już jedyna droga do zmiany nazwy nadawcy — `nadawcy` jest zwykłym
+  słownikiem — ale jedyna, w której rename na nazwę JUŻ ZAJĘTĄ jest
+  SCALENIEM, a nie błędem `UNIQUE`; a to najczęstsza poprawka literówki,
+  bo forma poprawna zwykle już w bazie jest. Zbiór jest WĘŻSZY niż w v3:
+  tam predykat działał na poziomie PUNKTU, więc sieć ze znanym PNI tylko
+  jednego sklepu wchodziła na listę drugim. Scalenie może zlepić punkty
+  identyczne pod `(nadawca_id, adres_id)`, czego zabrania `UNIQUE`, więc
+  kolizję wykrywamy PRZED przepięciem: wygrywa najniższe id, transakcje
+  przegrywającego przepinamy, kolizja `UNIQUE(data,kurier,punkt)` rzuca
+  `KolizjaTransakcji` i wycofuje CAŁOŚĆ),
   **`zaktualizuj_transakcje`/`usun_transakcje`/`ustaw_pole_transakcji`**
   (`0.1-alpha.3.2` — pierwsze destrukcyjne prymitywy na `transakcje` poza
   importem/formularzem. `KOLUMNY_EDYTOWALNE_TRANSAKCJI` świadomie BEZ
@@ -110,9 +143,14 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   Porównanie **tekstowe, nigdy liczbowe** — `"007"` i `"7"` to dwa różne
   punkty, a ich zrównanie to dokładnie błąd koercji naprawiony w 3.2.
   Zapytania
-  dedukcyjne (`znajdz_punkty_po_adresie`/`czy_nadawca_ma_pni`/
+  dedukcyjne (`znajdz_punkty_po_adresie`/`czy_nadawca_liczy_zpo`/
   `historia_rejonow_punktu`/`historia_wykonawcow_kuriera`) — jedyny
-  konsument to `dedukcja.py` niżej. `pobierz_transakcje` ma od
+  konsument to `dedukcja.py` niżej. **`czy_nadawca_liczy_zpo` zastąpiło
+  `czy_nadawca_ma_pni`** i to jest zmiana semantyki, nie nazwy: pole
+  „w tym ZPO" otwiera teraz flaga `nadawcy.liczy_zpo`, a nie obecność PNI.
+  Stara reguła gasiła pole dokładnie w najczęstszym przypadku — punkt JEST
+  ZPO, ale numer trzeba dopiero zdobyć z paragonu — i liczba z kartki
+  kuriera nie miała gdzie wejść. `pobierz_transakcje` ma od
   `0.1-alpha.3.2` opcjonalne filtry (`kurier`/`data_od`/`data_do`/
   `utworzono_od`/`utworzono_do`/`sesja_uuid`/`tekst`/`zrodlo`, łączone
   koniunkcją; `tekst` escapuje `%`/`_` przed doklejeniem do wzorca `LIKE` -
@@ -121,6 +159,18 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   poprawek potrzebuje ich mimo że tabela ich nie pokazuje.
   `_resolve_schema_path` rozróżnia dev vs spakowany `.exe` (PyInstaller
   rozpakowuje dane do `sys._MEIPASS`).
+  **`_przebuduj_punkty_do_v4` — JEDYNY krok `migruj`, który rusza dane.**
+  Przejścia `punkty.nadawca`/`punkty.adres` (tekst) na klucze obce nie da
+  się wyrazić dokładaniem kolumn, a wystemplowanie bazy w kształcie v3
+  numerem v4 byłoby gorsze niż brak migracji. `punkty.id` jest zachowywane
+  (wskazuje na nie `transakcje.punkt_id`); pary, które v3 pozwalało
+  zdublować pod `(nadawca, adres)`, zlepiają się w jeden punkt przez
+  `_scal_punkty`. Wymaga połączenia POZA transakcją: `PRAGMA foreign_keys`
+  jest w jej środku ignorowana, a razem z nią musi iść
+  `PRAGMA legacy_alter_table` — bez niej `ALTER TABLE RENAME` przepisuje
+  klauzulę `REFERENCES` w `transakcje` na nazwę tabeli kasowanej chwilę
+  później (przypięte testem
+  `test_migracja_v4_nie_rozpina_dziennika_transakcji`).
 - `ustawienia.py` (`0.1-alpha.3.2`) — `settings.json` w katalogu danych.
   Celowo POZA bazą: ustawienia typu „odsłoń przełącznik zaawansowany"
   muszą być lokalne dla KONKRETNEJ stacji i nie mogą wędrować przy
@@ -142,7 +192,7 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   `StanPola.kandydaci`. Ilość/„w tym ZPO" nigdy nie bramują ani nie są
   źródłem dedukcji innych pól — dedukcja rusza z kuriera/adresu
   niezależnie od stanu Ilości; jej jedyna rola to jednokierunkowe
-  autouzupełnienie „w tym ZPO", bramowane `czy_nadawca_ma_pni`.
+  autouzupełnienie „w tym ZPO", bramowane `czy_nadawca_liczy_zpo`.
   `sprawdz_niezmienniki` — stany zakazane (pomarańcz/czerwień bez
   `aktywne`, aktywne+niekolorowe-szare bez `w_nawigacji`), wołane
   w testach. `kolejnosc_pol(tryb, ...)` zwraca KLUCZE pól (krotki), nie
@@ -166,6 +216,41 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   jak przedtem. Migawka WYPEŁNIA LUKĘ (historia pusta lub sprzeczna),
   nigdy nie nadpisuje jednoznacznej historii punktu — reguły kolizji
   „historia vs rejonarz" to §10 raportu BaŚKi i osobna robota.
+- `dedukcja_miejscowosci.py` — kaskada dedukcji miejscowości dla adresu,
+  który jej nie zawiera (kurierzy jej nie piszą, Warszawa jest domyślna;
+  15,04% kluczy `ulica|nr` wskazuje przez to więcej niż jeden rejon).
+  Wejście: `adresy.Rozbicie` + kontekst (`rejon`, `miejscowosci_dnia`).
+  **Zero zależności od bazy** — rejonarz wchodzi jako wstrzykiwane
+  callable `szukaj(klucz_ulica_nr) -> iterable wierszy` (`sqlite3.Row`/
+  dict/krotka `(miejscowosc, rejon)`), więc testy reguł nie stawiają
+  migawki, a moduł działa też na stacji bez `rejonarz.db`. Gmina NIE jest
+  parametrem wiersza, tylko wyliczana z napisu (`gmina`:
+  `"Warszawa (Śródmieście) - Warszawa"` → `"Warszawa"`) — w migawce nie ma
+  takiej kolumny, a gmina podawana obok byłaby drugim źródłem prawdy.
+  Reguły próbowane malejąco po pewności, pierwsza trafiona wygrywa;
+  `Wynik.zrodlo` zawsze niesie nazwę reguły (do `adresy.zrodlo_miejscowosci`),
+  bo „wiemy na pewno" i „zgadliśmy z dnia kuriera" wyglądają w tabeli
+  identycznie. **Granica reguły `rejon_wskazuje_gmine` jest twarda**:
+  rejon warszawski (`czy_rejon_warszawski`, kanoniczne `WA<numer>`)
+  mieści się w jednej gminie w 120/121 przypadków → wolno wpisać
+  automatycznie; rejon spoza `WA` tylko w 32/59 (`ND4` obejmuje 36
+  miejscowości) → wolno mu WYŁĄCZNIE zawęzić listę dla człowieka
+  (`Wynik.zawezone_rejonem`, osobne pole obok `kandydaci`). Stąd reguła
+  `dzien_kuriera` liczy się na PEŁNEJ liście kandydatów, nie na
+  zawężonej — inaczej rejon spoza `WA` rozstrzygałby automatycznie
+  tylnymi drzwiami. Dla złego wejścia nie rzuca (jak `adresy.rozbij`),
+  ale wyjątek z `szukaj` propaguje świadomie: awaria migawki nie może
+  wyglądać jak zwykłe „nie wiem" na 100% wierszy.
+  Kolejność bloków `if` w `dedukuj` JEST zachowaniem (malejąco po
+  zmierzonej pewności: 2 bije 3, bo 99,8% > 99,17%; 2 bije 4, bo
+  99,8% > 86%) i jest przypięta testami — nie przestawiać bez pomiaru.
+  Wchodzący `rejon` świadomie NIE jest kanonizowany: migawka trzyma
+  `WA87`, ale nasze ścieżki zapisu (`normalizuj_rejon`) `WA` nie doklejają,
+  więc stary goły `87` po prostu nie uruchomi reguły 3 — traci się pomoc,
+  nie zyskuje błędu. Doklejenie `WA` na wejściu ruszyłoby granicę 120/121,
+  więc jest decyzją kroku integracji.
+  **Jeszcze nie podpięty** do `dedukcja.py`/importu — integracja to
+  osobna robota.
 - `import_orchestrator.py` — cały import w partii: `zwaliduj_wiersze`,
   `znajdz_propozycje_scalenia_kurierow` (literówki, auto-merge PRZED
   zapisem, nie cofanie po fakcie), `znajdz_ostrzezenia_podobienstwa_kurierow`
@@ -173,8 +258,9 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   **`zaimportuj(..., zaufany=False)`** (`0.1-alpha.3.2`) — domyślnie
   NIEZAUFANY, bo brak jawnego zaufania musi znaczyć brak zaufania. Plik
   niezaufany NIE wnosi **PNI** (klucz tożsamości punktu — śmieć podpina
-  transakcję pod cudzy punkt, zamienia kolejne wiersze w „duplikaty" i
-  trwale otwiera pole „w tym ZPO" przez `czy_nadawca_ma_pni`) ani **rejonu**
+  transakcję pod cudzy punkt i zamienia kolejne wiersze w „duplikaty";
+  od v4 nie otwiera już przy okazji pola „w tym ZPO", bo `znajdz_lub_utworz_
+  punkt_niezaufany` nie zapala `nadawcy.liczy_zpo`) ani **rejonu**
   (dane z papieru zakłamane; wiersze lądują na `???` i stają się
   kandydatami dla rejonarza). Reszta wchodzi normalnie — odcinamy WYŁĄCZNIE
   to, czego nie da się ani zweryfikować, ani poprawić ręcznie. `zrodlo`
@@ -262,6 +348,16 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   — pochodzenie, nie dana: bez niego wiersze odrzucone dopiero przy
   zapisie nie miałyby jak wrócić do użytkownika i przepadałyby po cichu.
   Do danych raportu nie wchodzi w żadnej z tych dwóch postaci.
+- `adresy.py` — rozbicie wolnego tekstu adresu na części (`rozbij`, nigdy
+  nie rzuca — nieudane rozbicie to `pewnosc='brak'`, nie wyjątek).
+  Niepustość ulicy sprawdzana DWA razy, drugi raz PO odcięciu prefiksu:
+  `"Piaseczno, al. 5"` ma niepusty człon ulicy dopóki prefiks go nie zje,
+  a wynik o pewności `pelna` i pustej nazwie ulicy jest najgorszym możliwym
+  kształtem — parser jest go PEWNY, więc trafiał prosto do słownika.
+  Stałe `STAN_*` (`adresy.stan`) mieszkają tutaj; wartości
+  `zrodlo_miejscowosci` CELOWO nie — te należą do `dedukcja_miejscowosci`
+  (`ZRODLO_*`), razem z kaskadą, która je nadaje. Dwa zestawy napisów na te
+  same przypadki zamieniłyby tę kolumnę w coś, czego nie da się odpytać.
 - `podpowiedzi.py` — silnik podpowiedzi (`podpowiedz`,
   `najlepsza_podpowiedz`), źródło kandydatów wstrzykiwane, nie zaszyte.
 - `uzytkownicy.py` — tożsamość osoby wprowadzającej dane. `users.id` to
@@ -300,6 +396,12 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   wprost przy wykonaniu (ten sam klucz PNI/adres, żadnej osobnej logiki).
   `users.id` to już UUIDv5 — dopisanie brakujących, rozjazd nr_kadrowego
   tylko informacyjny (niska stawka vs. konflikt ilości).
+  Źródło musi mieć BIEŻĄCĄ strukturę tabel — jest otwierane tylko do
+  odczytu, więc nie ma jak go po drodze zmigrować; brakujące KOLUMNY
+  w `transakcje` stają się NULL (`w.get(...)`), ale stary układ TABEL nie
+  jest obsługiwany. `liczy_zpo` przenosi `_przenies_flage_liczy_zpo`
+  (OR, nigdy gaszenie) — generyczny INSERT prostego słownika kopiuje samą
+  `nazwa` i flagę by zgubił.
   **Konflikt wartości (ta sama trójka data+kurier+punkt, różne ilości)
   NIGDY nie jest rozstrzygany automatycznie** (roadmap.md) — domyślnie
   zostaje wartość DOCELOWA (nigdy nie nadpisuje po cichu), zmiana
@@ -464,8 +566,14 @@ wartości z pól i wywołanie warstwy logiki:
   Excel, a `%LOCALAPPDATA%` jest dla niego miejscem, którego nie znajdzie.
   Pliki nie powstają, gdy wszystko weszło.),
   `zakladka_slowniki.py` (podzakładki kurierzy/punkty ZPO/wykonawcy/
-  rejony/firmy ZPO + **„Nadawcy (bez PNI)"** dołożona na KOŃCU listy, żeby
-  nie przesunąć istniejących indeksów `_podzakladki[...]`),
+  rejony/**Nadawcy** + **„Popraw / scal nadawcę"** dołożona na KOŃCU listy,
+  żeby nie przesunąć istniejących indeksów `_podzakladki[...]`. Etykieta
+  drugiej mówi, CO ROBI, a nie kogo zawiera — po v4 obie pokazują nadawców
+  i różnią się wyłącznie niewidocznym zachowaniem przy zmianie nazwy,
+  a dwie sąsiednie zakładki „Nadawcy" byłyby zaproszeniem do wybrania złej.
+  Kolumna „Firma ZPO (słownik)" w Punktach ZPO ustąpiła miejsca fladze
+  „Liczy ZPO": dwie kolumny nazwy istniały po to, żeby widać było ich
+  rozjazd, a w v4 nazwa jest jedna),
   `zakladka_scalanie.py` (`DialogKorektyScalania` -
   ten sam wzorzec ekranu korekty co import: pokazuje WYŁĄCZNIE propozycje
   literówek/różnice w zapisie/konflikty ilości, reszta wchodzi/pomija się

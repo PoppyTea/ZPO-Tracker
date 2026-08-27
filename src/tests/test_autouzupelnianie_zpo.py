@@ -23,6 +23,7 @@ import pytest
 
 from zpo_tracker import repo
 from zpo_tracker.gui.zakladka_wprowadzanie import ZakladkaWprowadzanie
+from zpo_tracker.importer import get_or_create_punkt
 
 
 def _ma_display():
@@ -51,15 +52,22 @@ def root():
 
 @pytest.fixture
 def conn():
-    """Baza z jednym punktem ZPO (Żabka z PNI) i jednym bez PNI (ZUS).
-    PNI jest tym, co włącza pole „w tym ZPO" - patrz dedukcja.py."""
+    """
+    Baza z trzema punktami: sieć ZPO ze znanym PNI (Żabka), zwykły nadawca
+    (ZUS) i - najważniejszy przypadek od schematu v4 - sieć ZPO, której PNI
+    jeszcze nie znamy (Groszek).
+
+    Pole „w tym ZPO" włącza `nadawcy.liczy_zpo`, a NIE obecność PNI. Do v3
+    było odwrotnie i to był błąd dokładnie w tym trzecim przypadku: punkt
+    JEST ZPO, ale numer trzeba dopiero zdobyć z paragonu - a wygaszone pole
+    nie pozwalało wpisać liczby, którą kurier miał na kartce.
+    """
     c = repo.polacz(":memory:")
     repo.utworz_schemat(c)
-    c.execute("INSERT INTO firmy_zpo (nazwa) VALUES ('Żabka')")
-    c.execute(
-        "INSERT INTO punkty (nadawca, adres, pni_zpo, firma_zpo_id) "
-        "VALUES ('Żabka', 'Odkryta 24', '228648', 1)")
-    c.execute("INSERT INTO punkty (nadawca, adres) VALUES ('ZUS', 'Marsa 56')")
+    get_or_create_punkt(c, "Żabka", "Odkryta 24", "228648")
+    get_or_create_punkt(c, "ZUS", "Marsa 56", None)
+    get_or_create_punkt(c, "Groszek", "Miła 3", None)
+    c.execute("UPDATE nadawcy SET liczy_zpo = 1 WHERE nazwa = 'Groszek'")
     yield c
     c.close()
 
@@ -75,7 +83,7 @@ def wiersz(root, conn, tmp_path):
     return w
 
 
-def test_pole_zpo_jest_aktywne_dla_nadawcy_z_pni(wiersz):
+def test_pole_zpo_jest_aktywne_dla_nadawcy_liczacego_zpo(wiersz):
     """Warunek wstępny reszty testów - gdyby to nie działało, wszystkie
     poniższe przechodziłyby z niewłaściwego powodu."""
     assert wiersz._ilosc_zpo_aktywne is True
@@ -151,16 +159,36 @@ def test_reczna_wartosc_rowna_ilosci_tez_jest_reczna(wiersz):
     assert wiersz.var_ilosc_zpo.get() == "10"
 
 
-# --- nadawca bez PNI ----------------------------------------------------
+# --- co włącza pole: flaga nadawcy, nie obecność PNI --------------------
 
-def test_bez_pni_pole_nieaktywne_i_bez_autouzupelniania(root, conn, tmp_path):
+def _wiersz_dla_adresu(root, conn, tmp_path, adres):
     z = ZakladkaWprowadzanie(root, conn, str(tmp_path), sesja_uuid="s")
     z.pack()
     root.update()
     w = z.wiersze[0]
-    w.var_adres.set("Marsa 56")        # ZUS, bez PNI
+    w.var_adres.set(adres)
     root.update()
+    return w
+
+
+def test_nadawca_nieliczacy_zpo_ma_pole_nieaktywne_i_bez_autouzupelniania(
+        root, conn, tmp_path):
+    w = _wiersz_dla_adresu(root, conn, tmp_path, "Marsa 56")   # ZUS
 
     assert w._ilosc_zpo_aktywne is False
     w.var_ilosc_total.set("5")
     assert w.var_ilosc_zpo.get() == ""
+
+
+def test_punkt_zpo_bez_znanego_pni_ma_pole_AKTYWNE(root, conn, tmp_path):
+    """
+    Cała pointa schematu v4. Do v3 aktywność pola brała się z obecności PNI,
+    więc ten wiersz - sieć ZPO, PNI jeszcze niezdobyte - miał pole wygaszone
+    i liczba z kartki kuriera nie miała gdzie wejść. Teraz decyduje
+    `nadawcy.liczy_zpo`, niezależnie od tego, czy numer już znamy.
+    """
+    w = _wiersz_dla_adresu(root, conn, tmp_path, "Miła 3")      # Groszek
+
+    assert w._ilosc_zpo_aktywne is True
+    w.var_ilosc_total.set("5")
+    assert w.var_ilosc_zpo.get() == "5"

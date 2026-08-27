@@ -13,6 +13,7 @@ from datetime import date
 import pytest
 
 from zpo_tracker import repo
+from zpo_tracker.importer import get_or_create_punkt
 
 
 @pytest.fixture
@@ -137,7 +138,7 @@ def test_scal_kurierow_jest_atomowe(conn):
     # którego już nie ma
     conn.execute("INSERT INTO kurierzy(imie_nazwisko) VALUES ('Wołczuk Rafal')")
     conn.execute("INSERT INTO kurierzy(imie_nazwisko) VALUES ('Wołczuk Rafał')")
-    conn.execute("INSERT INTO punkty(nadawca, adres) VALUES ('Żabka', 'Odkryta 24')")
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", None)
     conn.execute(
         "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total)"
         " VALUES ('2026-08-10', 1, 1, 5)")
@@ -160,7 +161,7 @@ def test_scal_kurierow_przy_kolizji_unique_nie_zostawia_polowicznego_stanu(conn)
     """
     conn.execute("INSERT INTO kurierzy(imie_nazwisko) VALUES ('Wołczuk Rafal')")
     conn.execute("INSERT INTO kurierzy(imie_nazwisko) VALUES ('Wołczuk Rafał')")
-    conn.execute("INSERT INTO punkty(nadawca, adres) VALUES ('Żabka', 'Odkryta 24')")
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", None)
     for kurier_id in (1, 2):
         conn.execute(
             "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total)"
@@ -178,7 +179,7 @@ def test_scal_kurierow_przy_kolizji_unique_nie_zostawia_polowicznego_stanu(conn)
 def test_scal_kurierow_przenosi_transakcje_i_usuwa_zrodlo(conn):
     conn.execute("INSERT INTO kurierzy(imie_nazwisko) VALUES ('Wołczuk Rafal')")
     conn.execute("INSERT INTO kurierzy(imie_nazwisko) VALUES ('Wołczuk Rafał')")
-    conn.execute("INSERT INTO punkty(nadawca, adres) VALUES ('Żabka', 'Odkryta 24')")
+    get_or_create_punkt(conn, "Żabka", "Odkryta 24", None)
     conn.execute(
         "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total)"
         " VALUES ('2026-08-10', 1, 1, 5)")
@@ -195,6 +196,12 @@ def test_scal_kurierow_przenosi_transakcje_i_usuwa_zrodlo(conn):
 def test_utworzenie_schematu_ustawia_user_version(conn):
     # bez wersji schematu przywrócenie starej migawki po aktualizacji
     # aplikacji kończy się "no such column" na dobrych danych
+    #
+    # TO JEST JEDYNE MIEJSCE W ZESTAWIE, które wiąże literał `PRAGMA
+    # user_version` ze `schema.sql` ze stałą w kodzie. Pozostałe testy
+    # porównują się już z `repo.WERSJA_SCHEMATU`, więc "zapomniałem podnieść
+    # stałą przy zmianie schematu" wywala się WYŁĄCZNIE tutaj. Nie zastępować
+    # tej asercji porównaniem stałej z samą sobą - zniknie bez śladu.
     assert conn.execute("PRAGMA user_version").fetchone()[0] == repo.WERSJA_SCHEMATU
     assert repo.WERSJA_SCHEMATU >= 1
 
@@ -399,8 +406,7 @@ def test_swieza_baza_ma_kolumny_sesji(conn):
     kolumny = {r[1] for r in conn.execute("PRAGMA table_info(transakcje)")}
     assert {"sesja_uuid", "zrodlo"} <= kolumny
     assert "idx_transakcje_sesja" in _nazwy_indeksow(conn, "transakcje")
-    assert repo.wersja_schematu(conn) == 3
-    assert repo.WERSJA_SCHEMATU == 3
+    assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU
 
 
 def test_migracja_z_alpha3_1_dokłada_sesje_i_zrodlo():
@@ -450,6 +456,128 @@ def test_migracja_ze_stanu_posredniego_jednej_kolumny_przezywa():
         kolumny = {r[1] for r in conn.execute("PRAGMA table_info(transakcje)")}
         assert {"sesja_uuid", "zrodlo"} <= kolumny
         assert repo.wersja_schematu(conn) == repo.WERSJA_SCHEMATU
+    finally:
+        conn.close()
+
+
+# --- migracja `0.1-alpha.4` (v4): adres strukturalny + jedna tabela nadawców ---
+#
+# JEDYNY krok `migruj`, który rusza dane. Nie da się go wyrazić dokładaniem
+# kolumn, a wystemplowanie bazy w kształcie v3 numerem v4 byłoby gorsze niż
+# brak migracji: program czytałby kolumny, których tam nie ma.
+
+def test_migracja_v4_przenosi_nadawce_i_adres_do_wlasnych_tabel():
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+
+        wiersz = conn.execute(
+            """SELECT n.nazwa, a.surowy FROM punkty p
+               JOIN nadawcy n ON n.id = p.nadawca_id
+               JOIN adresy a ON a.id = p.adres_id"""
+        ).fetchone()
+        assert tuple(wiersz) == ("Żabka", "Odkryta 24")
+    finally:
+        conn.close()
+
+
+def test_migracja_v4_zachowuje_id_punktu():
+    # `transakcje.punkt_id` wskazuje na `punkty.id` - przenumerowanie punktów
+    # oznaczałoby przepisanie całego dziennika transakcji, czyli tej jednej
+    # tabeli, której nie wolno ruszyć
+    conn = _baza_alpha2()
+    try:
+        stare_id = conn.execute("SELECT punkt_id FROM transakcje").fetchone()[0]
+        repo.migruj(conn)
+        assert conn.execute("SELECT punkt_id FROM transakcje").fetchone()[0] == stare_id
+        assert conn.execute(
+            "SELECT COUNT(*) FROM punkty WHERE id = ?", (stare_id,)).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_migracja_v4_nie_rozpina_dziennika_transakcji():
+    """
+    Podmiana tabeli `punkty` idzie przez ALTER TABLE RENAME, a ten domyślnie
+    przepisuje klauzulę REFERENCES w `transakcje` na NOWĄ nazwę - dziennik
+    zostawałby przypięty do tabeli kasowanej chwilę później. Stąd
+    `PRAGMA legacy_alter_table` w `_przebuduj_punkty_do_v4`; bez niej ten
+    test pokazuje każdy wiersz transakcji jako naruszenie klucza obcego.
+    """
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_migracja_v4_przenosi_firmy_zpo_do_nadawcow_z_zapalona_flaga():
+    # `firmy_zpo` trzymała nazwy sieci, czyli dokładnie tych nadawców, dla
+    # których wypełnia się "w tym ZPO"; wpis mógł tam powstać ręcznie
+    # w Słownikach, zanim powstał pierwszy punkt - stąd przenosimy CAŁĄ tabelę
+    conn = _baza_alpha2()
+    try:
+        conn.execute("INSERT INTO firmy_zpo(nazwa) VALUES ('Sieć Bez Punktów')")
+        repo.migruj(conn)
+
+        assert conn.execute(
+            "SELECT liczy_zpo FROM nadawcy WHERE nazwa = 'Sieć Bez Punktów'"
+        ).fetchone()[0] == 1
+        assert not repo._istnieje_tabela(conn, "firmy_zpo")
+    finally:
+        conn.close()
+
+
+def test_migracja_v4_zlepia_punkty_ktore_v3_pozwalalo_zdublowac():
+    """
+    v3 NIE miało `UNIQUE(nadawca, adres)`, więc wiersz z PNI potrafił powstać
+    obok identycznego bez PNI - ta sama fizyczna lokalizacja jako dwa punkty.
+    v4 na to nie pozwala, więc para zlepia się w jeden punkt, a transakcje
+    przegrywającego lądują na wygrywającym. PNI nie może przy tym przepaść.
+    """
+    conn = _baza_alpha2()
+    try:
+        conn.execute(
+            "INSERT INTO punkty(nadawca, adres, pni_zpo)"
+            " VALUES ('Żabka', 'Odkryta 24', '228648')")
+        conn.execute(
+            "INSERT INTO transakcje(data, kurier_id, punkt_id, ilosc_total)"
+            " VALUES ('2026-08-11', 1, 2, 4)")
+
+        repo.migruj(conn)
+
+        assert conn.execute("SELECT COUNT(*) FROM punkty").fetchone()[0] == 1
+        assert conn.execute("SELECT pni_zpo FROM punkty").fetchone()[0] == "228648"
+        punkty_transakcji = {
+            r[0] for r in conn.execute("SELECT punkt_id FROM transakcje")}
+        assert punkty_transakcji == {1}
+        assert conn.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0] == 2
+    finally:
+        conn.close()
+
+
+def test_migracja_v4_nie_zaklada_slownika_adresowego_dla_adresu_bez_miasta():
+    # ta sama reguła co przy imporcie (`importer.get_or_create_adres`):
+    # migracja nie jest wyjątkiem, przez który śmieć wchodzi do słownika
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        assert conn.execute("SELECT COUNT(*) FROM miejscowosci").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM ulice").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_migracja_v4_jest_idempotentna():
+    conn = _baza_alpha2()
+    try:
+        repo.migruj(conn)
+        repo.migruj(conn)
+        assert conn.execute("SELECT COUNT(*) FROM punkty").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM nadawcy").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0] == 1
     finally:
         conn.close()
 

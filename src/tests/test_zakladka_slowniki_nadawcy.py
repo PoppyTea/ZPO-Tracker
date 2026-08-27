@@ -1,7 +1,8 @@
 """
-PodzakladkaNadawcowBezPni (0.1-alpha.3.2): naprawa literówek nadawców bez
-PNI (ZUS/PKO/Kruk...), dotąd nienaprawialnych w aplikacji - patrz
-repo.pobierz_nadawcow_bez_pni/zmien_nadawce_bez_pni. Wymaga środowiska
+PodzakladkaNadawcowBezPni („Popraw / scal nadawcę"): naprawa literówek
+nadawców, dla których nie liczy się ZPO (ZUS/PKO/Kruk...). Jedyna droga,
+w której rename na nazwę JUŻ ZAJĘTĄ jest scaleniem, a nie błędem UNIQUE -
+patrz repo.pobierz_nadawcow_bez_pni/zmien_nadawce_bez_pni. Wymaga środowiska
 graficznego - pomijany automatycznie, jeśli niedostępne (patrz
 test_gui_smoke.py, ten sam mechanizm).
 """
@@ -63,8 +64,7 @@ def test_zastosuj_zmiane_przemianowuje_i_odswieza(root, conn, tmp_path):
 
     podzakladka._zastosuj_zmiane("ZUS", "Zakład Ubezpieczeń Społecznych")
 
-    assert conn.execute("SELECT nadawca FROM punkty").fetchone()[0] == \
-        "Zakład Ubezpieczeń Społecznych"
+    assert repo.pobierz_punkty(conn)[0]["nadawca"] == "Zakład Ubezpieczeń Społecznych"
     assert [w["nazwa"] for w in podzakladka._wpisy] == ["Zakład Ubezpieczeń Społecznych"]
 
 
@@ -101,7 +101,7 @@ def test_zastosuj_zmiane_kolizja_pokazuje_blad_bez_zmiany(root, conn, tmp_path, 
     podzakladka._zastosuj_zmiane("Zaklad Ubezpieczen", "ZUS")
 
     assert len(bledy) == 1
-    nadawcy = {r[0] for r in conn.execute("SELECT nadawca FROM punkty")}
+    nadawcy = {p["nadawca"] for p in repo.pobierz_punkty(conn)}
     assert nadawcy == {"ZUS", "Zaklad Ubezpieczen"}  # bez zmian
 
 

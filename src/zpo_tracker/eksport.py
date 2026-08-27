@@ -130,13 +130,16 @@ def pobierz_transakcje_miesiaca(conn, rok, miesiac):
     pierwszy = date(rok, miesiac, 1)
     ostatni = date(rok, miesiac, calendar.monthrange(rok, miesiac)[1])
     wiersze = conn.execute(
-        """SELECT t.data, p.nadawca, p.adres, k.imie_nazwisko AS kurier,
+        """SELECT t.data, n.nazwa AS nadawca, a.surowy AS adres,
+                  k.imie_nazwisko AS kurier,
                   r.kod AS rejon, t.ilosc_total, t.ilosc_zpo, p.pni_zpo,
                   t.ilosc_vinted, t.ilosc_automaty, t.ilosc_kurier48,
                   t.ilosc_niezrealizowane, w.nazwa AS wykonawca
            FROM transakcje t
            JOIN kurierzy k ON k.id = t.kurier_id
            JOIN punkty p ON p.id = t.punkt_id
+           JOIN nadawcy n ON n.id = p.nadawca_id
+           JOIN adresy a ON a.id = p.adres_id
            LEFT JOIN rejony r ON r.id = t.rejon_id
            LEFT JOIN wykonawcy w ON w.id = t.wykonawca_id
            WHERE t.data BETWEEN ? AND ?

@@ -13,6 +13,7 @@ import openpyxl
 import pytest
 
 from zpo_tracker import eksport, repo, ustawienia
+from zpo_tracker.importer import get_or_create_punkt
 from zpo_tracker.gui.zakladka_import_export import DialogKorektyImportu, ZakladkaImportExport
 from zpo_tracker.import_orchestrator import zwaliduj_wiersze
 
@@ -150,9 +151,7 @@ def test_zatwierdzenie_zaufanego_zapisuje_pni(root, conn, tmp_path):
 def test_zakladka_rozpoznaje_wlasny_eksport(root, conn, tmp_path):
     kurier_id = conn.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Kowalski Jan')").lastrowid
-    punkt_id = conn.execute(
-        "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES ('Żabka', 'Odkryta 24', '228648')"
-    ).lastrowid
+    punkt_id, _ = get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
     conn.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total)"
         " VALUES ('2026-08-03', ?, ?, 3)", (kurier_id, punkt_id))

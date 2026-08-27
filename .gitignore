@@ -28,6 +28,19 @@ docs/internal/**/*
 **/BaSKa-dokumentacja*
 **/Dokumentacja-API*
 **/baska-raport-zastosowania*
+### Surowe eksporty z BaŚKi - nazwy pilnowane niezależnie od katalogu,
+### bo trafiają tu przez przeglądarkę i lądują tam, gdzie akurat wskaże
+### okno zapisu (także w rootcie repo, poza osłoną `data/*`).
+**/Odbiór w punkcie*.xls
+**/Odbiór w punkcie*.xlsx
+**/Odbiór w punkcie*.csv
+**/Nieprzypisane.xls*
+**/Nieprzypisane.csv
+**/AliasyPNA.xls*
+**/AliasyPNA.csv
+**/*exporty*.zip
+**/*WER_Ciemne*
+**/WW__WER*
 docs/internal/baska-rejonarz/AGENTS.md
 
 ## moje brudnopisy

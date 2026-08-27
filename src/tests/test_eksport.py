@@ -10,7 +10,7 @@ import pytest
 
 from zpo_tracker import repo, eksport
 from zpo_tracker.eksport import nazwa_arkusza
-from zpo_tracker.importer import import_row
+from zpo_tracker.importer import get_or_create_punkt, import_row
 from zpo_tracker.normalizacja import REJON_NIEZNANY
 
 REALNA_PROBKA = (
@@ -35,10 +35,7 @@ def _wstaw_prosta_transakcje(conn, **nadpisz):
     kurier_id = conn.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES (?)", ("Kowalski Jan",)
     ).lastrowid
-    punkt_id = conn.execute(
-        "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES (?, ?, ?)",
-        ("Żabka", "Odkryta 24", "228648"),
-    ).lastrowid
+    punkt_id, _ = get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
     conn.execute(
         """INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, ilosc_zpo)
            VALUES (?, ?, ?, ?, ?)""",
@@ -161,9 +158,7 @@ def test_pni_eksportuje_sie_jako_tekst_zachowujac_zera_wiodace(conn, tmp_path):
     # duplikat. Samo-zadana korupcja, bez udziału żadnego obcego pliku.
     kurier_id = conn.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Kowalski Jan')").lastrowid
-    punkt_id = conn.execute(
-        "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES ('Żabka', 'Odkryta 24', '007')"
-    ).lastrowid
+    punkt_id, _ = get_or_create_punkt(conn, "Żabka", "Odkryta 24", "007")
     conn.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total)"
         " VALUES ('2026-08-03', ?, ?, 3)", (kurier_id, punkt_id))

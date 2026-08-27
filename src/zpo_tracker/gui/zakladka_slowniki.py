@@ -104,7 +104,7 @@ class PodzakladkaProstegoSlownika(ttk.Frame):
 
 
 class PodzakladkaPunktowZpo(ttk.Frame):
-    """Punkty ZPO - nadawca (firma ZPO) + adres + PNI, tylko odczyt + dodawanie."""
+    """Punkty ZPO - nadawca + adres + PNI, tylko odczyt + dodawanie."""
 
     def __init__(self, parent, conn, katalog_danych):
         super().__init__(parent)
@@ -117,7 +117,7 @@ class PodzakladkaPunktowZpo(ttk.Frame):
         self.var_adres = tk.StringVar()
         self.var_pni = tk.StringVar()
         for etykieta, var, szer in [
-            ("Nadawca/firma ZPO", self.var_nadawca, 18),
+            ("Nadawca", self.var_nadawca, 18),
             ("Adres", self.var_adres, 28),
             ("PNI ZPO (opcjonalnie)", self.var_pni, 10),
         ]:
@@ -125,12 +125,12 @@ class PodzakladkaPunktowZpo(ttk.Frame):
             ttk.Entry(ramka_nowy, textvariable=var, width=szer).pack(side="left", padx=(2, 10))
         ttk.Button(ramka_nowy, text="+ dodaj", command=self.dodaj).pack(side="left")
 
-        # nadawca i firma ZPO to DWIE różne wartości (punkty.nadawca vs
-        # firmy_zpo.nazwa) - pokazywanie ich pod jednym nagłówkiem chowało
-        # rozjazd między nimi, czyli dokładnie to, co trzeba było zobaczyć
+        # Do v3 były tu DWIE kolumny nazwy (punkt vs słownik), żeby widać
+        # było ich rozjazd. W v4 nazwa jest jedna, więc druga kolumna pokazuje
+        # to, co teraz naprawdę różnicuje nadawców: czy liczy im się ZPO.
         kolumny = [
-            ("nadawca", "Nadawca (punkt)", 150),
-            ("firma_zpo", "Firma ZPO (słownik)", 150),
+            ("nadawca", "Nadawca", 150),
+            ("liczy_zpo", "Liczy ZPO", 80),
             ("adres", "Adres", 240),
             ("pni_zpo", "PNI ZPO", 90),
         ]
@@ -146,7 +146,8 @@ class PodzakladkaPunktowZpo(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         for p in repo.pobierz_punkty(self.conn):
             self.tree.insert("", "end", values=(
-                p["nadawca"], p["firma_zpo"] or "", p["adres"], p["pni_zpo"] or "",
+                p["nadawca"], "tak" if p["liczy_zpo"] else "", p["adres"],
+                p["pni_zpo"] or "",
             ))
 
     def dodaj(self):
@@ -171,11 +172,15 @@ class PodzakladkaPunktowZpo(ttk.Frame):
 
 class PodzakladkaNadawcowBezPni(ttk.Frame):
     """
-    Nadawcy BEZ PNI (ZUS, PKO, Kruk...) - 0.1-alpha.3.2. Istnieją WYŁĄCZNIE
-    jako `punkty.nadawca` (`firma_zpo_id IS NULL`), nigdy jako wiersz w
-    `firmy_zpo` (patrz `importer.get_or_create_punkt`, gałąź bez PNI) -
-    dotąd literówka w takiej nazwie była nienaprawialna w aplikacji, bo
-    „Firmy ZPO" niżej pokazuje wyłącznie sieci z PNI.
+    Nadawcy, dla których nie wypełnia się "w tym ZPO" (ZUS, PKO, Kruk...).
+
+    Powód, dla którego ta podzakładka powstała w `0.1-alpha.3.2`, zniknął
+    razem ze schematem v3: nadawcy bez PNI nie mają już własnej, ukrytej
+    egzystencji poza słownikiem - „Nadawcy" obok pokazuje ich wszystkich.
+    Zostaje natomiast jedno, czego tamta podzakładka nie potrafi: rename na
+    nazwę już zajętą jest tutaj SCALENIEM (`repo.zmien_nadawce_bez_pni`),
+    a w zwykłym słowniku byłby błędem UNIQUE. A to jest właśnie najczęstsza
+    poprawka literówki - „Zaklad Ubezpieczen" na istniejący już „ZUS".
     """
 
     def __init__(self, parent, conn, katalog_danych):
@@ -254,7 +259,7 @@ class ZakladkaSlowniki(ttk.Frame):
             PodzakladkaPunktowZpo(notebook, conn, katalog_danych),
             PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "wykonawcy", "Wykonawca"),
             PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "rejony", "Rejon"),
-            PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "firmy_zpo", "Firma ZPO"),
+            PodzakladkaProstegoSlownika(notebook, conn, katalog_danych, "nadawcy", "Nadawca"),
             # 0.1-alpha.3.2: DOŁOŻONA na końcu, żeby indeksy powyższych
             # (_podzakladki[0] itd., patrz test_gui_smoke.py) zostały nietknięte
             PodzakladkaNadawcowBezPni(notebook, conn, katalog_danych),
@@ -262,7 +267,7 @@ class ZakladkaSlowniki(ttk.Frame):
         for widget, etykieta in zip(
             self._podzakladki,
             ["Kurierzy", "Punkty ZPO", "Wykonawcy", "Rejony",
-             "Firmy ZPO (sieci z PNI)", "Nadawcy (bez PNI)"],
+             "Nadawcy", "Popraw / scal nadawcę"],
         ):
             notebook.add(widget, text=etykieta)
 

@@ -11,6 +11,7 @@ from datetime import date
 import pytest
 
 from zpo_tracker import repo
+from zpo_tracker.importer import get_or_create_punkt
 from zpo_tracker.models import Blankiet, WierszBlankietu
 
 
@@ -655,8 +656,8 @@ def test_scalanie_end_to_end_dodaje_nowa_transakcje_i_loguje_operacje(tmp_path):
     repo_modul.utworz_schemat(zrodlowa)
     kurier_id = zrodlowa.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
-    punkt_id = zrodlowa.execute(
-        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    punkt_id, _ = get_or_create_punkt(
+        zrodlowa, "Żabka", "Odkryta 24", None)
     zrodlowa.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, uuid)"
         " VALUES ('2026-08-01', ?, ?, 3, 'uuid-1')", (kurier_id, punkt_id))
@@ -694,8 +695,8 @@ def test_scalanie_konflikt_domyslnie_zostawia_docelowa_przez_dialog(tmp_path):
     repo_modul.utworz_schemat(zrodlowa)
     kurier_id = zrodlowa.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
-    punkt_id = zrodlowa.execute(
-        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    punkt_id, _ = get_or_create_punkt(
+        zrodlowa, "Żabka", "Odkryta 24", None)
     zrodlowa.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, uuid)"
         " VALUES ('2026-08-01', ?, ?, 5, 'uuid-1')", (kurier_id, punkt_id))
@@ -710,7 +711,7 @@ def test_scalanie_konflikt_domyslnie_zostawia_docelowa_przez_dialog(tmp_path):
             app.conn, app.katalog_danych, rodzaj="test", etykieta="e",
             funkcja=lambda conn: conn.execute(
                 "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')"))
-        app.conn.execute("INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')")
+        get_or_create_punkt(app.conn, "Żabka", "Odkryta 24", None)
         app.conn.execute(
             "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, uuid)"
             " VALUES ('2026-08-01', 1, 1, 3, 'uuid-docelowa')")

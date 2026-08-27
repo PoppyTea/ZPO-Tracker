@@ -58,6 +58,17 @@ this file alone.
 
 ## Work Guidance
 
+- **Not deployed yet — every `0.1-alpha.x` is a pre-user phase.** The
+  program is handed out for testing only; nobody keeps working data in it.
+  Consequence for design: there is no installed base to protect. Concerns
+  of the form "we must migrate/merge what users already have on disk" are
+  **unfounded until this paragraph is removed**, and must not constrain a
+  decision. Existing migration and repair paths (`repo.migruj`,
+  `repo.napraw_dane`, `app._przenies_ze_starej_lokalizacji`, the
+  `transakcje.zrodlo IS NULL` cohort) stay in the code — this rule frees
+  design decisions, it is not an instruction to delete them. Breaking the
+  schema is currently cheap: test databases are disposable. Remove this
+  paragraph on the user's word, not on your own judgement.
 - **TDD is mandatory for new production code**: red test → watch it fail →
   minimal implementation → green → refactor. Do not write implementation
   before a test without the user's explicit permission. Exception: pure
@@ -78,8 +89,8 @@ pytest
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
-734 tests are collected and 733 pass under the pip/system-Python setup
-above, with no skips (last run 2026-08-24). The one deselected test is
+889 tests are collected and 888 pass under the pip/system-Python setup
+above, with no skips (last run 2026-08-27, schema v4). The one deselected test is
 marked `slow` — a scale check that imports tens of thousands of rows; run
 the fast set with `pytest -m "not slow"`. Coverage includes a real
 1294-row slice of source data, both import and export round-trip.

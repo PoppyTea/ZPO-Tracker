@@ -190,3 +190,37 @@ def test_numer_budynku_nie_jest_normalizowany_rozmyto():
     """`56` i `56A` to dwa różne budynki, często w różnych rejonach."""
     assert adresy.rozbij("Kwiatowa 56").klucz_ulica_nr != \
            adresy.rozbij("Kwiatowa 56A").klucz_ulica_nr
+
+
+# --- sama nazwa rodzajowa to nie jest nazwa ulicy -----------------------
+#
+# Domknięcie tej samej dziury, przez którą przechodziło `"Piaseczno, al. 5"`.
+# Tam prefiks zjadał człon w całości i zostawał pusty string; tutaj zostaje
+# NIEPUSTY, ale bezwartościowy: `"al"` bez kropki nie łapie się we wzorcu
+# prefiksu, więc przeżywa jako nazwa ulicy.
+#
+# Dlaczego to nie jest drobiazg: taki adres ma `pewnosc='pelna'`, czyli
+# parser jest go PEWNY - a to jedyny warunek wpuszczający wpis do słownika
+# ulic. Powstawałaby tam ulica o nazwie „al", zbierająca pod sobą wszystkie
+# adresy tego kształtu z danej miejscowości.
+
+@pytest.mark.parametrize("zapis", [
+    "Ząbki, al 7",
+    "Ząbki, al. 7",
+    "Ząbki, aleja 7",
+    "Ząbki, ul 7",
+    "Ząbki, ulica 7",
+    "Ząbki, pl 7",
+    "Ząbki, plac 7",
+])
+def test_sam_wyraz_rodzajowy_nie_jest_ulica(zapis):
+    r = adresy.rozbij(zapis)
+    assert r.pewnosc == "brak"
+    assert r.ulica is None
+
+
+def test_wyraz_rodzajowy_z_nazwa_zostaje_ulica():
+    """Kontrola, żeby poprzedni test nie okazał się prawdziwy przez
+    wycięcie za dużo - `"Aleja Kwiatowa"` ma nadal działać."""
+    r = adresy.rozbij("Ząbki, aleja Kwiatowa 7")
+    assert (r.ulica, r.typ_ulicy, r.pewnosc) == ("Kwiatowa", "Aleja", "pelna")

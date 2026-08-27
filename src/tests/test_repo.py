@@ -130,30 +130,34 @@ def test_zmien_nazwe_w_slowniku(conn):
     assert wpisy[wpis_id] == "WA88"
 
 
-def test_zmiana_nazwy_firmy_zpo_propaguje_do_punktow(conn):
-    # firmy_zpo to jedyny "prosty słownik", który ma zdenormalizowanego
-    # bliźniaka w punkty.nadawca - bez propagacji rename w Słownikach
-    # natychmiast rozjeżdża obie kopie i nic tego nie naprawia
+def test_zmiana_nazwy_nadawcy_jest_widoczna_w_punktach_bez_zadnej_propagacji(conn):
+    """
+    To jest cel schematu v4, nie efekt uboczny. Do v3 nazwa nadawcy żyła
+    w DWÓCH miejscach naraz (`firmy_zpo.nazwa` i `punkty.nadawca`), więc
+    rename w Słownikach musiał ją kopiować do drugiego miejsca, a każde
+    pominięcie tej kopii rozjeżdżało obie na stałe i wymagało osobnej
+    naprawy danych. W v4 nazwa istnieje raz - nie ma czego propagować
+    ani czemu się rozjechać.
+    """
     from zpo_tracker.importer import get_or_create_punkt
     get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
-    firma_id = repo.pobierz_slownik(conn, "firmy_zpo")[0]["id"]
+    nadawca_id = repo.pobierz_slownik(conn, "nadawcy")[0]["id"]
 
-    repo.zmien_nazwe_w_slowniku(conn, "firmy_zpo", firma_id, "Żabka Polska")
+    repo.zmien_nazwe_w_slowniku(conn, "nadawcy", nadawca_id, "Żabka Polska")
 
-    nadawcy = [r[0] for r in conn.execute("SELECT nadawca FROM punkty")]
-    assert nadawcy == ["Żabka Polska"]
+    assert [p["nadawca"] for p in repo.pobierz_punkty(conn)] == ["Żabka Polska"]
 
 
 def test_zmiana_nazwy_zwyklego_slownika_nie_rusza_punktow(conn):
-    # kurierzy/wykonawcy/rejony są referencowane wyłącznie przez FK -
-    # propagacja dotyczy TYLKO firmy_zpo, nie wszystkich słowników
+    # kurierzy/wykonawcy/rejony są referencowane przez transakcje, nie przez
+    # punkty - rename w nich nie ma prawa dotknąć nazwy nadawcy
     from zpo_tracker.importer import get_or_create_punkt
     get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
     wpis_id = repo.dodaj_do_slownika(conn, "wykonawcy", "Koli")
 
     repo.zmien_nazwe_w_slowniku(conn, "wykonawcy", wpis_id, "Koli sp. z o.o.")
 
-    assert [r[0] for r in conn.execute("SELECT nadawca FROM punkty")] == ["Żabka"]
+    assert [p["nadawca"] for p in repo.pobierz_punkty(conn)] == ["Żabka"]
 
 
 def test_dodaj_do_slownika_rejon_smieciowy_trafia_w_kanoniczny_wiersz(conn):
@@ -192,11 +196,12 @@ def test_nie_mozna_usunac_kanonicznego_rejonu_nieznanego(conn):
         repo.usun_z_slownika(conn, "rejony", wpis_id)
 
 
-# --- 0.1-alpha.3.2: nadawcy bez PNI (ZUS/PKO/Kruk...) - naprawialność ---
-# root cause: firmy_zpo powstaje TYLKO w gałęzi PNI importer.get_or_create_punkt,
-# więc literówki nadawców bez PNI dotąd nie dało się poprawić w aplikacji.
+# --- nadawcy, dla których nie liczy się ZPO (ZUS/PKO/Kruk...) ---
+# Podzakładka „Popraw / scal nadawcę": jedyna droga, w której rename na nazwę
+# JUŻ ZAJĘTĄ jest scaleniem, a nie błędem UNIQUE - a to najczęstsza poprawka
+# literówki, bo poprawna forma zwykle już w bazie jest.
 
-def test_pobierz_nadawcow_bez_pni_pomija_nadawcow_z_pni(conn):
+def test_pobierz_nadawcow_bez_pni_pomija_nadawcow_liczacych_zpo(conn):
     from zpo_tracker.importer import get_or_create_punkt
     get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")  # ma PNI
     get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)     # bez PNI
@@ -223,23 +228,23 @@ def test_zmien_nadawce_bez_pni_propaguje_do_wszystkich_punktow(conn):
 
     repo.zmien_nadawce_bez_pni(conn, "ZUS", "Zakład Ubezpieczeń Społecznych")
 
-    nadawcy = {r[0] for r in conn.execute("SELECT nadawca FROM punkty")}
+    nadawcy = {p["nadawca"] for p in repo.pobierz_punkty(conn)}
     assert nadawcy == {"Zakład Ubezpieczeń Społecznych"}
 
 
-def test_zmien_nadawce_bez_pni_nie_rusza_nadawcy_z_pni(conn):
+def test_zmien_nadawce_bez_pni_nie_rusza_nadawcy_liczacego_zpo(conn):
     from zpo_tracker.importer import get_or_create_punkt
     get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
 
     repo.zmien_nadawce_bez_pni(conn, "Żabka", "Żabka Polska")
 
-    assert conn.execute("SELECT nadawca FROM punkty").fetchone()[0] == "Żabka"
+    assert repo.pobierz_punkty(conn)[0]["nadawca"] == "Żabka"
 
 
 def test_zmien_nadawce_bez_pni_zlepienie_przepina_transakcje_i_usuwa_przegrywajacy(conn):
-    # dwa RÓŻNE punkty (różne pisownie), ten sam adres - po zmianie nazwy
-    # stają się identyczne pod (nadawca, adres); schemat nie ma na to UNIQUE,
-    # więc trzeba je scalić ręcznie (wzorzec _przemianuj_lub_scal_firme)
+    # dwa RÓŻNE punkty (różne pisownie nadawcy), ten sam adres - po scaleniu
+    # nadawców obie pary (nadawca_id, adres_id) byłyby identyczne, czego
+    # zabrania UNIQUE, więc kolizję trzeba wykryć PRZED przepięciem
     from zpo_tracker.importer import get_or_create_punkt
     id_a, _ = get_or_create_punkt(conn, "ZUS", "Senatorska 6/8", None)
     id_b, _ = get_or_create_punkt(conn, "Zaklad Ubezpieczen", "Senatorska 6/8", None)
@@ -251,7 +256,7 @@ def test_zmien_nadawce_bez_pni_zlepienie_przepina_transakcje_i_usuwa_przegrywaja
 
     repo.zmien_nadawce_bez_pni(conn, "Zaklad Ubezpieczen", "ZUS")
 
-    punkty = conn.execute("SELECT id FROM punkty WHERE nadawca = 'ZUS'").fetchall()
+    punkty = [p for p in repo.pobierz_punkty(conn) if p["nadawca"] == "ZUS"]
     assert len(punkty) == 1  # zlepione w jeden
     transakcja = conn.execute("SELECT punkt_id FROM transakcje").fetchone()
     assert transakcja["punkt_id"] == id_a  # przepięta na wygrywający (najniższe id)
@@ -278,7 +283,7 @@ def test_zmien_nadawce_bez_pni_kolizja_transakcji_blokuje_calosc(conn):
         repo.zmien_nadawce_bez_pni(conn, "Zaklad Ubezpieczen", "ZUS")
 
     # CAŁOŚĆ zablokowana - nawet sam rename się nie utrzymał
-    nadawcy = {r[0] for r in conn.execute("SELECT nadawca FROM punkty")}
+    nadawcy = {p["nadawca"] for p in repo.pobierz_punkty(conn)}
     assert nadawcy == {"ZUS", "Zaklad Ubezpieczen"}
     assert conn.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0] == 2
 
@@ -291,9 +296,9 @@ def test_mozna_usunac_zwykly_nieuzywany_rejon(conn):
 
 
 def test_usun_z_slownika_nieuzywany_wpis(conn):
-    wpis_id = repo.dodaj_do_slownika(conn, "firmy_zpo", "Testowa Sieć")
-    repo.usun_z_slownika(conn, "firmy_zpo", wpis_id)
-    assert repo.pobierz_slownik(conn, "firmy_zpo") == []
+    wpis_id = repo.dodaj_do_slownika(conn, "nadawcy", "Testowa Sieć")
+    repo.usun_z_slownika(conn, "nadawcy", wpis_id)
+    assert repo.pobierz_slownik(conn, "nadawcy") == []
 
 
 def test_scal_kurierow_przenosi_transakcje_i_usuwa_stary(conn):
@@ -314,7 +319,7 @@ def test_scal_kurierow_przenosi_transakcje_i_usuwa_stary(conn):
     assert kurier_transakcji == id_nowy
 
 
-def test_pobierz_punkty_z_nazwa_firmy_zpo(conn):
+def test_pobierz_punkty_pokazuje_nadawce_adres_i_flage_zpo(conn):
     blok = _blok(wiersze=[
         WierszBlankietu(nadawca="Żabka", adres="Odkryta 24", pni_zpo="228648", ilosc_total=3),
     ])
@@ -322,7 +327,9 @@ def test_pobierz_punkty_z_nazwa_firmy_zpo(conn):
     punkty = repo.pobierz_punkty(conn)
     assert len(punkty) == 1
     assert punkty[0]["nadawca"] == "Żabka"
-    assert punkty[0]["firma_zpo"] == "Żabka"
+    assert punkty[0]["adres"] == "Odkryta 24"
+    assert punkty[0]["pni_zpo"] == "228648"
+    assert punkty[0]["liczy_zpo"] == 1
 
 
 def test_dane_przetrwaja_zamkniecie_i_ponowne_otwarcie_polaczenia(tmp_path):
@@ -489,23 +496,39 @@ def test_znajdz_punkty_po_adresie_wiele_nadawcow_pod_tym_samym_adresem(conn):
     assert nadawcy == {"Żabka", "Gemartis"}
 
 
-def test_czy_nadawca_ma_pni_prawda(conn):
+def test_czy_nadawca_liczy_zpo_prawda(conn):
     repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="Żabka", adres="Odkryta 24",
                         pni_zpo="228648", ilosc_total=3),
     ]))
-    assert repo.czy_nadawca_ma_pni(conn, "Żabka") is True
+    assert repo.czy_nadawca_liczy_zpo(conn, "Żabka") is True
 
 
-def test_czy_nadawca_ma_pni_falsz_dla_zwyklego_nadawcy(conn):
+def test_czy_nadawca_liczy_zpo_falsz_dla_zwyklego_nadawcy(conn):
     repo.zapisz_blankiet(conn, _blok(wiersze=[
         WierszBlankietu(nadawca="ZUS", adres="Senatorska 6/8", ilosc_total=1),
     ]))
-    assert repo.czy_nadawca_ma_pni(conn, "ZUS") is False
+    assert repo.czy_nadawca_liczy_zpo(conn, "ZUS") is False
 
 
-def test_czy_nadawca_ma_pni_nieznany_nadawca(conn):
-    assert repo.czy_nadawca_ma_pni(conn, "Nikt Taki") is False
+def test_czy_nadawca_liczy_zpo_nieznany_nadawca(conn):
+    assert repo.czy_nadawca_liczy_zpo(conn, "Nikt Taki") is False
+
+
+def test_czy_nadawca_liczy_zpo_nie_wymaga_znanego_pni(conn):
+    """
+    Sedno zmiany w v4: punkt JEST ZPO, ale PNI trzeba dopiero zdobyć
+    z paragonu. Do v3 pytaliśmy o obecność PNI, więc pole "w tym ZPO" było
+    wtedy wygaszone i kurierowej liczby nie dało się w ogóle wpisać -
+    a to najczęstszy przypadek, nie brzegowy.
+    """
+    repo.zapisz_blankiet(conn, _blok(wiersze=[
+        WierszBlankietu(nadawca="Żabka", adres="Odkryta 24",
+                        pni_zpo="228648", ilosc_total=3),
+    ]))
+    conn.execute("UPDATE punkty SET pni_zpo = NULL")
+
+    assert repo.czy_nadawca_liczy_zpo(conn, "Żabka") is True
 
 
 def test_historia_rejonow_punktu_jednoznaczna(conn):
@@ -556,9 +579,8 @@ def test_historia_wykonawcow_kuriera_nowy_kurier(conn):
 # WYŁĄCZNIE polem wyjściowym, wyprowadzanym z rozstrzygniętego punktu.
 
 def _punkt_z_pni(conn, pni, nadawca="Żabka", adres="Odkryta 24"):
-    conn.execute(
-        "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES (?, ?, ?)",
-        (nadawca, adres, pni))
+    from zpo_tracker.importer import get_or_create_punkt
+    get_or_create_punkt(conn, nadawca, adres, pni)
 
 
 def test_znajduje_punkt_po_pni(conn):

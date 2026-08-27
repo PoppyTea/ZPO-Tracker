@@ -143,8 +143,8 @@ class Aplikacja(tk.Tk):
         dziennik.skonfiguruj(self.katalog_danych)
         dziennik.zainstaluj_haki(self, katalog=self.katalog_danych)
 
-        # naprawa rozjazdów danych sprzed tej wersji (rejony "???",
-        # firmy_zpo <-> punkty.nadawca) - CELOWO poza `_upewnij_schemat`/
+        # naprawa rozjazdów danych sprzed tej wersji (rejony "???") -
+        # CELOWO poza `_upewnij_schemat`/
         # `migruj`, patrz docstring `repo.napraw_dane`. Migawka PRZED (przez
         # `operacje.wykonaj`) bo to największa jednorazowa mutacja danych
         # w tym wydaniu; awaria NIE może zablokować startu aplikacji na
@@ -153,7 +153,7 @@ class Aplikacja(tk.Tk):
         try:
             operacje.wykonaj(
                 self.conn, self.katalog_danych, rodzaj="naprawa_danych",
-                etykieta="rejony ??? + firmy_zpo", funkcja=repo.napraw_dane,
+                etykieta="rejony ???", funkcja=repo.napraw_dane,
             )
         except Exception:
             logging.getLogger("zpo_tracker").exception(

@@ -19,6 +19,12 @@ Jak w całym projekcie — patrz root `CLAUDE.md`.
   ilości przesyłek) — repozytorium docelowo trafia na **publiczny**
   GitHub, więc nic z tego katalogu (poza `README.md`) nigdy nie może
   zostać dodane do gita.
+- Surowe eksporty z BaŚKi mają **drugą, niezależną osłonę**: wzorce po
+  nazwie pliku (`**/Odbiór w punkcie*`, `**/Nieprzypisane.*`,
+  `**/AliasyPNA.*`, `**/*exporty*.zip`) łapią je w KAŻDYM katalogu repo,
+  nie tylko tutaj. Powód: pliki przychodzą przez przeglądarkę i lądują
+  tam, gdzie wskaże okno zapisu — archiwum z tymi eksportami trafiło już
+  raz do rootu repo, czyli poza zasięg wzorca `data/*`.
 
 ## Work Guidance
 

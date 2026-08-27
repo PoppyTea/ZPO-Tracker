@@ -27,6 +27,19 @@ PEWNOSC_PELNA = "pelna"
 PEWNOSC_BEZ_MIASTA = "bez_miasta"
 PEWNOSC_BRAK = "brak"
 
+# Wartości `adresy.stan` (schema.sql v4). Tutaj, a nie w importer.py, bo to
+# słownik pojęć o adresie, a nie szczegół zapisu do bazy. Kolejne dwa stany
+# ze schematu ("potwierdzony", "do_decyzji") powstają dopiero przy udziale
+# człowieka - parser sam z siebie nie ma jak ich nadać.
+STAN_SUROWY = "surowy"
+STAN_SPARSOWANY = "sparsowany"
+
+# Wartości `adresy.zrodlo_miejscowosci` NIE mieszkają tutaj, tylko w
+# `dedukcja_miejscowosci` (ZRODLO_*) - razem z kaskadą, która je nadaje.
+# Drugi zestaw napisów na te same przypadki zamieniłby tę kolumnę w coś,
+# czego nie da się odpytać: raport pewności byłby po cichu niepełny,
+# zależnie od tego, którędy wiersz wszedł do bazy.
+
 # Numer budynku: cyfry, opcjonalna litera, potem dowolnie wiele członów po
 # ukośniku lub myślniku ("6/8", "49-51", "143A/145/LU2"). Rozdzielenie
 # budynku od lokalu dzieje się DOPIERO w `_odetnij_lokal_po_ukosniku` -
@@ -48,6 +61,15 @@ _LOKAL_ZE_ZNACZNIKIEM = re.compile(
 _PREFIKS_ULICY = re.compile(r"^(?:aleje|aleja|al\.|al\s)\s*", re.IGNORECASE)
 
 _MA_CYFRE = re.compile(r"\d")
+
+# Wyrazy rodzajowe, które same z siebie nie są nazwą ulicy. Wzorzec
+# prefiksu wyżej odcina tylko część wariantów ("al." tak, gołe "al" bez
+# spacji po sobie już nie), a to, co przeżyje, jest NIEPUSTE - więc
+# przechodzi kontrolę niepustości i trafia do słownika jako ulica "al".
+# Węższe niż pusty string, ale tak samo bezwartościowe.
+_WYRAZY_RODZAJOWE = frozenset({
+    "al", "aleja", "aleje", "ul", "ulica", "pl", "plac", "os", "osiedle",
+})
 
 
 @dataclass(frozen=True)
@@ -112,6 +134,22 @@ def rozbij(adres) -> Rozbicie:
 
     nr, lokal_z_ukosnika = _odetnij_lokal_po_ukosniku(dopasowanie.group("nr"))
     typ, ulica = _odetnij_prefiks(dopasowanie.group("ulica").strip())
+    if _czy_sam_wyraz_rodzajowy(ulica):
+        # Ta sama dziura co niżej, tylko węższa: tu po odcięciu prefiksu
+        # zostaje NIEPUSTY, ale bezwartościowy wyraz - "al" bez kropki nie
+        # łapie się we wzorcu prefiksu, więc przeżywa jako nazwa ulicy.
+        # Skutek jest identyczny: `pewnosc='pelna'` wpuszcza go do
+        # słownika, gdzie powstaje ulica o nazwie "al".
+        return Rozbicie(surowy=surowy, miejscowosc=miejscowosc)
+    if not ulica.strip():
+        # Niepustość ulicy trzeba sprawdzić DRUGI raz, już PO odcięciu
+        # prefiksu: `"Piaseczno, al. 5"` przechodzi sprawdzenie wyżej
+        # (człon "al." jest niepusty), a prefiks zjada go w całości.
+        # Bez tego wychodzi Rozbicie o `pewnosc='pelna'` i pustej ulicy -
+        # najgorszy możliwy kształt, bo parser jest go PEWNY, więc trafia
+        # prosto do słownika ulic i zbiera pod jednym pustym wpisem
+        # wszystkie adresy tego kształtu.
+        return Rozbicie(surowy=surowy, miejscowosc=miejscowosc)
 
     return Rozbicie(
         surowy=surowy,
@@ -185,3 +223,8 @@ def _odetnij_prefiks(ulica):
     if _PREFIKS_ULICY.match(ulica):
         return "Aleja", _PREFIKS_ULICY.sub("", ulica).strip()
     return None, ulica
+
+
+def _czy_sam_wyraz_rodzajowy(ulica) -> bool:
+    """Czy to, co zostało, jest samym wyrazem rodzajowym bez nazwy."""
+    return ulica.strip().rstrip(".").casefold() in _WYRAZY_RODZAJOWE

@@ -173,7 +173,7 @@ def zaimportuj(conn, zwalidowane, mapowanie_scalen=None, *, zaufany=False,
     - **PNI** - to klucz tożsamości punktu (`punkty.pni_zpo UNIQUE`), więc
       śmieciowa wartość po cichu podpina transakcję pod cudzy punkt, zamienia
       kolejne wiersze w "duplikaty" (utrata danych) i trwale otwiera pole
-      "w tym ZPO" przez `repo.czy_nadawca_ma_pni`;
+      "w tym ZPO" przez `repo.czy_nadawca_liczy_zpo`;
     - **rejon** - dane z papierowych blankietów są zakłamane, a rejonarz
       (0.1-alpha.3.3/3.4) będzie źródłem prawdy; wiersze lądują na
       kanonicznym "???" i staną się kandydatami do uzupełnienia.

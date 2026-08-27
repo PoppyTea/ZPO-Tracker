@@ -3,6 +3,13 @@ Ręczne scalanie dwóch baz: docelowa (żywa, ta w której pracuje użytkownik)
 WCHŁANIA źródłową (wskazany plik `.db`) - JEDNOKIERUNKOWO, źródło zostaje
 NIETKNIĘTE (bezpieczne do ponownego przejrzenia/scalenia gdzie indziej).
 
+Źródło musi mieć BIEŻĄCĄ wersję schematu: jest otwierane tylko do odczytu,
+więc nie ma jak go po drodze zmigrować. Rozjazd wersji odrzuca
+`_sprawdz_wersje_zrodla` czytelnym komunikatem, ZANIM cokolwiek zostanie
+zmienione. Brakujące KOLUMNY w `transakcje` są mimo to obsłużone przez
+`w.get(...)` i stają się NULL - to zabezpieczenie na bazy w stanie
+pośrednim, nie furtka dla starego układu tabel.
+
 Dwa etapy, rozdzielone celowo (ten sam wzorzec co import_orchestrator.py):
 1. `zaplanuj_scalenie` - WYŁĄCZNIE odczyt obu baz, buduje pełny plan, nic
    nie zmienia - użytkownik widzi co się stanie ZANIM cokolwiek się stanie.
@@ -15,13 +22,15 @@ data+kurier+punkt, różne ilości) NIE jest rozstrzygany automatycznie -
 
 Dopasowanie słowników po kluczu NATURALNYM, nie po `id` - te same
 osoby/miejsca mają różne surogatowe ID na różnych stacjach:
-- kurierzy/wykonawcy/rejony/firmy_zpo: nazwa, z tym samym trójpoziomowym
+- kurierzy/wykonawcy/rejony/nadawcy: nazwa, z tym samym trójpoziomowym
   podejściem co import_orchestrator.py (bezpieczne białe znaki -> automat,
   literówka -> propozycja, WYŁĄCZNIE diakrytyki -> ostrzeżenie, nigdy
   automat). Wykrywanie literówek tylko dla kurierów - świadomie wąskie,
   jak w imporcie (docs/domain-model.md: to konkretny, nazwany problem).
 - punkty: PNI ZPO albo (nadawca, adres) - identycznie jak przy imporcie
-  (`importer.get_or_create_punkt`), reużyte wprost przy wykonaniu.
+  (`importer.get_or_create_punkt`), reużyte wprost przy wykonaniu. Adresy
+  i nadawcy jadą jako TEKST, nie jako id: w v4 są osobnymi tabelami, ale
+  ich surogatowe id są tak samo lokalne dla stacji jak każde inne.
 - users: `id` to już deterministyczny UUIDv5 (patrz uzytkownicy.py) - żadne
   dopasowanie nie jest potrzebne, tylko wykrycie rzadkiego przypadku tej
   samej osoby z różnym numerem kadrowym na obu stacjach (miękkie
@@ -40,8 +49,17 @@ _SLOWNIKI_PROSTE = {
     "kurierzy": ("imie_nazwisko", True),
     "wykonawcy": ("nazwa", False),
     "rejony": ("kod", False),
-    "firmy_zpo": ("nazwa", False),
+    "nadawcy": ("nazwa", False),
 }
+
+# Punkt źródłowy w postaci porównywalnej między bazami: nadawca i adres jako
+# tekst, bo tylko on jest wspólny dla obu stacji (id nie jest).
+_SQL_PUNKTY_ZRODLOWE = """
+    SELECT p.id, n.nazwa AS nadawca, a.surowy AS adres, p.pni_zpo
+    FROM punkty p
+    JOIN nadawcy n ON n.id = p.nadawca_id
+    JOIN adresy a ON a.id = p.adres_id
+"""
 
 _POLA_ILOSCI = ["ilosc_total", "ilosc_zpo", "ilosc_vinted",
                 "ilosc_automaty", "ilosc_kurier48", "ilosc_niezrealizowane"]
@@ -49,6 +67,36 @@ _POLA_ILOSCI = ["ilosc_total", "ilosc_zpo", "ilosc_vinted",
 
 def _ilosci_identyczne(a, b):
     return all(a[p] == b[p] for p in _POLA_ILOSCI)
+
+
+class NiezgodnaWersjaZrodla(Exception):
+    """
+    Plik źródłowy ma inną wersję struktury niż ten program. Komunikat idzie
+    wprost do użytkownika (`gui/zakladka_scalanie.py` pokazuje `str(e)`
+    w okienku), więc jest po polsku i bez żargonu.
+    """
+
+
+def _sprawdz_wersje_zrodla(conn_zrodlowa):
+    """
+    Odpowiednik `repo.sprawdz_zgodnosc_wersji`, ale w OBIE strony i dla
+    pliku, którego nie da się naprawić: źródło jest otwierane tylko do
+    odczytu, więc `migruj` nie ma tu zastosowania.
+
+    Bez tego sprawdzenia użytkownik wskazujący starszy plik dostawał surowy
+    `no such table: nadawcy` - komunikat, z którym nie zrobi nic w programie
+    pisanym dla ludzi, którzy nie mają jak go zinterpretować.
+    """
+    wersja = conn_zrodlowa.execute("PRAGMA user_version").fetchone()[0]
+    if wersja == repo.WERSJA_SCHEMATU:
+        return
+    kierunek = "starszej" if wersja < repo.WERSJA_SCHEMATU else "nowszej"
+    raise NiezgodnaWersjaZrodla(
+        f"Wybrany plik pochodzi ze {kierunek} wersji programu (wersja danych "
+        f"{wersja}, ten program obsługuje {repo.WERSJA_SCHEMATU}). "
+        f"Scalanie zostało przerwane - nic nie zostało zmienione. "
+        f"Otwórz ten plik w programie w tej samej wersji, żeby go podnieść."
+    )
 
 
 def _otworz_zrodlo_tylko_do_odczytu(sciezka):
@@ -122,6 +170,24 @@ def _dopasuj_prosty_slownik(conn_docelowa, conn_zrodlowa, tabela, kolumna,
             "ostrzezenia": ostrzezenia}
 
 
+def _przenies_flage_liczy_zpo(conn_docelowa, conn_zrodlowa, mapa_nadawcow):
+    """
+    `liczy_zpo` to flaga, nie nazwa, więc generyczny INSERT prostego słownika
+    (sama kolumna `nazwa`) jej nie przenosi. Scalamy ją przez OR: zapaloną
+    zapalamy w celu, zgaszonej NIE gasimy.
+
+    Powód asymetrii jest ten sam co w `importer.get_or_create_nadawca`:
+    zgaszenie flagi wygasza pole "w tym ZPO" u nadawcy, dla którego druga
+    stacja to pole normalnie wypełniała - i nikt tego nie zauważy, bo pole
+    po prostu przestaje przyjmować wpis. Flaga zapalona nadmiarowo jest
+    widoczna i naprawialna w Słownikach.
+    """
+    for r in conn_zrodlowa.execute("SELECT id, liczy_zpo FROM nadawcy"):
+        if r["liczy_zpo"]:
+            conn_docelowa.execute(
+                "UPDATE nadawcy SET liczy_zpo = 1 WHERE id = ?", (mapa_nadawcow[r["id"]],))
+
+
 def _dopasuj_uzytkownikow(conn_docelowa, conn_zrodlowa):
     """
     `users.id` to już deterministyczny UUIDv5 - dopasowanie to prosty
@@ -163,8 +229,15 @@ def _znajdz_punkt_docelowy(conn_docelowa, nadawca, adres, pni_zpo):
         row = conn_docelowa.execute(
             "SELECT id FROM punkty WHERE pni_zpo = ?", (pni_zpo,)).fetchone()
     else:
+        # bez predykatu `AND pni_zpo IS NULL`, tak samo jak w
+        # `get_or_create_punkt` po przejściu na v4: para (nadawca, adres)
+        # opisuje tam JEDEN punkt, więc wiersz bez PNI dopasuje się do
+        # istniejącego punktu ZPO zamiast wyglądać na nowy
         row = conn_docelowa.execute(
-            "SELECT id FROM punkty WHERE nadawca = ? AND adres = ? AND pni_zpo IS NULL",
+            """SELECT p.id FROM punkty p
+               JOIN nadawcy n ON n.id = p.nadawca_id
+               JOIN adresy a ON a.id = p.adres_id
+               WHERE n.nazwa = ? AND a.surowy = ?""",
             (nadawca, adres),
         ).fetchone()
     return row["id"] if row else None
@@ -177,7 +250,7 @@ def _zaplanuj_punkty(conn_docelowa, conn_zrodlowa):
     (ten sam klucz co przy imporcie).
     """
     mapowanie, nowe = {}, []
-    for r in conn_zrodlowa.execute("SELECT id, nadawca, adres, pni_zpo FROM punkty"):
+    for r in conn_zrodlowa.execute(_SQL_PUNKTY_ZRODLOWE):
         id_docelowe = _znajdz_punkt_docelowy(conn_docelowa, r["nadawca"], r["adres"], r["pni_zpo"])
         if id_docelowe is not None:
             mapowanie[r["id"]] = id_docelowe
@@ -226,7 +299,10 @@ def _zaplanuj_transakcje(conn_docelowa, conn_zrodlowa, slowniki, punkty):
                 "SELECT imie_nazwisko FROM kurierzy WHERE id = ?",
                 (kurier_docelowy,)).fetchone()[0]
             punkt = conn_docelowa.execute(
-                "SELECT nadawca, adres FROM punkty WHERE id = ?",
+                """SELECT n.nazwa AS nadawca, a.surowy AS adres FROM punkty p
+                   JOIN nadawcy n ON n.id = p.nadawca_id
+                   JOIN adresy a ON a.id = p.adres_id
+                   WHERE p.id = ?""",
                 (punkt_docelowy,)).fetchone()
             konflikty.append({
                 "id_transakcji_zrodlowej": w["id"],
@@ -248,6 +324,7 @@ def zaplanuj_scalenie(conn_docelowa, sciezka_zrodlowa):
     """
     conn_zrodlowa = _otworz_zrodlo_tylko_do_odczytu(sciezka_zrodlowa)
     try:
+        _sprawdz_wersje_zrodla(conn_zrodlowa)
         slowniki = {
             tabela: _dopasuj_prosty_slownik(
                 conn_docelowa, conn_zrodlowa, tabela, kolumna, wykryj_literowki)
@@ -293,6 +370,7 @@ def wykonaj_scalenie(conn_docelowa, sciezka_zrodlowa, *,
 
     conn_zrodlowa = _otworz_zrodlo_tylko_do_odczytu(sciezka_zrodlowa)
     try:
+        _sprawdz_wersje_zrodla(conn_zrodlowa)
         with repo.transakcja(conn_docelowa):
             wynik = _wykonaj_scalenie_bez_transakcji(
                 conn_docelowa, conn_zrodlowa,
@@ -347,6 +425,8 @@ def _wykonaj_scalenie_bez_transakcji(conn_docelowa, conn_zrodlowa,
 
         mapy[tabela] = mapa
 
+    _przenies_flage_liczy_zpo(conn_docelowa, conn_zrodlowa, mapy["nadawcy"])
+
     # 2. użytkownicy - id już globalnie spójny (UUIDv5), dopisz tylko
     #    brakujących; ostrzeżenia o rozjeździe nr_kadrowy są informacyjne,
     #    nie blokują (niska stawka w porównaniu do konfliktu ilości)
@@ -360,7 +440,7 @@ def _wykonaj_scalenie_bez_transakcji(conn_docelowa, conn_zrodlowa,
     # 3. punkty - reużywa get_or_create_punkt WPROST (ten sam klucz co przy
     #    imporcie, idempotentne, bezpieczne do wywołania na mutującym conn)
     mapa_punkty = {}
-    for p in conn_zrodlowa.execute("SELECT id, nadawca, adres, pni_zpo FROM punkty"):
+    for p in conn_zrodlowa.execute(_SQL_PUNKTY_ZRODLOWE):
         id_docelowe, _ostrzezenia = get_or_create_punkt(
             conn_docelowa, p["nadawca"], p["adres"], p["pni_zpo"])
         mapa_punkty[p["id"]] = id_docelowe

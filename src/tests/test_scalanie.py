@@ -10,6 +10,7 @@ from datetime import date
 import pytest
 
 from zpo_tracker import repo, scalanie
+from zpo_tracker.importer import get_or_create_punkt
 from zpo_tracker.normalizacja import REJON_NIEZNANY
 
 
@@ -105,7 +106,7 @@ def test_dopasowanie_literowka_to_propozycja_gdy_wlaczone(docelowa, zrodlowa):
 
 
 def test_dopasowanie_literowka_bez_wlaczonego_wykrywania_ląduje_jako_nowa(docelowa, zrodlowa):
-    # wykonawcy/rejony/firmy_zpo NIE dostają wykrywania literówek - to
+    # wykonawcy/rejony/nadawcy NIE dostają wykrywania literówek - to
     # świadome, wąskie rozwiązanie tylko dla kurierów (docs/domain-model.md)
     docelowa.execute("INSERT INTO wykonawcy (nazwa) VALUES ('Koli')")
     zrodlowa.execute("INSERT INTO wykonawcy (nazwa) VALUES ('Kolii')")
@@ -160,6 +161,59 @@ def test_uzytkownik_ten_sam_id_inny_nr_kadrowy_to_ostrzezenie(docelowa, zrodlowa
     assert len(wynik["ostrzezenia"]) == 1
 
 
+# --- wersja schematu źródła ---
+#
+# Źródło jest otwierane TYLKO DO ODCZYTU, więc `scalanie.py` nie ma jak go
+# zmigrować - i to jest w porządku. Nie jest w porządku, żeby użytkownik
+# dowiadywał się o tym z `no such table: nadawcy`: to program dla ludzi,
+# którzy nie mają jak z takim komunikatem nic zrobić (docs/ux-ui.md).
+# Odpowiednik `repo.sprawdz_zgodnosc_wersji`, tylko w drugą stronę.
+
+def _plik_o_wersji(tmp_path, wersja, nazwa="obce.db"):
+    sciezka = tmp_path / nazwa
+    conn = repo.polacz(str(sciezka))
+    repo.utworz_schemat(conn)
+    conn.execute(f"PRAGMA user_version = {wersja}")
+    conn.close()
+    return sciezka
+
+
+def test_zaplanuj_scalenie_odrzuca_starsze_zrodlo_z_czytelnym_komunikatem(
+        docelowa, tmp_path):
+    sciezka = _plik_o_wersji(tmp_path, repo.WERSJA_SCHEMATU - 1)
+
+    with pytest.raises(scalanie.NiezgodnaWersjaZrodla) as e:
+        scalanie.zaplanuj_scalenie(docelowa, sciezka)
+
+    # komunikat trafia wprost do użytkownika (zakladka_scalanie.py pokazuje
+    # str(e) w okienku), więc po polsku i bez żargonu SQLite
+    assert "starsz" in str(e.value).lower()
+
+
+def test_zaplanuj_scalenie_odrzuca_nowsze_zrodlo(docelowa, tmp_path):
+    sciezka = _plik_o_wersji(tmp_path, repo.WERSJA_SCHEMATU + 1)
+
+    with pytest.raises(scalanie.NiezgodnaWersjaZrodla) as e:
+        scalanie.zaplanuj_scalenie(docelowa, sciezka)
+
+    assert "nowsz" in str(e.value).lower()
+
+
+def test_wykonaj_scalenie_tez_sprawdza_wersje_zrodla(docelowa, tmp_path):
+    # sprawdzenie tylko w planie nie wystarcza: `wykonaj_scalenie` jest
+    # osobnym wejściem i to ono mutuje bazę docelową
+    sciezka = _plik_o_wersji(tmp_path, repo.WERSJA_SCHEMATU - 1)
+
+    with pytest.raises(scalanie.NiezgodnaWersjaZrodla):
+        scalanie.wykonaj_scalenie(docelowa, sciezka)
+
+
+def test_zgodne_zrodlo_przechodzi(docelowa, plik_zrodlowy):
+    sciezka, zrodlowa = plik_zrodlowy
+    zrodlowa.commit()
+    scalanie.zaplanuj_scalenie(docelowa, sciezka)  # nie rzuca
+
+
 # --- pełny przepływ: zaplanuj_scalenie + wykonaj_scalenie ---
 
 def _wstaw_transakcje(conn, kurier, nadawca, adres, data_, ilosc, pni=None):
@@ -170,13 +224,7 @@ def _wstaw_transakcje(conn, kurier, nadawca, adres, data_, ilosc, pni=None):
     ).fetchone() else conn.execute(
         "SELECT id FROM kurierzy WHERE imie_nazwisko = ?", (kurier,)
     ).fetchone()[0]
-    punkt = conn.execute(
-        "SELECT id FROM punkty WHERE nadawca = ? AND adres = ?", (nadawca, adres)
-    ).fetchone()
-    punkt_id = punkt[0] if punkt else conn.execute(
-        "INSERT INTO punkty (nadawca, adres, pni_zpo) VALUES (?, ?, ?)",
-        (nadawca, adres, pni),
-    ).lastrowid
+    punkt_id, _ = get_or_create_punkt(conn, nadawca, adres, pni)
     conn.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, uuid)"
         " VALUES (?, ?, ?, ?, ?)",
@@ -256,8 +304,9 @@ def test_wykonaj_scalenie_dodaje_nowa_transakcje_z_nowym_kurierem_i_punktem(doce
 
     assert wynik["dodano_transakcji"] == 1
     wiersz = docelowa.execute(
-        "SELECT k.imie_nazwisko, p.nadawca, t.ilosc_total FROM transakcje t"
+        "SELECT k.imie_nazwisko, n.nazwa AS nadawca, t.ilosc_total FROM transakcje t"
         " JOIN kurierzy k ON k.id = t.kurier_id JOIN punkty p ON p.id = t.punkt_id"
+        " JOIN nadawcy n ON n.id = p.nadawca_id"
     ).fetchone()
     assert wiersz["imie_nazwisko"] == "Nowak Piotr"
     assert wiersz["ilosc_total"] == 3
@@ -340,8 +389,7 @@ def test_wykonaj_scalenie_transakcja_z_null_rejonem_dostaje_kanoniczny(docelowa,
     sciezka, zrodlowa = plik_zrodlowy
     kurier_id = zrodlowa.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
-    punkt_id = zrodlowa.execute(
-        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    punkt_id, _ = get_or_create_punkt(zrodlowa, "Żabka", "Odkryta 24", None)
     zrodlowa.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, rejon_id, ilosc_total, uuid)"
         " VALUES ('2026-08-01', ?, ?, NULL, 3, 'uuid-1')", (kurier_id, punkt_id))
@@ -380,8 +428,7 @@ def test_wykonaj_scalenie_kopiuje_atrybucje_ze_zrodla(docelowa, plik_zrodlowy):
     )
     kurier_id = zrodlowa.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
-    punkt_id = zrodlowa.execute(
-        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    punkt_id, _ = get_or_create_punkt(zrodlowa, "Żabka", "Odkryta 24", None)
     zrodlowa.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, uuid, autor_id, utworzono)"
         " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -403,8 +450,7 @@ def test_wykonaj_scalenie_przenosi_sesje_i_zrodlo_ze_zrodla(docelowa, plik_zrodl
     sciezka, zrodlowa = plik_zrodlowy
     kurier_id = zrodlowa.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
-    punkt_id = zrodlowa.execute(
-        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    punkt_id, _ = get_or_create_punkt(zrodlowa, "Żabka", "Odkryta 24", None)
     zrodlowa.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total, sesja_uuid, zrodlo)"
         " VALUES (?, ?, ?, ?, ?, ?)",
@@ -418,14 +464,21 @@ def test_wykonaj_scalenie_przenosi_sesje_i_zrodlo_ze_zrodla(docelowa, plik_zrodl
     assert wiersz["zrodlo"] == "formularz"
 
 
-def _zrodlo_plikowa_v2(tmp_path):
+def _zrodlo_w_stanie_posrednim(tmp_path):
     """
-    Baza źródłowa w kształcie sprzed `0.1-alpha.3.2`: ma już users +
-    atrybucję (alpha.3) i indeksy dedukcji (alpha.3.1), ale NIE ma
-    sesja_uuid/zrodlo. `wykonaj_scalenie` (`w.get(...)` w `scalanie.py`)
-    musi to przeżyć bez wybuchania - brakujące kolumny stają się NULL.
+    Baza źródłowa W STANIE POŚREDNIM: `user_version` już bieżąca, ale
+    `transakcje` bez kolumn `sesja_uuid`/`zrodlo` - realny skutek przerwanej
+    aktualizacji albo przywróconej migawki (ta sama klasa stanu, co
+    `test_transakcje.py::test_migracja_ze_stanu_posredniego_...`).
+    `wykonaj_scalenie` (`w.get(...)` w `scalanie.py`) musi to przeżyć bez
+    wybuchania - brakujące kolumny stają się NULL.
+
+    Numer wersji MUSI być bieżący, bo od tego wydania `_sprawdz_wersje_zrodla`
+    odrzuca rozjazd wersji zanim dojdzie do czytania tabel. Ten test pilnuje
+    odporności na brakujące KOLUMNY, a nie na stary układ tabel - tamten
+    scenariusz zamyka `test_zaplanuj_scalenie_odrzuca_starsze_zrodlo_...`.
     """
-    sciezka = tmp_path / "zrodlo_v2.db"
+    sciezka = tmp_path / "zrodlo_niepelne.db"
     conn = sqlite3.connect(str(sciezka))
     conn.row_factory = sqlite3.Row
     conn.executescript("""
@@ -434,10 +487,19 @@ def _zrodlo_plikowa_v2(tmp_path):
         CREATE TABLE rejony (id INTEGER PRIMARY KEY, kod TEXT NOT NULL UNIQUE);
         INSERT INTO rejony (kod) VALUES ('???');
         CREATE TABLE wykonawcy (id INTEGER PRIMARY KEY, nazwa TEXT NOT NULL UNIQUE);
-        CREATE TABLE firmy_zpo (id INTEGER PRIMARY KEY, nazwa TEXT NOT NULL UNIQUE);
+        CREATE TABLE nadawcy (
+            id INTEGER PRIMARY KEY, nazwa TEXT NOT NULL UNIQUE,
+            liczy_zpo INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE adresy (
+            id INTEGER PRIMARY KEY, surowy TEXT NOT NULL UNIQUE,
+            ulica_id INTEGER, nr_budynku TEXT, nr_lokalu TEXT, pna TEXT,
+            stan TEXT NOT NULL DEFAULT 'surowy', zrodlo_miejscowosci TEXT,
+            rejon_baska TEXT, rejon_potwierdzony TEXT);
         CREATE TABLE punkty (
-            id INTEGER PRIMARY KEY, nadawca TEXT NOT NULL, adres TEXT NOT NULL,
-            pni_zpo TEXT UNIQUE, firma_zpo_id INTEGER REFERENCES firmy_zpo(id));
+            id INTEGER PRIMARY KEY,
+            nadawca_id INTEGER NOT NULL REFERENCES nadawcy(id),
+            adres_id INTEGER NOT NULL REFERENCES adresy(id),
+            pni_zpo TEXT UNIQUE, UNIQUE(nadawca_id, adres_id));
         CREATE TABLE users (
             id TEXT PRIMARY KEY, login TEXT NOT NULL UNIQUE,
             alias TEXT, nr_kadrowy TEXT UNIQUE, utworzono TEXT);
@@ -453,18 +515,17 @@ def _zrodlo_plikowa_v2(tmp_path):
             komentarz TEXT, uuid TEXT UNIQUE,
             autor_id TEXT REFERENCES users(id), utworzono TEXT, zmodyfikowano TEXT,
             UNIQUE(data, kurier_id, punkt_id));
-        PRAGMA user_version = 2;
     """)
+    conn.execute(f"PRAGMA user_version = {repo.WERSJA_SCHEMATU}")
     conn.commit()
     return sciezka, conn
 
 
-def test_wykonaj_scalenie_ze_zrodla_v2_bez_kolumn_sesji_daje_null(docelowa, tmp_path):
-    sciezka, zrodlowa = _zrodlo_plikowa_v2(tmp_path)
+def test_wykonaj_scalenie_ze_zrodla_bez_kolumn_sesji_daje_null(docelowa, tmp_path):
+    sciezka, zrodlowa = _zrodlo_w_stanie_posrednim(tmp_path)
     kurier_id = zrodlowa.execute(
         "INSERT INTO kurierzy (imie_nazwisko) VALUES ('Nowak Piotr')").lastrowid
-    punkt_id = zrodlowa.execute(
-        "INSERT INTO punkty (nadawca, adres) VALUES ('Żabka', 'Odkryta 24')").lastrowid
+    punkt_id, _ = get_or_create_punkt(zrodlowa, "Żabka", "Odkryta 24", None)
     zrodlowa.execute(
         "INSERT INTO transakcje (data, kurier_id, punkt_id, ilosc_total)"
         " VALUES (?, ?, ?, ?)",

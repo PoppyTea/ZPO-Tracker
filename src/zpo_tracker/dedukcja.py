@@ -103,7 +103,7 @@ def dedukuj_wiersz(conn, *, kurier, adres, nadawca=None, ilosc_total=None,
         pni = kandydaci_punktow[0]["pni_zpo"]
         if pni:
             pola["pni_zpo"] = StanPola(wartosc=pni, stan="zielony", aktywne=False)
-        elif nadawca_efektywny and repo.czy_nadawca_ma_pni(conn, nadawca_efektywny):
+        elif nadawca_efektywny and repo.czy_nadawca_liczy_zpo(conn, nadawca_efektywny):
             pola["pni_zpo"] = StanPola(
                 stan="pomaranczowy", aktywne=True,
                 powod="Ten nadawca ma PNI w innych lokalizacjach - "
@@ -130,10 +130,10 @@ def dedukuj_wiersz(conn, *, kurier, adres, nadawca=None, ilosc_total=None,
     else:
         pola["rejon"] = _rejon_z_migawki(conn_rejonarz, adres)
 
-    # ilosc_zpo: aktywność <- WYŁĄCZNIE czy_nadawca_ma_pni, nigdy nie
+    # ilosc_zpo: aktywność <- WYŁĄCZNIE czy_nadawca_liczy_zpo, nigdy nie
     # bramowana przez ilosc_total (patrz docstring modułu) - ilosc_total
     # rządzi tylko WARTOŚCIĄ autouzupełnienia, nie aktywnością
-    if nadawca_efektywny and repo.czy_nadawca_ma_pni(conn, nadawca_efektywny):
+    if nadawca_efektywny and repo.czy_nadawca_liczy_zpo(conn, nadawca_efektywny):
         wartosc = ilosc_zpo if ilosc_zpo is not None else ilosc_total
         pola["ilosc_zpo"] = StanPola(
             wartosc=wartosc, stan="zielony" if wartosc is not None else "pomaranczowy",
