@@ -118,6 +118,30 @@ def _dopasuj_po_literowce(klucz, warianty):
     return trafienia[0] if len(trafienia) == 1 else None
 
 
+def zbuduj_wiersz(naglowki, wartosci) -> dict:
+    """
+    Surowe komórki -> `{nagłówek: wartość}`, z PIERWSZYM wystąpieniem
+    przy powtórzonym nagłówku.
+
+    Nie da się tu użyć `dict(zip(...))`, bo ten bierze OSTATNIE
+    wystąpienie - a `dopasuj_kolumny` trzyma się pierwszego. Rozjazd był
+    realny i cichy: eksport „Odbiór w punkcie" ma dwie kolumny `WER`
+    o różnym znaczeniu (węzeł jednostki kontra węzeł doręczeń), więc
+    filtr działał na innej kolumnie, niż wskazywało mapowanie. Obie
+    liczby wyglądały równie sensownie i nic nie sygnalizowało pomyłki.
+
+    Wiersz krótszy od nagłówka uzupełnia się `None` - arkusze bywają
+    obcięte na końcu, a wyjątek w środku importu 22 tysięcy wierszy
+    kosztowałby cały import.
+    """
+    wiersz = {}
+    for i, naglowek in enumerate(naglowki):
+        if naglowek in wiersz:
+            continue
+        wiersz[naglowek] = wartosci[i] if i < len(wartosci) else None
+    return wiersz
+
+
 def wyodrebnij(surowy_wiersz, dopasowanie: Dopasowanie) -> dict:
     """Surowy wiersz (nagłówek -> wartość) na wiersz w nazwach docelowych.
     Kolumny spoza mapowania po prostu nie wchodzą."""

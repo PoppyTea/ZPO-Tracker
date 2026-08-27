@@ -176,3 +176,39 @@ def test_ostrzezenia_o_tresci_wskazuja_kolumne():
     probki = {"pna": ["Warszawa", "Radom"], "nr": ["56", "12"]}
     ostrzezenia = profil_kolumn.sprawdz_tresc(d, probki)
     assert [o.pole for o in ostrzezenia] == ["pna"]
+
+
+# --- powtórzony nagłówek: która kolumna wygrywa -------------------------
+
+def test_zbuduj_wiersz_przy_powtorzonym_naglowku_bierze_PIERWSZY():
+    """
+    ZNALEZIONE NA REALNYM EKSPORCIE. Plik „Odbiór w punkcie" ma DWIE
+    kolumny nazwane `WER`, znaczące różne rzeczy: pierwsza to węzeł
+    jednostki obsługującej punkt, dziewiąta - węzeł doręczeń pod ten
+    adres. Filtr po jednej daje 2354 punkty, po drugiej 2349.
+
+    Zwykłe `dict(zip(naglowki, wartosci))` bierze OSTATNIE wystąpienie,
+    więc filtrowało po innej kolumnie, niż wskazało `dopasuj_kolumny`
+    (które trzyma się pierwszej). Rozjazd był cichy: obie liczby wyglądają
+    równie sensownie, a nic nie sygnalizowało, że to nie ta kolumna.
+    """
+    naglowki = ["WER", "Miejscowość", "WER"]
+    wiersz = profil_kolumn.zbuduj_wiersz(naglowki, ["WW", "Warszawa", "WA"])
+    assert wiersz["WER"] == "WW"
+
+
+def test_zbuduj_wiersz_jest_zgodny_z_dopasowaniem():
+    """Obie funkcje MUSZĄ wybierać tę samą kolumnę - inaczej mapowanie
+    mówi o jednej, a wartość pochodzi z drugiej."""
+    naglowki = ["WER", "WER"]
+    profil = profil_kolumn.Profil(pola={"wezel": ["WER"]}, wymagane=frozenset())
+    dopasowanie = profil_kolumn.dopasuj_kolumny(naglowki, profil)
+    wiersz = profil_kolumn.zbuduj_wiersz(naglowki, ["pierwszy", "drugi"])
+    assert profil_kolumn.wyodrebnij(wiersz, dopasowanie) == {"wezel": "pierwszy"}
+
+
+def test_zbuduj_wiersz_toleruje_krotszy_wiersz_niz_naglowek():
+    """Arkusze bywają obcięte na końcu - brakująca komórka ma być None,
+    a nie wyjątkiem w środku importu 22 tysięcy wierszy."""
+    wiersz = profil_kolumn.zbuduj_wiersz(["a", "b", "c"], ["x"])
+    assert wiersz == {"a": "x", "b": None, "c": None}

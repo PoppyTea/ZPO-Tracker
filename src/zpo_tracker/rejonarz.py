@@ -26,7 +26,8 @@ from pathlib import Path
 
 from zpo_tracker import arkusze, normalizacja, profil_kolumn
 
-WERSJA_SCHEMATU = 1
+# 2: doszła tabela `punkty_zpo` (rejestr PNI -> adres + rejon).
+WERSJA_SCHEMATU = 2
 NAZWA_PLIKU = "rejonarz.db"
 
 # Interesują nas wyłącznie rejony tego węzła i tego typu kierowania.
@@ -54,10 +55,47 @@ PROFIL = profil_kolumn.Profil(
     wymagane=frozenset({"miejscowosc", "nr", "rejon"}),
 )
 
-# Ten sam profil, ale BEZ wymaganego rejonu - dla eksportu, w którym rejon
-# jest nazwą arkusza, a nie kolumną. Osobna stała, nie mutacja tamtej:
-# dwa kształty eksportu przychodzą z BaŚKi naprzemiennie i oba muszą dać
-# się rozpoznać w tym samym przebiegu.
+# Rejestr punktów ZPO. `pni` jest jedynym polem WYMAGANYM, bo jest kluczem
+# tożsamości - adres bywa niepełny, PNI nie może być.
+PROFIL_PUNKTY_ZPO = profil_kolumn.Profil(
+    pola={
+        # W nowszym eksporcie to JEDNA kolumna z dwiema wartościami
+        # ("542261 / TN6000468") - rozbija ją `_rozbij_pni`.
+        "pni": ["PNI", "PNI / Id ZPO", "PNI/Id ZPO"],
+        "nazwa": ["Placówka/ZPO", "Placówka / ZPO", "Nazwa"],
+        "jednostka": ["RS/RD", "RS / RD"],
+        "miejscowosc": ["Miejscowość", "Miasto"],
+        "ulica": ["Ulica"],
+        "nr": ["Nr", "Nr domu", "Numer domu"],
+        "pna": ["PNA", "PNA (skr.)", "Kod pocztowy"],
+        "wezel": ["Węzeł", "Węzeł oddawczy", "WER"],
+        "tk": ["TK", "Typ kier.", "Typ kierowania"],
+        "rejon": ["Rejon", "Rejon doręczeń"],
+    },
+    wymagane=frozenset({"pni"}),
+)
+
+# Węzły, do których punktów jeździmy. UWAGA: to NIE jest ten sam filtr,
+# co `WEZEL_ZPO` dla rejonarza adresowego, i różnica jest celowa.
+#
+#   rejonarz adresowy  -> tylko WW    ("jakie rejony doręczeń ma NASZ węzeł")
+#   rejestr punktów    -> WA i WW     ("do których punktów jeździmy")
+#
+# Zmierzone na realnym eksporcie (22 393 wiersze): `WER in (WA, WW)` daje
+# 2354 punkty. Sam `WW` dałby 223, czyli 9% z tego. Filtr po jednostce
+# `RS/RD` dałby 3138 - o 784 za dużo, bo wciąga punkty obsługiwane przez
+# Ciechanów, Płock, Kielce, Siedlce i Ostrołękę, gdzie nasi kurierzy
+# nie jeżdżą.
+WEZLY_PUNKTOW = frozenset({"WA", "WW"})
+
+RODZAJ_REJONARZ = "rejonarz"
+RODZAJ_PUNKTY_ZPO = "punkty_zpo"
+
+
+# Ten sam profil co PROFIL, ale BEZ wymaganego rejonu - dla eksportu,
+# w którym rejon jest nazwą arkusza, a nie kolumną. Osobna stała, nie
+# mutacja tamtej: oba kształty eksportu przychodzą z BaŚKi naprzemiennie
+# i muszą dać się rozpoznać w tym samym przebiegu.
 PROFIL_BEZ_REJONU = profil_kolumn.Profil(
     pola=PROFIL.pola,
     wymagane=frozenset({"miejscowosc", "nr"}),
@@ -82,6 +120,18 @@ CREATE TABLE IF NOT EXISTS adresy_rejony (
     -- Dwa RÓŻNE rejony pod tym samym kluczem zostają oba i dopiero
     -- `znajdz_rejon` odmawia rozstrzygnięcia.
     UNIQUE (klucz, rejon)
+);
+-- Rejestr punktów ZPO. OSOBNA tabela, nie kolumny w `adresy_rejony`:
+-- każdy import PODMIENIA swoją tabelę w całości, więc wspólna oznaczałaby,
+-- że wczytanie punktów kasuje rejonarz adresowy - i odwrotnie.
+CREATE TABLE IF NOT EXISTS punkty_zpo (
+    pni         TEXT PRIMARY KEY,   -- TEKST: "007" i "7" to różne punkty
+    id_zpo      TEXT,               -- identyfikator BaŚKi, gdy eksport go niesie
+    nazwa       TEXT,
+    jednostka   TEXT,               -- RS/RD; zapisywana, filtrujemy po węźle
+    miejscowosc TEXT, ulica TEXT, nr TEXT, pna TEXT,
+    wezel       TEXT, tk TEXT,      -- zapisywane, NIE filtrowane
+    rejon       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_rejonarz_klucz ON adresy_rejony(klucz);
 CREATE INDEX IF NOT EXISTS idx_rejonarz_ulica_nr ON adresy_rejony(klucz_ulica_nr);
@@ -258,7 +308,8 @@ def _wczytaj_arkusz(conn, skoroszyt, nazwa, wynik, rozmiar_partii) -> bool:
 
     partia = []
     for surowy in iterator:
-        wiersz = profil_kolumn.wyodrebnij(dict(zip(naglowki, surowy)), dopasowanie)
+        wiersz = profil_kolumn.wyodrebnij(
+            profil_kolumn.zbuduj_wiersz(naglowki, surowy), dopasowanie)
         if not any(_tekst(w) for w in wiersz.values()):
             continue                      # pusty wiersz na końcu arkusza
         wynik.wczytane += 1
@@ -467,3 +518,164 @@ def _po_ulicy_i_numerze(conn, ulica, nr):
         (klucz_ulica_nr(ulica, nr),),
     ).fetchall()
     return rejony[0][0] if len(rejony) == 1 else None
+
+
+# --- rejestr punktów ZPO ------------------------------------------------
+
+@dataclass
+class WynikImportuPunktow:
+    wczytane: int = 0
+    zapisane: int = 0
+    pominiete: int = 0          # obcy węzeł
+    bez_pni: int = 0            # wiersz bez klucza tożsamości
+    bez_filtrowania: bool = False   # eksport nie miał kolumny węzła
+
+
+def rozpoznaj_rodzaj(sciezka) -> str:
+    """
+    Czy to rejestr punktów ZPO, czy rejonarz adresowy — po ZAWARTOŚCI.
+
+    Jeden przycisk „Importuj", rozróżnienie po obecności kolumny PNI.
+    Osobny przycisk na każdy rodzaj eksportu byłby przerzuceniem na
+    użytkownika decyzji, którą program potrafi podjąć sam — a użytkownik
+    nie ma jak wiedzieć, który plik jest którym rodzajem.
+    """
+    with arkusze.otworz(sciezka) as skoroszyt:
+        for nazwa in skoroszyt.nazwy_arkuszy():
+            iterator = skoroszyt.wiersze(nazwa)
+            try:
+                naglowki = list(next(iterator))
+            except StopIteration:
+                continue
+            finally:
+                iterator.close()
+            if "pni" in profil_kolumn.dopasuj_kolumny(
+                    naglowki, PROFIL_PUNKTY_ZPO).mapowanie.values():
+                return RODZAJ_PUNKTY_ZPO
+    return RODZAJ_REJONARZ
+
+
+def _rozbij_pni(wartosc):
+    """
+    `"542261 / TN6000468"` -> `("542261", "TN6000468")`.
+
+    Nowszy eksport skleja PNI z identyfikatorem BaŚKi w jednej kolumnie.
+    Starszy podaje samo PNI - wtedy drugi człon jest `None`, a nie pustym
+    napisem, żeby dało się odróżnić „nie ma" od „jest puste".
+    """
+    tekst = _tekst(wartosc)
+    if "/" not in tekst:
+        return tekst, None
+    pni, _, id_zpo = tekst.partition("/")
+    return pni.strip(), id_zpo.strip() or None
+
+
+def zaimportuj_punkty(conn, sciezka) -> WynikImportuPunktow:
+    """
+    Wczytuje eksport „Odbiór w punkcie" i PODMIENIA rejestr punktów.
+
+    To jest ogniwo, którego rejonarz adresowy nie ma: PNI jest jedyną
+    rzeczą na paragonie, którą da się odczytać jednoznacznie, a ten
+    eksport wiąże je z kanonicznym adresem i rejonem. Pozwala więc
+    ustalić rejon BEZ parsowania adresu.
+
+    Filtr po węźle, przyjmujący OBA warszawskie — patrz `WEZLY_PUNKTOW`.
+    """
+    wynik = WynikImportuPunktow()
+    with arkusze.otworz(sciezka) as skoroszyt:
+        with conn:
+            conn.execute("BEGIN")
+            conn.execute("DELETE FROM punkty_zpo")
+            uzyte = 0
+            for nazwa in skoroszyt.nazwy_arkuszy():
+                if _wczytaj_punkty_z_arkusza(conn, skoroszyt, nazwa, wynik):
+                    uzyte += 1
+            if not uzyte:
+                # W ŚRODKU transakcji, żeby `DELETE` został wycofany —
+                # nieudany import nie może zostawić pustego rejestru.
+                raise NiezgodnyArkusz(
+                    "Żaden arkusz nie ma kolumny PNI, więc to nie jest "
+                    "eksport punktów ZPO."
+                )
+    return wynik
+
+
+def _wczytaj_punkty_z_arkusza(conn, skoroszyt, nazwa, wynik) -> bool:
+    iterator = skoroszyt.wiersze(nazwa)
+    try:
+        naglowki = list(next(iterator))
+    except StopIteration:
+        return False
+
+    dopasowanie = profil_kolumn.dopasuj_kolumny(naglowki, PROFIL_PUNKTY_ZPO)
+    if not dopasowanie.kompletne:
+        iterator.close()
+        return False
+
+    umie_filtrowac = "wezel" in dopasowanie.mapowanie.values()
+    if not umie_filtrowac:
+        # JAWNIE, bo inaczej użytkownik wziąłby ogólnopolską listę za swoją.
+        wynik.bez_filtrowania = True
+
+    partia = []
+    for surowy in iterator:
+        wiersz = profil_kolumn.wyodrebnij(
+            profil_kolumn.zbuduj_wiersz(naglowki, surowy), dopasowanie)
+        if not any(_tekst(w) for w in wiersz.values()):
+            continue
+        wynik.wczytane += 1
+
+        if umie_filtrowac and _tekst(wiersz.get("wezel")).upper() not in WEZLY_PUNKTOW:
+            wynik.pominiete += 1
+            continue
+
+        pni, id_zpo = _rozbij_pni(wiersz.get("pni"))
+        if not pni:
+            wynik.bez_pni += 1
+            continue
+
+        partia.append((
+            pni, id_zpo,
+            _tekst(wiersz.get("nazwa")) or None,
+            _tekst(wiersz.get("jednostka")) or None,
+            _tekst(wiersz.get("miejscowosc")) or None,
+            _tekst(wiersz.get("ulica")) or None,
+            _tekst(wiersz.get("nr")) or None,
+            _tekst(wiersz.get("pna")) or None,
+            _tekst(wiersz.get("wezel")) or None,
+            _tekst(wiersz.get("tk")) or None,
+            normalizacja.normalizuj_rejon_baska(_tekst(wiersz.get("rejon")))
+            if _tekst(wiersz.get("rejon")) else None,
+        ))
+    if partia:
+        conn.executemany(
+            "INSERT OR REPLACE INTO punkty_zpo (pni, id_zpo, nazwa, jednostka,"
+            " miejscowosc, ulica, nr, pna, wezel, tk, rejon)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", partia)
+        wynik.zapisane += len(partia)
+    return True
+
+
+def znajdz_po_pni(conn, pni):
+    """
+    Punkt po PNI albo `None`.
+
+    Porównanie TEKSTOWE, nigdy liczbowe: `"007"` i `"7"` to dwa różne
+    punkty, a ich zrównanie to ta sama samo-zadana korupcja, którą
+    naprawialiśmy w eksporcie miesiąca.
+
+    Zwraca SŁOWNIK, nie krotkę: to połączenie celowo nie ma
+    `row_factory` (`zbuduj_szukaj` oddaje krotki i tak jest testowane),
+    a odczyt pojedynczego punktu po pozycji w krotce rozjechałby się przy
+    pierwszej zmianie kolejności kolumn.
+    """
+    wiersz = conn.execute(
+        "SELECT pni, id_zpo, nazwa, jednostka, miejscowosc, ulica, nr, pna,"
+        " wezel, tk, rejon FROM punkty_zpo WHERE pni = ?",
+        (_tekst(pni),),
+    ).fetchone()
+    if wiersz is None:
+        return None
+    return dict(zip(
+        ("pni", "id_zpo", "nazwa", "jednostka", "miejscowosc", "ulica", "nr",
+         "pna", "wezel", "tk", "rejon"), wiersz))
