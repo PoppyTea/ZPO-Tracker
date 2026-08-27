@@ -283,6 +283,21 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   Nieczytelny plik to `PLIK_OBCY`, nie wyjątek: „nie umiem zweryfikować"
   znaczy dokładnie tyle co „nie ufam", a decyzja o zaufaniu nie może
   wysadzić importu.
+- `arkusze.py` (`0.1-alpha.5.0`) — JEDNA warstwa czytania skoroszytów,
+  niezależna od formatu. Powód jest twardy: `openpyxl` **nie otwiera
+  `.xls` w ogóle** (inny format pliku, OLE2 — nie kwestia wersji), a
+  wszystkie eksporty z BaŚKi przychodzą właśnie w nim. Dwie decyzje:
+  (1) **format rozpoznajemy po magicznych bajtach, nie po rozszerzeniu** —
+  pliki przychodzą przez przeglądarkę i bywają przemianowane; przy okazji
+  `openpyxl.load_workbook` robi dokładnie to, czego ten moduł ma nie
+  robić (sprawdza rozszerzenie ŚCIEŻKI i odmawia otwarcia poprawnego
+  `.xlsx` nazwanego `.xls`), więc dostaje otwarty UCHWYT zamiast ścieżki;
+  (2) **oba silniki oddają te same wartości** — w `.xls` każda liczba
+  jest zmiennoprzecinkowa, więc numer domu `8` przychodzi jako `8.0`
+  i po sklejeniu klucza daje `"8.0"`, czyli inny adres. `xlrd` nie ma
+  trybu strumieniowego, stąd `on_demand=True` + `unload_sheet`
+  w `finally` (konsument bywa leniwy i przerywa iterację). Zmierzone:
+  219 arkuszy / 277 tys. wierszy w 1,4 s przy szczycie 84 MB.
 - `profil_kolumn.py` (`0.1-alpha.3.3`) — dopasowanie kolumn arkusza po
   NAGŁÓWKU, nie po pozycji. Profil jest parametrem, nie stałą modułową,
   więc moduł nie wie nic o rejonach. Porównanie idzie po
@@ -291,7 +306,17 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   niejednoznaczność. `dopasuj_kolumny` **nie rzuca przy pierwszym braku**:
   oddaje pełny obraz (`braki` + `nierozpoznane`), bo rzucanie pokazywałoby
   jeden problem naraz. Powtórzony nagłówek nie nadpisuje pierwszego —
-  arkusze bywają sklejane z kilku. `pasuje_do_wzorca` zwraca **None dla
+  arkusze bywają sklejane z kilku.
+  **`zbuduj_wiersz` zamiast `dict(zip(naglowki, wartosci))`** — ten drugi
+  bierze OSTATNIE wystąpienie powtórzonego nagłówka, a `dopasuj_kolumny`
+  trzyma się PIERWSZEGO. Rozjazd był realny i cichy: eksport „Odbiór
+  w punkcie" ma dwie kolumny `WER` o różnym znaczeniu (węzeł jednostki
+  obsługującej punkt kontra węzeł doręczeń pod ten adres), więc filtr
+  działał na innej kolumnie niż mapowanie — 2349 punktów zamiast 2354,
+  a obie liczby wyglądają równie wiarygodnie. Uzupełnia też `None` dla
+  wiersza krótszego od nagłówka: arkusze bywają obcięte, a wyjątek
+  w środku importu 22 tysięcy wierszy kosztowałby cały import.
+  `pasuje_do_wzorca` zwraca **None dla
   pól bez wzorca**, nie False: "nie wiem" i "nie pasuje" to dwie różne
   odpowiedzi, a ich zlanie zamieniłoby siatkę bezpieczeństwa w generator
   fałszywych alarmów. **Świadomie NIE podpięty pod
@@ -318,6 +343,30 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   `TYP_KIEROWANIA_ZPO="1"` jest tutaj, nie w normalizacji (wymaga widoku
   na cały wiersz); brak tych kolumn w arkuszu oznacza brak filtrowania,
   ale **jawnie zaznaczony** w `WynikImportu.bez_filtrowania`.
+  **`punkty_zpo` (`0.1-alpha.5.0`) — DRUGI rejestr w tym samym pliku
+  `.db`, osobna tabela.** PNI → kanoniczny adres + rejon, czyli ogniwo,
+  którego rejonarz adresowy nie ma: PNI jest jedyną rzeczą na paragonie
+  odczytywalną jednoznacznie, więc pozwala ustalić rejon BEZ parsowania
+  adresu. Osobna tabela, bo każdy import PODMIENIA swoją w całości —
+  wspólna oznaczałaby, że wczytanie punktów kasuje rejonarz adresowy.
+  **Filtr po węźle przyjmuje OBA warszawskie (`WEZLY_PUNKTOW` = WA, WW)
+  i to NIE jest ten sam filtr, co `WEZEL_ZPO` dla rejonarza adresowego** —
+  tam pytanie brzmi „jakie rejony doręczeń ma nasz węzeł", tutaj „do
+  których punktów jeździmy". Zmierzone: WA+WW daje 2354 punkty z 22 393;
+  sam WW dałby 223, a filtr po jednostce `RS/RD` 3138 (wciąga Ciechanów,
+  Płock, Kielce). TK **zapisujemy, nie filtrujemy** — wycięcie przy
+  imporcie jest nieodwracalne, filtrowanie przy odczycie nie.
+  `rozpoznaj_rodzaj`/`wczytaj` — jedno wejście na oba eksporty, rodzaj po
+  obecności kolumny PNI; dyspozytor jest TUTAJ, nie w zakładce, bo wybór
+  ścieżki importu to decyzja o danych, nie o widoku.
+  **`zaimportuj` czyta WSZYSTKIE arkusze**, a gdy arkusz nie ma kolumny
+  `Rejon`, bierze rejon z NAZWY ZAKŁADKI (realny eksport „WW - WER
+  Ciemne": 219 arkuszy, 277 tys. adresów). Kolumna ma pierwszeństwo przed
+  nazwą — odwrotnie psułby się eksport jednoarkuszowy o nazwie
+  „Arkusz1". Arkusz nieużyteczny nie przewraca importu pozostałych, ale
+  trafia do `WynikImportu.arkusze_pominiete`; gdy nie nadaje się ŻADEN,
+  wyjątek leci W ŚRODKU transakcji, żeby `DELETE` starej migawki został
+  wycofany.
   `rozbij_adres`/`znajdz_rejon_dla_adresu` — most do formularza, który
   trzyma adres jako jeden wolny tekst; to proteza na czas do wdrożenia
   strukturalnego adresu (`../docs/normalization-v2.md`). Adres bez

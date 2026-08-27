@@ -89,8 +89,8 @@ pytest
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
-889 tests are collected and 888 pass under the pip/system-Python setup
-above, with no skips (last run 2026-08-27, schema v4). The one deselected test is
+972 tests are collected and 971 pass under the pip/system-Python setup
+above, with no skips (last run 2026-08-27, schema v4 + obsługa .xls). The one deselected test is
 marked `slow` — a scale check that imports tens of thousands of rows; run
 the fast set with `pytest -m "not slow"`. Coverage includes a real
 1294-row slice of source data, both import and export round-trip.
