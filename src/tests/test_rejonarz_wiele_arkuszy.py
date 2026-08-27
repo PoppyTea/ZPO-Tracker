@@ -186,3 +186,29 @@ def test_wartownik_w_nazwie_arkusza_nie_trafia_do_migawki(conn, zbuduj_xls):
     rejonarz.zaimportuj(conn, sciezka)
     assert normalizacja.REJON_NIEZNANY not in _rejony_w_migawce(conn)
     assert _rejony_w_migawce(conn) == ["L11"]
+
+
+def test_eksport_per_arkusz_jest_oznaczony_jako_taki(conn, zbuduj_xls):
+    """
+    Eksport per-arkusz Z DEFINICJI nie niesie kolumny węzła, więc
+    komunikat „arkusz bez kolumn Węzeł/TK - wzięto wszystko" byłby przy
+    nim myląco alarmujący: brzmi jak usterka, a jest normalnym kształtem
+    tego pliku.
+
+    Ostrzeżenie ma jednak zostać, bo realne ryzyko istnieje - ktoś może
+    wczytać eksport CUDZEGO węzła i nie zauważyć. Rozróżnienie pozwala
+    powiedzieć mu wprost, co ma sprawdzić, zamiast straszyć go brakiem
+    kolumn, na które i tak nic nie poradzi.
+    """
+    sciezka = zbuduj_xls({
+        "L11": [NAGLOWKI_BEZ_REJONU, ["Legionowo", "Polna", "3", "05-120"]]})
+    wynik = rejonarz.zaimportuj(conn, sciezka)
+    assert wynik.rejon_z_nazw_arkuszy is True
+
+
+def test_eksport_z_kolumna_rejonu_nie_jest_per_arkusz(conn, zbuduj_xls):
+    sciezka = zbuduj_xls({
+        "Arkusz1": [["Miejscowość", "Ulica", "Nr", "Rejon"],
+                    ["Warszawa", "Kwiatowa", "8", "WA93"]]})
+    wynik = rejonarz.zaimportuj(conn, sciezka)
+    assert wynik.rejon_z_nazw_arkuszy is False

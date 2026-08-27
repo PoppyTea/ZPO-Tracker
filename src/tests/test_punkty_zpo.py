@@ -26,7 +26,7 @@ w eksporcie miesiąca.
 import pytest
 import xlwt
 
-from zpo_tracker import rejonarz
+from zpo_tracker import arkusze, rejonarz
 
 
 @pytest.fixture
@@ -212,3 +212,37 @@ def test_brak_kolumny_wezla_nie_blokuje_ale_jest_zaznaczony(conn, zbuduj_xls):
     wynik = rejonarz.zaimportuj_punkty(conn, sciezka)
     assert wynik.zapisane == 1
     assert wynik.bez_filtrowania is True
+
+
+# --- jeden przycisk: dyspozytor -----------------------------------------
+
+def test_wczytaj_kieruje_plik_z_pni_do_rejestru(conn, zbuduj_xls):
+    wynik = rejonarz.wczytaj(conn, zbuduj_xls(NAGLOWKI_A, [_wiersz()]))
+    assert wynik.rodzaj == rejonarz.RODZAJ_PUNKTY_ZPO
+    assert conn.execute("SELECT COUNT(*) FROM punkty_zpo").fetchone()[0] == 1
+
+
+def test_wczytaj_kieruje_plik_bez_pni_do_rejonarza(conn, zbuduj_xls):
+    sciezka = zbuduj_xls(["Miejscowość", "Ulica", "Nr", "PNA"],
+                         [["Warszawa", "Kwiatowa", "8", "00-001"]], tytul="WA87")
+    wynik = rejonarz.wczytaj(conn, sciezka)
+    assert wynik.rodzaj == rejonarz.RODZAJ_REJONARZ
+    assert rejonarz.policz(conn) == 1
+
+
+def test_wczytaj_nie_miesza_obu_rejestrow(conn, zbuduj_xls):
+    """Oba pliki wchodzą tym samym przyciskiem i MUSZĄ współistnieć -
+    to jest cały powód, dla którego trzymamy je w osobnych tabelach."""
+    rejonarz.wczytaj(conn, zbuduj_xls(
+        ["Miejscowość", "Ulica", "Nr"], [["Warszawa", "Kwiatowa", "8"]], tytul="WA87"))
+    rejonarz.wczytaj(conn, zbuduj_xls(NAGLOWKI_A, [_wiersz()]))
+
+    assert rejonarz.policz(conn) == 1
+    assert conn.execute("SELECT COUNT(*) FROM punkty_zpo").fetchone()[0] == 1
+
+
+def test_wczytaj_odmawia_dla_pliku_ktory_nie_jest_arkuszem(conn, tmp_path):
+    plik = tmp_path / "cokolwiek.xlsx"
+    plik.write_text("nie arkusz", encoding="utf-8")
+    with pytest.raises(arkusze.NieznanyFormat):
+        rejonarz.wczytaj(conn, plik)

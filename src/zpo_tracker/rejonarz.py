@@ -154,6 +154,11 @@ class WynikImportu:
     # ale gdyby znikał bez śladu, tak samo zniknąłby arkusz z literówką
     # w nazwie rejonu - czyli realna strata danych.
     arkusze_pominiete: list = field(default_factory=list)
+    # Czy rejon pochodził z NAZW ARKUSZY. Taki eksport z definicji nie ma
+    # kolumny węzła, więc ostrzeżenie o jej braku brzmiałoby jak usterka,
+    # a jest normalnym kształtem tego pliku - komunikat musi mówić co
+    # innego w każdym z tych dwóch przypadków.
+    rejon_z_nazw_arkuszy: bool = False
 
 
 # --- schemat i połączenie -----------------------------------------------
@@ -297,6 +302,8 @@ def _wczytaj_arkusz(conn, skoroszyt, nazwa, wynik, rozmiar_partii) -> bool:
             iterator.close()
             return False
         rejon_arkusza = normalizacja.normalizuj_rejon_baska(nazwa)
+        if rejon_arkusza != normalizacja.REJON_NIEZNANY:
+            wynik.rejon_z_nazw_arkuszy = True
         if rejon_arkusza == normalizacja.REJON_NIEZNANY:
             # Nazwa zakładki nie jest kodem rejonu (np. "Podsumowanie")
             # ani jest wartownikiem ("ZPO", "*UP") - nie ma czego przypisać.
@@ -679,3 +686,27 @@ def znajdz_po_pni(conn, pni):
     return dict(zip(
         ("pni", "id_zpo", "nazwa", "jednostka", "miejscowosc", "ulica", "nr",
          "pna", "wezel", "tk", "rejon"), wiersz))
+
+
+@dataclass
+class WynikWczytania:
+    """Co wczytano i jakiego rodzaju. `wynik` to `WynikImportu` albo
+    `WynikImportuPunktow`, zależnie od `rodzaj`."""
+    rodzaj: str
+    wynik: object
+
+
+def wczytaj(conn, sciezka) -> WynikWczytania:
+    """
+    Jedno wejście na oba eksporty z BaŚKi — rodzaj rozpoznaje sam.
+
+    Dyspozytor siedzi TUTAJ, nie w zakładce: wybór ścieżki importu to
+    decyzja o danych, nie o widoku, a GUI ma wyłącznie pokazać wynik.
+    Dzięki temu da się go też przetestować bez środowiska graficznego.
+
+    Oba rejestry współistnieją — każdy podmienia wyłącznie SWOJĄ tabelę.
+    """
+    rodzaj = rozpoznaj_rodzaj(sciezka)
+    if rodzaj == RODZAJ_PUNKTY_ZPO:
+        return WynikWczytania(rodzaj, zaimportuj_punkty(conn, sciezka))
+    return WynikWczytania(rodzaj, zaimportuj(conn, sciezka))

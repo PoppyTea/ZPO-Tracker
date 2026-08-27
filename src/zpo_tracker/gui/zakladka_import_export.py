@@ -15,7 +15,7 @@ from tkinter import filedialog, messagebox, ttk
 
 import openpyxl
 
-from zpo_tracker import eksport, operacje, rejonarz, ustawienia
+from zpo_tracker import arkusze, eksport, operacje, rejonarz, ustawienia
 from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
     KLUCZ_NUMERU_WIERSZA,
@@ -42,6 +42,48 @@ def _pole_z_roznicami(parent, segmenty):
         pole.insert("end", tekst, "rozni" if rozni else ())
     pole.configure(state="disabled")
     return pole
+
+
+def _podsumowanie_wczytania(wczytane):
+    """
+    Zdanie o tym, co weszło z eksportu BaŚKi.
+
+    Liczby POMINIĘTYCH są tu tak samo ważne jak wczytanych: użytkownik
+    wskazuje plik ogólnopolski i musi zobaczyć, że z 22 tysięcy wierszy
+    wzięliśmy dwa i pół - inaczej wygląda to na awarię importu, a jest
+    poprawnym filtrowaniem.
+    """
+    w = wczytane.wynik
+    if wczytane.rodzaj == rejonarz.RODZAJ_PUNKTY_ZPO:
+        czesci = [f"Punkty ZPO: wczytano {w.zapisane}"]
+        if w.pominiete:
+            czesci.append(f"pominięto {w.pominiete} spoza węzłów "
+                          f"{'/'.join(sorted(rejonarz.WEZLY_PUNKTOW))}")
+        if w.bez_pni:
+            czesci.append(f"{w.bez_pni} bez PNI")
+        if w.bez_filtrowania:
+            czesci.append("UWAGA: eksport bez kolumny węzła - wzięto CAŁY plik")
+        return ", ".join(czesci) + "."
+
+    czesci = [f"Rejonarz: wczytano {w.zapisane} adresów"]
+    if w.pominiete:
+        czesci.append(f"pominięto {w.pominiete} spoza węzła "
+                      f"{rejonarz.WEZEL_ZPO}/typu {rejonarz.TYP_KIEROWANIA_ZPO}")
+    if w.bez_rejonu:
+        czesci.append(f"{w.bez_rejonu} bez rejonu")
+    if w.arkusze_pominiete:
+        czesci.append(f"pominięto {len(w.arkusze_pominiete)} arkuszy: "
+                      + ", ".join(w.arkusze_pominiete[:5])
+                      + ("..." if len(w.arkusze_pominiete) > 5 else ""))
+    if w.rejon_z_nazw_arkuszy:
+        # Ten eksport z definicji nie ma kolumny węzła - straszenie jej
+        # brakiem byłoby myleniem normalnego kształtu pliku z usterką.
+        # Ryzyko jest inne i konkretne: to może być eksport CUDZEGO węzła.
+        czesci.append(f"rejon wzięty z nazw arkuszy - upewnij się, że to "
+                      f"eksport węzła {rejonarz.WEZEL_ZPO}")
+    elif w.bez_filtrowania:
+        czesci.append("UWAGA: arkusz bez kolumn Węzeł/TK - wzięto wszystko")
+    return ", ".join(czesci) + "."
 
 
 def _wczytaj_surowe_wiersze(sciezka):
@@ -354,7 +396,7 @@ class ZakladkaImportExport(ttk.Frame):
         self.etykieta_import.pack(anchor="w", pady=(6, 0))
 
         ramka_rejonarz = ttk.LabelFrame(
-            self, text="Rejonarz (BaŚKa) - słownik adres → rejon", padding=10)
+            self, text="Dane referencyjne z BaŚKi", padding=10)
         ramka_rejonarz.pack(fill="x", padx=10, pady=(0, 10))
         ttk.Button(
             ramka_rejonarz, text="Wczytaj eksport z BaŚKi...",
@@ -442,36 +484,38 @@ class ZakladkaImportExport(ttk.Frame):
             else "Brak wczytanego rejonarza - rejon będzie zostawał jako „???”.")
 
     def importuj_rejonarz(self):
-        """Wczytuje eksport `.xlsx` z BaŚKi do migawki adres → rejon.
+        """
+        JEDEN przycisk na oba eksporty z BaŚKi - rodzaj rozpoznaje
+        `rejonarz.wczytaj` po zawartości pliku.
 
-        Import PODMIENIA całą migawkę, więc wczytanie kawałka pliku
-        zastępuje to, co było - to jest migawka stanu, nie dziennik
-        przyrostowy (patrz rejonarz.zaimportuj).
+        Rozróżnienie w interfejsie jest czysto funkcjonalne: użytkownik
+        wskazuje plik, program ustala, czym on jest. Osobny przycisk na
+        każdy rodzaj byłby przerzuceniem na niego decyzji, której nie ma
+        jak podjąć - nazwy plików z BaŚKi nic o rodzaju nie mówią.
+
+        Każdy import PODMIENIA swój rejestr w całości (migawka stanu, nie
+        dziennik przyrostowy), ale rejestry są rozdzielne, więc wczytanie
+        punktów nie kasuje rejonarza adresowego.
         """
         if self.conn_rejonarz is None:
             return
-        sciezka = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")])
+        sciezka = filedialog.askopenfilename(
+            # OBA formaty: eksporty z BaŚKi przychodzą jako `.xls` (stary
+            # OLE2), nasze własne pliki jako `.xlsx`. Rozszerzenie i tak
+            # nie rozstrzyga - `arkusze.otworz` patrzy na zawartość.
+            filetypes=[("Excel", "*.xls *.xlsx"), ("Wszystkie pliki", "*.*")])
         if not sciezka:
             return
         try:
-            wynik = rejonarz.zaimportuj(self.conn_rejonarz, sciezka)
-        except rejonarz.NiezgodnyArkusz as e:
-            # Nazwy kolumn w eksporcie mogą się różnić od tych, których
-            # się spodziewamy - komunikat mówi WPROST czego zabrakło,
-            # zamiast zostawiać użytkownika z "nie zadziałało".
-            messagebox.showerror("Nie rozpoznano arkusza", str(e), parent=self)
+            wczytane = rejonarz.wczytaj(self.conn_rejonarz, sciezka)
+        except (rejonarz.NiezgodnyArkusz, arkusze.NieznanyFormat) as e:
+            # Komunikat mówi WPROST, czego zabrakło, zamiast zostawiać
+            # użytkownika z "nie zadziałało".
+            messagebox.showerror("Nie rozpoznano pliku", str(e), parent=self)
             self.etykieta_rejonarz.configure(text="Nie wczytano - patrz komunikat.")
             return
 
-        czesci = [f"Wczytano {wynik.zapisane} adresów"]
-        if wynik.pominiete:
-            czesci.append(f"pominięto {wynik.pominiete} spoza węzła "
-                          f"{rejonarz.WEZEL_ZPO}/typu {rejonarz.TYP_KIEROWANIA_ZPO}")
-        if wynik.bez_rejonu:
-            czesci.append(f"{wynik.bez_rejonu} bez rejonu")
-        if wynik.bez_filtrowania:
-            czesci.append("UWAGA: arkusz bez kolumn Węzeł/TK - wzięto wszystko")
-        self.etykieta_rejonarz.configure(text=", ".join(czesci) + ".")
+        self.etykieta_rejonarz.configure(text=_podsumowanie_wczytania(wczytane))
 
     def eksportuj(self):
         try:

@@ -133,3 +133,41 @@ def test_dialog_korekty_przekazuje_zrodlo_do_importu(root, conn, tmp_path):
             dialog.destroy()
 
     assert przechwycone.get("szukaj") is znacznik
+
+
+# --- jeden przycisk na oba eksporty ------------------------------------
+
+def test_podsumowanie_mowi_ile_POMINIETO_a_nie_tylko_ile_weszlo():
+    """Użytkownik wskazuje plik ogólnopolski i musi zobaczyć, że z 22
+    tysięcy wierszy wzięliśmy dwa i pół tysiąca. Bez tej liczby wygląda
+    to na awarię importu, a jest poprawnym filtrowaniem."""
+    from zpo_tracker.gui.zakladka_import_export import _podsumowanie_wczytania
+
+    wynik = rejonarz.WynikImportuPunktow(
+        wczytane=22393, zapisane=2354, pominiete=20039)
+    tekst = _podsumowanie_wczytania(
+        rejonarz.WynikWczytania(rejonarz.RODZAJ_PUNKTY_ZPO, wynik))
+
+    assert "2354" in tekst and "20039" in tekst
+    assert "WA" in tekst and "WW" in tekst
+
+
+def test_podsumowanie_rejonarza_wymienia_pominiete_arkusze():
+    from zpo_tracker.gui.zakladka_import_export import _podsumowanie_wczytania
+
+    wynik = rejonarz.WynikImportu(zapisane=100, arkusze_pominiete=["Podsumowanie"])
+    tekst = _podsumowanie_wczytania(
+        rejonarz.WynikWczytania(rejonarz.RODZAJ_REJONARZ, wynik))
+    assert "Podsumowanie" in tekst
+
+
+def test_ostrzezenie_gdy_eksport_nie_dal_sie_przefiltrowac():
+    """Cichy import CAŁEGO pliku ogólnopolskiego byłby gorszy od błędu -
+    użytkownik miałby w rejestrze 22 tysiące cudzych punktów i nie
+    dowiedziałby się o tym."""
+    from zpo_tracker.gui.zakladka_import_export import _podsumowanie_wczytania
+
+    wynik = rejonarz.WynikImportuPunktow(zapisane=22393, bez_filtrowania=True)
+    tekst = _podsumowanie_wczytania(
+        rejonarz.WynikWczytania(rejonarz.RODZAJ_PUNKTY_ZPO, wynik))
+    assert "UWAGA" in tekst and "CAŁY plik" in tekst
