@@ -128,7 +128,8 @@ def get_or_create_ulica(conn, nazwa, miejscowosc_id, typ=None):
     return cur.lastrowid
 
 
-def get_or_create_adres(conn, surowy):
+def get_or_create_adres(conn, surowy, *, szukaj=None, rejon=None,
+                        miejscowosci_dnia=()):
     """
     Adres jako wiersz `adresy`, get-or-create po `surowy` (UNIQUE) - to surowy
     tekst jest tożsamością adresu, struktura jest tylko jego interpretacją
@@ -142,12 +143,19 @@ def get_or_create_adres(conn, surowy):
     pola. Adres nierozstrzygnięty zapisuje się z samym `surowy`; nic nie
     przepada, bo parser przepuści go ponownie, kiedy dorośnie do przypadku.
 
-    Bez miejscowości nie ma też ulicy: `ulice.miejscowosc_id` jest NOT NULL,
-    a domyślenie miasta to osobna kaskada (`dedukcja_miejscowosci.py`), nie
-    zadanie tej funkcji - zgadnięcie miejscowości tylko po to, żeby mieć na
-    czym zawiesić ulicę, byłoby dokładnie tym zakładaniem bytu z niepewnej
-    interpretacji. Numer budynku i lokalu zapisujemy mimo to, bo nie zakładają
-    niczego w żadnym słowniku.
+    Bez miejscowości nie ma też ulicy (`ulice.miejscowosc_id` NOT NULL).
+    Miejscowość może pochodzić z dwóch źródeł: wprost z tekstu adresu albo
+    z kaskady `dedukcja_miejscowosci`, i to KASKADA decyduje, czy jest
+    dość pewna - jej reguły są ułożone malejąco po zmierzonej trafności
+    właśnie po to. Gdy odmówi, adres dostaje numer budynku i lokalu (te
+    nie zakładają niczego w żadnym słowniku), a `ulica_id` zostaje puste.
+
+    `szukaj` to wstrzykiwany rejonarz (patrz `dedukcja_miejscowosci`).
+    POMINIĘTY ALBO wskazujący na pustą migawkę daje zachowanie bit w bit
+    takie jak przed wpięciem kaskady - stacja bez zaimportowanego
+    rejonarza ma działać dokładnie tak jak przedtem, i jest to przypięte
+    testem w obie strony. Ta sama zasada co przy wpinaniu rejonarza
+    w `dedukcja.dedukuj_wiersz`.
 
     Brak adresu (None) staje się JEDNYM wierszem o pustym `surowy`, nie
     wierszem na każde wystąpienie: `punkty.adres_id` jest NOT NULL, więc
@@ -166,14 +174,23 @@ def get_or_create_adres(conn, surowy):
         cur = conn.execute("INSERT INTO adresy (surowy) VALUES (?)", (surowy,))
         return cur.lastrowid
 
+    # Kaskada dostaje rozbicie ZAWSZE, gdy jest czym pytać: dla adresu
+    # z miejscowością zwraca ją natychmiast (i nie pyta rejonarza, żeby
+    # migawka nie miała jak nadpisać tego, co podał kurier), a dla adresu
+    # bez miejscowości próbuje ją domyślić. Bez tego drugiego przypadku
+    # rozbicie adresu nie robi tego, po co powstało: 79% realnych adresów
+    # nie niesie miasta, a `ulice.miejscowosc_id` jest NOT NULL - więc
+    # cztery piąte adresów zostałoby bez struktury.
+    wynik = dedukcja_miejscowosci.dedukuj(
+        rozbicie, szukaj or _BEZ_REJONARZA,
+        rejon=rejon, miejscowosci_dnia=miejscowosci_dnia)
+
     ulica_id = zrodlo_miejscowosci = None
-    if rozbicie.miejscowosc:
-        miejscowosc_id = get_or_create_miejscowosc(conn, rozbicie.miejscowosc)
+    if wynik.rozstrzygniete:
+        miejscowosc_id = get_or_create_miejscowosc(conn, wynik.miejscowosc)
         ulica_id = get_or_create_ulica(
             conn, rozbicie.ulica, miejscowosc_id, rozbicie.typ_ulicy)
-        # ta sama nazwa reguły, którą nadaje kaskada dla tego przypadku -
-        # jedna kolumna nie może mieć dwóch napisów na "podał człowiek"
-        zrodlo_miejscowosci = dedukcja_miejscowosci.ZRODLO_Z_ADRESU
+        zrodlo_miejscowosci = wynik.zrodlo
 
     cur = conn.execute(
         """INSERT INTO adresy (surowy, ulica_id, nr_budynku, nr_lokalu, stan,
@@ -394,3 +411,11 @@ def import_row(conn, row):
         }
 
     return {"skipped": False, "reason": None, "warnings": warnings}
+
+
+def _BEZ_REJONARZA(_klucz):
+    """Rejonarz, który nic nie wie. Pozwala wołać kaskadę bezwarunkowo -
+    dla adresu z miejscowością i tak zwraca ona odpowiedź bez pytania
+    migawki, a dla pozostałych „brak migawki" i „migawka nic nie wie"
+    mają dawać ten sam wynik."""
+    return ()
