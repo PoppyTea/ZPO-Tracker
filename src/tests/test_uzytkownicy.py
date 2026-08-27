@@ -273,15 +273,15 @@ def test_znajdz_konta_dla_loginu_nie_traktuje_podkreslenia_jak_wieloznacznika(co
 
 # --- wstrzymany proces logowania ---------------------------------------
 
-def test_nie_pytamy_o_dane_dopoki_logowanie_jest_wstrzymane():
+def test_nie_pytamy_o_dane_w_trybie_testowym():
     """
-    Proces logowania jest świadomie wstrzymany — decyzja Papavera, bo
-    pracownicy nie mają jeszcze numerów kadrowych i cała ta ścieżka
-    czeka na rozstrzygnięcie. Dopóki czeka, program nie ma prawa witać
-    użytkownika okienkiem, którego nie da się sensownie wypełnić.
+    Proces logowania jest wstrzymany — pracownicy nie mają jeszcze
+    numerów kadrowych i cała ta ścieżka czeka na rozstrzygnięcie.
+    Dopóki czeka, program nie ma prawa witać użytkownika okienkiem,
+    którego nie da się sensownie wypełnić.
 
     `wymaga_uzupelnienia` zostaje nietknięte — to predykat o STANIE
-    danych i nadal odpowiada zgodnie z prawdą. Wstrzymana jest DECYZJA
+    danych i nadal odpowiada zgodnie z prawdą. Wyłączona jest DECYZJA
     o pokazaniu okna, a nie fakt, że alias jest pusty.
     """
     c = repo.polacz(":memory:")
@@ -294,16 +294,15 @@ def test_nie_pytamy_o_dane_dopoki_logowanie_jest_wstrzymane():
     c.close()
 
 
-def test_ustawienie_przywraca_pytanie_bez_przebudowy():
-    """Furtka na wznowienie: wpis w settings.json wystarczy, żeby okno
-    wróciło — bez nowego `.exe` u użytkownika."""
+def test_wylaczenie_trybu_testowego_przywraca_pytanie():
+    """Furtka na wznowienie: wyłączenie trybu testowego w settings.json
+    wystarczy, żeby okno wróciło — bez nowego `.exe` u użytkownika."""
     c = repo.polacz(":memory:")
     repo.utworz_schemat(c)
     login = "DOMENA\\jkowalski"
     uzytkownicy.zapewnij_uzytkownika(c, login)
 
-    assert uzytkownicy.czy_pytac_o_dane(
-        c, login, {"zaawansowane": {"pytaj_o_dane_uzytkownika": True}}) is True
+    assert uzytkownicy.czy_pytac_o_dane(c, login, {"tryb_testowy": False}) is True
     c.close()
 
 
@@ -315,6 +314,5 @@ def test_wznowione_pytanie_i_tak_milczy_gdy_dane_sa_kompletne():
     login = "DOMENA\\jkowalski"
     uzytkownicy.zapewnij_uzytkownika(c, login, alias="Jan Kowalski")
 
-    assert uzytkownicy.czy_pytac_o_dane(
-        c, login, {"zaawansowane": {"pytaj_o_dane_uzytkownika": True}}) is False
+    assert uzytkownicy.czy_pytac_o_dane(c, login, {"tryb_testowy": False}) is False
     c.close()

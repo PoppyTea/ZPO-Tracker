@@ -24,6 +24,8 @@ import re
 import uuid
 from datetime import datetime
 
+from zpo_tracker import ustawienia
+
 # Stała przestrzeń nazw - NIE zmieniać. Zmiana unieważniłaby wszystkie
 # dotychczasowe identyfikatory i rozdwoiła każdą osobę w bazie.
 NAMESPACE_ZPO = uuid.UUID("c8d99132-35c0-5978-b932-1c21a5d1edb7")
@@ -110,34 +112,27 @@ def wymaga_uzupelnienia(conn, login):
     return not wiersz["alias"]
 
 
-# Proces logowania jest ŚWIADOMIE WSTRZYMANY. Powód: pracownicy nie mają
-# jeszcze numerów kadrowych, a cała ścieżka tożsamości czeka na
-# rozstrzygnięcie. Dopóki czeka, program nie wita użytkownika okienkiem,
-# którego nie da się sensownie wypełnić.
-#
-# To NIE jest usunięcie funkcji: dialog zostaje osiągalny z menu
-# („Zmień użytkownika…"), a `autor_id` i tak powstaje z loginu Windows,
-# więc atrybucja wpisów działa bez pytania o cokolwiek. Wstrzymane jest
-# wyłącznie zaczepianie człowieka przy starcie.
-LOGOWANIE_WSTRZYMANE = True
-
-
 def czy_pytac_o_dane(conn, login, dane_ustawien=None) -> bool:
     """
     Czy pokazać dialog uzupełnienia danych przy starcie.
 
+    W TRYBIE TESTOWYM nigdy: proces logowania jest wstrzymany, bo
+    pracownicy nie mają jeszcze numerów kadrowych i cała ścieżka
+    tożsamości czeka na rozstrzygnięcie. Program nie ma wtedy witać
+    człowieka okienkiem, którego nie da się sensownie wypełnić.
+
+    To NIE jest usunięcie funkcji: dialog zostaje osiągalny z menu
+    („Zmień użytkownika…"), a `autor_id` i tak powstaje z loginu
+    Windows, więc atrybucja wpisów działa bez pytania o cokolwiek.
+    Wyłączone jest wyłącznie zaczepianie przy starcie.
+
     Rozdzielone od `wymaga_uzupelnienia` celowo. Tamto jest predykatem
     o STANIE DANYCH („alias jest pusty") i ma dalej odpowiadać zgodnie
-    z prawdą — na nim stoją inne ścieżki. Wstrzymana jest DECYZJA
-    o pokazaniu okna, a to dwie różne rzeczy i zlanie ich w jedną
-    kazałoby kłamać predykatowi.
-
-    Wznowienie nie wymaga nowego `.exe`: wystarczy wpis
-    `zaawansowane.pytaj_o_dane_uzytkownika` w `settings.json`.
+    z prawdą — na nim stoją inne ścieżki. Tutaj zapada DECYZJA
+    o pokazaniu okna, a zlanie tych dwóch rzeczy kazałoby predykatowi
+    kłamać.
     """
-    wznowione = bool(
-        (dane_ustawien or {}).get("zaawansowane", {}).get("pytaj_o_dane_uzytkownika"))
-    if LOGOWANIE_WSTRZYMANE and not wznowione:
+    if ustawienia.czy_tryb_testowy(dane_ustawien):
         return False
     return wymaga_uzupelnienia(conn, login)
 

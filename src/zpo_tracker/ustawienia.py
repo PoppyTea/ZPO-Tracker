@@ -49,3 +49,35 @@ def zapisz(katalog_danych, dane):
     with open(tymczasowa, "w", encoding="utf-8") as f:
         json.dump(dane, f, ensure_ascii=False, indent=2)
     os.replace(tymczasowa, docelowa)
+
+
+# Tryb testowy. Domyślnie WŁĄCZONY, bo program jest dziś wydawany
+# wyłącznie do testów i nikt nie trzyma w nim danych roboczych (patrz
+# akapit "not deployed yet" w root CLAUDE.md). Dopóki to prawda, tryb
+# testowy jest stanem NORMALNYM, a nie wyjątkiem do włączania.
+#
+# Domyślność ma zniknąć razem z tamtym akapitem - stąd jawna stała,
+# a nie `True` zaszyte w kilku miejscach, których potem nie sposób
+# odnaleźć.
+TRYB_TESTOWY_DOMYSLNIE = True
+
+KLUCZ_TRYBU_TESTOWEGO = "tryb_testowy"
+
+
+def czy_tryb_testowy(dane_ustawien=None) -> bool:
+    """
+    Czy program działa w trybie testowym.
+
+    Dziś wyłącza jedno: pytanie o dane użytkownika przy starcie, bo
+    proces logowania jest wstrzymany i okna nie da się sensownie
+    wypełnić.
+
+    NIGDY nie rzuca - jak `wczytaj`. Wartość spoza `true`/`false`
+    (literówka w ręcznie edytowanym pliku) wraca do domyślnej, zamiast
+    blokować uruchomienie programu osobie bez konsoli i bez uprawnień
+    administratora.
+    """
+    wartosc = (dane_ustawien or {}).get(KLUCZ_TRYBU_TESTOWEGO)
+    if isinstance(wartosc, bool):
+        return wartosc
+    return TRYB_TESTOWY_DOMYSLNIE

@@ -63,3 +63,47 @@ def test_nieznane_klucze_przetrwaja_read_modify_write(tmp_path):
     wynik = ustawienia.wczytaj(tmp_path)
     assert wynik["aktywny_login"] == "b"
     assert wynik["przyszla_funkcja"] == {"x": 1}
+
+
+# --- tryb testowy ------------------------------------------------------
+
+def test_tryb_testowy_jest_domyslnie_wlaczony_w_alfie(tmp_path):
+    """
+    Program jest wydawany wyłącznie do testów - nikt nie trzyma w nim
+    danych roboczych (patrz root CLAUDE.md). Dopóki to prawda, tryb
+    testowy jest stanem NORMALNYM, a nie wyjątkiem, który trzeba włączyć.
+
+    Ta domyślność jest tymczasowa i ma zniknąć razem z akapitem
+    "not deployed yet" w CLAUDE.md - stąd jawna stała, a nie zaszyte
+    `True` w kilku miejscach.
+    """
+    assert ustawienia.czy_tryb_testowy(ustawienia.wczytaj(tmp_path)) is True
+
+
+def test_tryb_testowy_da_sie_wylaczyc_wpisem(tmp_path):
+    ustawienia.zapisz(tmp_path, {"tryb_testowy": False})
+    assert ustawienia.czy_tryb_testowy(ustawienia.wczytaj(tmp_path)) is False
+
+
+def test_uszkodzony_wpis_nie_wywraca_startu(tmp_path):
+    """`ustawienia.wczytaj` nigdy nie rzuca - ta sama zasada musi objąć
+    odczyt trybu, bo inaczej literówka w pliku blokuje uruchomienie
+    programu u osoby bez konsoli i bez uprawnień administratora."""
+    for smiec in ["tak", 1, None, [], {"a": 1}]:
+        assert ustawienia.czy_tryb_testowy({"tryb_testowy": smiec}) in (True, False)
+
+
+def test_tryb_testowy_wylacza_pytanie_o_dane_uzytkownika(tmp_path):
+    """Powód istnienia tego trybu dzisiaj: proces logowania jest
+    wstrzymany, więc program nie ma witać człowieka okienkiem, którego
+    nie da się sensownie wypełnić."""
+    from zpo_tracker import repo, uzytkownicy
+
+    c = repo.polacz(":memory:")
+    repo.utworz_schemat(c)
+    login = "DOMENA\\jkowalski"
+    uzytkownicy.zapewnij_uzytkownika(c, login)
+
+    assert uzytkownicy.czy_pytac_o_dane(c, login, {"tryb_testowy": True}) is False
+    assert uzytkownicy.czy_pytac_o_dane(c, login, {"tryb_testowy": False}) is True
+    c.close()
