@@ -44,6 +44,20 @@ def _pole_z_roznicami(parent, segmenty):
     return pole
 
 
+# Nazwy pól z modelu na nagłówki, które użytkownik widzi w swoim Excelu.
+# Bez tego raport mówiłby "ilosc_zpo", czego nie ma w żadnej kolumnie
+# jego pliku, więc nie miałby jak tego odnaleźć.
+_ETYKIETY_POL = {
+    p: n for n, p in
+    __import__("zpo_tracker.import_orchestrator", fromlist=["MAPA_NAGLOWKOW"])
+    .MAPA_NAGLOWKOW.items()
+}
+
+
+def _po_polsku(istniejace):
+    return {_ETYKIETY_POL.get(k, k): v for k, v in istniejace.items()}
+
+
 def _podsumowanie_wczytania(wczytane):
     """
     Zdanie o tym, co weszło z eksportu BaŚKi.
@@ -191,6 +205,17 @@ class DialogKorektyImportu(tk.Toplevel):
             ).pack(anchor="w", padx=6, pady=6)
             for o in ostrzezenia:
                 self._dodaj_wiersz_ostrzezenia(ramka_o, o)
+
+        # Przełącznik pliku ze znalezionymi duplikatami. Stan wraca
+        # z `settings.json` i tam wraca po zmianie - odznaczanie go przy
+        # każdym imporcie byłoby karą za jednorazową decyzję.
+        self.var_zapisz_duplikaty = tk.BooleanVar(
+            value=ustawienia.czy_zapisywac_duplikaty(
+                ustawienia.wczytaj(self.katalog_danych)))
+        ttk.Checkbutton(
+            self, variable=self.var_zapisz_duplikaty,
+            text="Zapisz plik ze znalezionymi duplikatami (obok pliku źródłowego)",
+        ).pack(anchor="w", padx=10)
 
         pasek = ttk.Frame(self)
         pasek.pack(fill="x", padx=10, pady=10)
@@ -358,6 +383,42 @@ class DialogKorektyImportu(tk.Toplevel):
         self.destroy()
         self.on_gotowe(wynik)
 
+    def _zapisz_duplikaty(self, wynik, katalog, rdzen, naglowki):
+        """
+        Plik ze znalezionymi duplikatami — osobny od pliku-reszty.
+
+        Stan przełącznika zapisuje się do `settings.json` PRZY KAŻDYM
+        imporcie, nie tylko przy zmianie: użytkownik odznacza raz i ma
+        prawo oczekiwać, że tak zostanie.
+
+        Nazwa mówi „znalezione", nie „usunięte" — niczego nie kasujemy,
+        tylko zgłaszamy, że w źródle są dwa zapisy tego samego zdarzenia
+        i trzeba rozstrzygnąć, który jest prawdziwy.
+        """
+        wlaczone = bool(self.var_zapisz_duplikaty.get())
+        dane = ustawienia.wczytaj(self.katalog_danych)
+        if dane.get(ustawienia.KLUCZ_ZAPISU_DUPLIKATOW) != wlaczone:
+            dane[ustawienia.KLUCZ_ZAPISU_DUPLIKATOW] = wlaczone
+            ustawienia.zapisz(self.katalog_danych, dane)
+
+        duplikaty = wynik.get("duplikaty", [])
+        if not wlaczone or not duplikaty:
+            return []
+
+        numery = {id(d): d["wiersz"].numer_wiersza for d in duplikaty}
+        surowe = {w.get(KLUCZ_NUMERU_WIERSZA): w for w in self.surowe}
+        pozycje = [{
+            "numer_wiersza": numery[id(d)],
+            "dane": {k: v for k, v in (surowe.get(numery[id(d)]) or {}).items()
+                     if k != KLUCZ_NUMERU_WIERSZA},
+            "istniejace": _po_polsku(d.get("istniejace") or {}),
+            "roznice": [_ETYKIETY_POL.get(p, p) for p in d.get("roznice") or []],
+        } for d in duplikaty]
+
+        sciezka = katalog / f"{rdzen}-znalezione-duplikaty.xlsx"
+        eksport.zapisz_duplikaty(sciezka, naglowki, pozycje)
+        return [sciezka]
+
     def _zapisz_do_poprawy(self, wynik):
         """Zapisuje plik-resztę i wykaz obok pliku ŹRÓDŁOWEGO.
 
@@ -366,14 +427,20 @@ class DialogKorektyImportu(tk.Toplevel):
         miejscem, którego nie znajdzie. Zwraca listę ścieżek albo pustą
         listę, gdy wszystko weszło.
         """
-        pozycje = zbierz_odrzucone(self.odrzucone, wynik.get("wymagajace_uwagi", []))
-        if not pozycje or self.sciezka_pliku is None:
+        if self.sciezka_pliku is None:
             return []
 
         katalog = self.sciezka_pliku.parent
         rdzen = self.sciezka_pliku.stem
         naglowki = list(self.surowe[0]) if self.surowe else []
         naglowki = [n for n in naglowki if n != KLUCZ_NUMERU_WIERSZA]
+
+        pliki_duplikatow = self._zapisz_duplikaty(
+            wynik, katalog, rdzen, naglowki)
+
+        pozycje = zbierz_odrzucone(self.odrzucone, wynik.get("wymagajace_uwagi", []))
+        if not pozycje:
+            return pliki_duplikatow
 
         sciezka_reszty = katalog / f"{rdzen}-do-poprawy.xlsx"
         eksport.zapisz_niezaimportowane(

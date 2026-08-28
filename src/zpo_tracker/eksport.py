@@ -288,3 +288,74 @@ def zapisz_niezaimportowane(sciezka, naglowki, wiersze, powody=None, z_powodem=T
 
     wb.save(sciezka)
     return len(wiersze)
+
+
+# --- znalezione duplikaty ------------------------------------------------
+
+OPIS_BEZ_ROZNIC = "identyczne - czysta kopia"
+NAGLOWEK_ROZNIC = "Czym się różnią"
+NAGLOWEK_WERSJI = "Wersja"
+WERSJA_W_BAZIE = "już w bazie"
+WERSJA_Z_PLIKU = "z importowanego pliku"
+
+
+def zapisz_duplikaty(sciezka, naglowki, pozycje):
+    """
+    Zapisuje `.xlsx` z wierszami, które odpadły jako duplikat klucza
+    (data + kurier + punkt), pokazując OBIE WERSJE obok siebie.
+
+    Osobny artefakt od `zapisz_niezaimportowane`, i to jest sedno
+    zgłoszenia: tamten plik jest DO PRACY - poprawia się go i wczytuje
+    ponownie. Duplikat w nim albo wraca jako ten sam duplikat, albo
+    trzeba go ręcznie skasować; jedno i drugie to strata czasu, bo
+    w duplikacie nie ma czego poprawić.
+
+    Ten plik jest do ROZSTRZYGNIĘCIA, nie do poprawiania. Pomiar na
+    realnym sierpniu pokazał, dlaczego to nie to samo: z 30 powtórzonych
+    kluczy 19 RÓŻNI SIĘ ilością, „w tym ZPO", PNI, wykonawcą albo
+    rejonem, a tylko 8 sąsiaduje ze sobą (mediana odległości 4 wiersze,
+    maksimum 3431). W arkuszu sklejonym z pracy sześciu osób znaczy to,
+    że ten sam odbiór wpisały DWIE OSOBY w dwóch miejscach - i to
+    człowiek musi powiedzieć, która wersja jest prawdziwa.
+
+    Stąd dwa wiersze na każdy przypadek (stan z bazy i wiersz z pliku)
+    oraz kolumna mówiąca, CZYM się różnią: przy trzydziestu przypadkach
+    szukanie różnicy wzrokiem po kilkunastu kolumnach to gwarancja
+    przeoczenia.
+
+    Pusta lista NIE tworzy pliku - inaczej niż wykaz odrzuconych, gdzie
+    pusty plik znaczy „sprawdziłem, nic nie odrzucono". Tutaj istnienie
+    pliku samo w sobie znaczy „masz coś do zrobienia", więc pusty byłby
+    fałszywym alarmem. Zwraca liczbę zgłoszonych przypadków.
+    """
+    if not pozycje:
+        return 0
+
+    kolumny = [n for n in naglowki if n]
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Znalezione duplikaty"
+    ws.append([NAGLOWEK_NUMERU, NAGLOWEK_WERSJI, NAGLOWEK_ROZNIC] + kolumny)
+
+    for pozycja in pozycje:
+        dane = pozycja.get("dane") or {}
+        istniejace = pozycja.get("istniejace") or {}
+        roznice = pozycja.get("roznice") or []
+        opis = ", ".join(roznice) if roznice else OPIS_BEZ_ROZNIC
+
+        # Najpierw stan z bazy, potem wiersz z pliku - w tej kolejności,
+        # bo pytanie brzmi "czy podmienić to, co mam, na to, co przyszło".
+        ws.append([pozycja.get("numer_wiersza"), WERSJA_W_BAZIE, opis]
+                  + [istniejace.get(k, dane.get(k)) for k in kolumny])
+        ws.append([pozycja.get("numer_wiersza"), WERSJA_Z_PLIKU, opis]
+                  + [dane.get(k) for k in kolumny])
+
+        if "PNI ZPO" in kolumny:
+            # PNI zostaje TEKSTEM - ta sama pułapka co w eksporcie
+            # miesiąca: "007" rzutowane na liczbę to "7", czyli inny punkt.
+            kolumna = kolumny.index("PNI ZPO") + 4
+            for offset in (0, 1):
+                ws.cell(row=ws.max_row - offset, column=kolumna).number_format = "@"
+
+    wb.save(sciezka)
+    return len(pozycje)

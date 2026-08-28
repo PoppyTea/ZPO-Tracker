@@ -119,12 +119,24 @@ def test_zaimportuj_stosuje_zaakceptowane_scalenie(conn):
     assert nazwiska == ["Kowalski Jan"]
 
 
-def test_zaimportuj_flaguje_duplikat_jako_wymagajacy_uwagi(conn):
+def test_zaimportuj_zglasza_duplikat_OSOBNO_od_wymagajacych_uwagi(conn):
+    """
+    ZMIANA KONTRAKTU (zgłoszenie Papavera). Duplikat trafiał dotąd do
+    „wymagających uwagi", a stamtąd do pliku „do-poprawy" — który jest
+    plikiem DO PRACY: poprawia się go i wczytuje ponownie. Duplikat w nim
+    albo wraca jako ten sam duplikat, albo trzeba go skasować ręcznie,
+    bo w duplikacie nie ma czego poprawić.
+
+    Teraz idzie osobną listą, do własnego artefaktu „znalezione
+    duplikaty" — nie do poprawienia, tylko do ROZSTRZYGNIĘCIA, która
+    z dwóch wersji jest prawdziwa.
+    """
     zwalidowane, _ = zwaliduj_wiersze([_surowy(), _surowy()])  # identyczny wiersz dwa razy
     wynik = zaimportuj(conn, zwalidowane)
     assert wynik["zaimportowano"] == 1
-    assert len(wynik["wymagajace_uwagi"]) == 1
-    assert "duplikat" in wynik["wymagajace_uwagi"][0]["powod"].lower()
+    assert wynik["wymagajace_uwagi"] == []
+    assert len(wynik["duplikaty"]) == 1
+    assert "duplikat" in wynik["duplikaty"][0]["powod"].lower()
 
 
 def test_zaimportuj_scala_automatycznie_warianty_bialych_znakow(conn):

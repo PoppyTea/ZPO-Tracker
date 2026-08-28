@@ -194,6 +194,11 @@ def zaimportuj(conn, zwalidowane, mapowanie_scalen=None, *, zaufany=False,
     zrodlo = "import_zaufany" if zaufany else "import"
     zaimportowano = 0
     wymagajace_uwagi = []
+    # Duplikaty OSOBNO od "wymagających uwagi", i to nie jest porządkowanie
+    # list. Plik "do-poprawy" jest DO PRACY: poprawia się go i wczytuje
+    # ponownie. Duplikat w nim albo wraca jako ten sam duplikat, albo
+    # trzeba go skasować ręcznie - w duplikacie nie ma czego poprawić.
+    duplikaty = []
     # Miejscowości ustalone już dla tej pary (kurier, dzień) - wejście dla
     # reguły 4 kaskady. Kurier w ciągu dnia nie krąży po całym WER-ze
     # (zmierzone: 86% par mieści się w jednej gminie), więc adres
@@ -255,8 +260,46 @@ def zaimportuj(conn, zwalidowane, mapowanie_scalen=None, *, zaufany=False,
             )
             zaimportowano += 1
         except sqlite3.IntegrityError:
-            wymagajace_uwagi.append({
-                "wiersz": w, "powod": "duplikat (ta sama data+kurier+punkt już istnieje)",
+            istniejace, roznice = _porownaj_z_istniejacym(
+                conn, w, kurier_id, punkt_id)
+            duplikaty.append({
+                "wiersz": w, "istniejace": istniejace, "roznice": roznice,
+                "powod": "duplikat (ta sama data+kurier+punkt już istnieje)",
             })
 
-    return {"zaimportowano": zaimportowano, "wymagajace_uwagi": wymagajace_uwagi}
+    return {"zaimportowano": zaimportowano, "wymagajace_uwagi": wymagajace_uwagi,
+            "duplikaty": duplikaty}
+
+
+# Pola porównywane przy duplikacie. Wyłącznie te, które człowiek WPISUJE -
+# metadane (uuid, autor, znaczniki czasu) różnią się zawsze i zasypałyby
+# raport szumem, w którym realna różnica ilości przepadłaby bez śladu.
+POLA_POROWNANIA = (
+    "ilosc_total", "ilosc_zpo", "ilosc_vinted", "ilosc_automaty",
+    "ilosc_kurier48", "ilosc_niezrealizowane",
+)
+
+
+def _porownaj_z_istniejacym(conn, wiersz, kurier_id, punkt_id):
+    """
+    Stan już zapisany + lista pól, którymi różni się od wiersza z pliku.
+
+    Bez tego użytkownik dostaje "odrzucono wiersz 3 jako duplikat" i nie
+    ma jak stwierdzić, KTÓRA wersja jest prawdziwa. Na realnym sierpniu
+    19 z 30 powtórzeń różniło się liczbami, a maksymalna odległość
+    między nimi wynosiła 3431 wierszy - czyli był to ten sam odbiór
+    wpisany przez dwie osoby w dwóch częściach sklejonego arkusza, a nie
+    kopiuj-wklej.
+    """
+    istniejacy = conn.execute(
+        "SELECT " + ", ".join(POLA_POROWNANIA)
+        + " FROM transakcje WHERE data = ? AND kurier_id = ? AND punkt_id = ?",
+        (wiersz.data.isoformat(), kurier_id, punkt_id),
+    ).fetchone()
+    if istniejacy is None:
+        return {}, []
+
+    istniejace = {p: istniejacy[i] for i, p in enumerate(POLA_POROWNANIA)}
+    roznice = [p for p in POLA_POROWNANIA
+               if istniejace[p] != getattr(wiersz, p, None)]
+    return istniejace, roznice

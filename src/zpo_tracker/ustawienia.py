@@ -81,3 +81,20 @@ def czy_tryb_testowy(dane_ustawien=None) -> bool:
     if isinstance(wartosc, bool):
         return wartosc
     return TRYB_TESTOWY_DOMYSLNIE
+
+
+# Zapisywanie pliku "znalezione duplikaty" przy imporcie. Domyślnie
+# WŁĄCZONE: plik powstaje wyłącznie wtedy, gdy duplikaty faktycznie są,
+# więc nie zaśmieca katalogu - a jego brak przy wyłączonej opcji znaczy
+# tyle, że użytkownik nie dowie się o wierszach, które nie weszły.
+# Cisza jest tu gorsza od nadmiaru.
+KLUCZ_ZAPISU_DUPLIKATOW = "zapisuj_znalezione_duplikaty"
+
+
+def czy_zapisywac_duplikaty(dane_ustawien=None) -> bool:
+    """Jak `czy_tryb_testowy` - wartość spoza `true`/`false` wraca do
+    domyślnej zamiast wywracać import."""
+    wartosc = (dane_ustawien or {}).get(KLUCZ_ZAPISU_DUPLIKATOW)
+    if isinstance(wartosc, bool):
+        return wartosc
+    return True
