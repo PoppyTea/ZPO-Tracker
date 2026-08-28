@@ -407,6 +407,23 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   `zrodlo_miejscowosci` CELOWO nie — te należą do `dedukcja_miejscowosci`
   (`ZRODLO_*`), razem z kaskadą, która je nadaje. Dwa zestawy napisów na te
   same przypadki zamieniłyby tę kolumnę w coś, czego nie da się odpytać.
+- `porzadkowanie.py` (`0.1-alpha.5.0`) — narzędzie NA CZAS PRZEJŚCIOWY,
+  uruchamiane przez `python -m zpo_tracker.porzadkowanie plik.xlsx`.
+  Miesiące zaległości są sklejone z pracy kilku osób i ten sam odbiór
+  bywa wpisany dwa razy; dopóki nie zrobi tego auto-naprawa w potoku
+  importu, robi to jedno polecenie. **Źródło zostaje nietknięte** —
+  narzędzie działające na miesiącu rozliczeń nie nadpisuje jedynej kopii.
+  Próg `PROG_BLISKOSCI = 10` wzięty z POMIARU na realnym sierpniu:
+  odległości między powtórzeniami to `1..9`, potem przerwa i `11..3431`.
+  Poniżej progu to jeden blok arkusza (ktoś rozbił odbiór na dwa
+  wiersze) — scalamy i SUMUJEMY ilości. Powyżej to dwie osoby wpisujące
+  w dwóch częściach pliku — automat NIE rozstrzyga, oba wiersze zostają
+  oznaczone do decyzji. Nazw firm NIE RUSZA: dwie pisownie to dwa różne
+  punkty, a ich scalanie jest osobną decyzją (aliasy).
+  **Kontrola sum jest częścią narzędzia, nie testu**: liczona z dwóch
+  NIEZALEŻNYCH odczytów, bo licząc ją na jednej liście mutowanej
+  w miejscu dostaje się fałszywy rozjazd (złapane na sobie). Niezgodność
+  daje kod wyjścia 1, żeby dało się ją wykryć bez czytania wydruku.
 - `podpowiedzi.py` — silnik podpowiedzi (`podpowiedz`,
   `najlepsza_podpowiedz`), źródło kandydatów wstrzykiwane, nie zaszyte.
 - `uzytkownicy.py` — tożsamość osoby wprowadzającej dane. `users.id` to
