@@ -19,6 +19,12 @@ reviews:
 
   review_status: true
 
+  # Zatwierdzenie PR przez CodeRabbita, gdy jego uwagi są rozwiązane.
+  # Tego sygnału używa automat Lineara „PR ready for merge” → status
+  # Merge Ready: kolejka PR-ów, które czekają już tylko na przeczytanie
+  # i merge przez Papavera.
+  request_changes_workflow: true
+
   path_instructions:
     - path: "src/zpo_tracker/**/*.py"
       instructions: >
