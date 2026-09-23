@@ -93,6 +93,15 @@ pip install -r requirements-dev.txt && pip install -e .
 pytest
 ```
 
+After editing `.coderabbit.yaml`, validate it against CodeRabbit's schema.
+An invalid file makes CodeRabbit silently fall back to defaults. This
+happened from 2026-08-23 to 2026-09-23 without anyone noticing:
+
+```
+curl -sL https://coderabbit.ai/integrations/schema.v2.json -o /tmp/cr.json
+uvx check-jsonschema --schemafile /tmp/cr.json .coderabbit.yaml
+```
+
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
