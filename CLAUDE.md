@@ -65,6 +65,12 @@ this file alone.
 
 ## Work Guidance
 
+- **The agent never pushes to `main`.** Every change goes through a
+  branch and a PR, however small. The agent acts under Papaver's GitHub
+  identity, which is on the `main-protection` ruleset's bypass list (kept so
+  Papaver can land trivial fixes directly). GitHub will therefore not stop
+  an agent push to `main`; this rule is the only guard. Direct pushes to
+  `main` are Papaver's call alone.
 - **Not deployed yet — every `0.1-alpha.x` is a pre-user phase.** The
   program is handed out for testing only; nobody keeps working data in it.
   Consequence for design: there is no installed base to protect. Concerns
