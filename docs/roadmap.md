@@ -4,7 +4,8 @@ Referencja dla `CLAUDE.md`.
 
 **Ten dokument nie jest harmonogramem.** Co i w jakiej kolejności — to
 milestones i issues projektu ZPO-Tracker w Linear
-(<https://linear.app/aid4u/project/zpo-tracker-07c6d93278dd/overview>).
+(<https://linear.app/poppy-tea/project/zpo-tracker-07c6d93278dd/overview>),
+a numery wersji — tagi w gicie (patrz `proces.md`).
 Tutaj zostaje to, czego milestone nie udźwignie: **dlaczego** akurat taka
 kolejność, jakie bramki muszą paść przed przejściem dalej i które zasady
 projektowe obowiązują niezależnie od wersji. Podział ról między Linear
@@ -26,6 +27,10 @@ pozwala.
 
 **Warunek przejścia:** program uznany za nadający się do użytku.
 Funkcjonalności mogą być podstawowe, ale muszą być.
+
+**Zdana** — od `v0.1.0-alpha.4` program działa na stanowisku w dziale
+(`.exe` budowany na miejscu). Filtr trzech pytań niżej obowiązuje dalej
+przy wyborze kolejnej pracy, bo pytania nie straciły sensu wraz z bramką.
 
 Filtr, przez który musi przejść każdy kandydat do `0.1-alpha.3.x`:
 

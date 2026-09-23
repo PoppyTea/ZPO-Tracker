@@ -5,9 +5,9 @@
 # reguły ani kontraktu tego projektu. Ten plik to naprawia.
 #
 # Uzupełniające źródła wiedzy o repo, których treści tutaj NIE duplikujemy:
-#   - docs/proces.md         — reguły recenzji R1-R3 i granice Linear <-> docs/
+#   - docs/proces.md         — reguły recenzji R1-R4 i granice Linear <-> docs/
 #   - **/AGENTS.md           — kontrakty DOX per podkatalog
-#   - Linear (team AID)      — jedyny rejestr zadań, projekt ZPO-Tracker
+#   - Linear (team ZPO)      — jedyny rejestr zadań, projekt ZPO-Tracker
 
 language: pl-PL
 
@@ -82,7 +82,7 @@ reviews:
         w docs/proces.md. Zgłaszaj każdą nową listę `- [ ]` odbijającą pracę
         do wykonania oraz tabele z kolumną Priorytet/Status opisujące
         pojedyncze zadania: jedynym rejestrem zadań jest Linear (reguła R3,
-        severity ERROR). Kotwica `(→ AID-XXX)` w tekście jest dozwolona.
+        severity ERROR). Kotwica `(→ ZPO-XXX)` w tekście jest dozwolona.
 
 tone_instructions: >
   Solo-projekt wewnętrzny, jeden maintainer, użytkownicy nietechniczni na
@@ -103,4 +103,5 @@ knowledge_base:
   linear:
     enabled: true
     team_keys:
+      - "ZPO"
       - "AID"

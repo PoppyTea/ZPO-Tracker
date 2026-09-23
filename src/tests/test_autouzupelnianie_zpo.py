@@ -1,5 +1,5 @@
 """
-Autouzupełnianie „w tym ZPO" z „Ilości" — AID-119, zgłoszone z testów
+Autouzupełnianie „w tym ZPO" z „Ilości" — ZPO-38, zgłoszone z testów
 na żywo build'a v0.1.0-alpha.4.1.
 
 Mechanizm istniał od 0.1-alpha.3.1 i był CAŁKOWICIE nieprzetestowany.

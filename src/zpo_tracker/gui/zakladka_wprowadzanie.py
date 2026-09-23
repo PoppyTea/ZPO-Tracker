@@ -92,7 +92,7 @@ class WierszWidget:
         self._ilosc_zpo_aktywne = False
         # Czy wartość w "w tym ZPO" pochodzi od CZŁOWIEKA. Do 0.1-alpha.4.1
         # rozpoznawaliśmy to po pustości pola - a to przestaje być prawdą
-        # w chwili, gdy autouzupełnienie zadziała pierwszy raz (AID-119).
+        # w chwili, gdy autouzupełnienie zadziała pierwszy raz (ZPO-38).
         # Pustość nie odróżnia "użytkownik jeszcze nie tknął" od "sami tu
         # przed chwilą wpisaliśmy", więc pochodzenie musi być śledzone,
         # a nie zgadywane z wartości.

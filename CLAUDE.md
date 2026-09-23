@@ -20,19 +20,25 @@ No other contributors yet.
 ## Local Contracts
 
 **Tasks live in Linear, never in this repo.** The ZPO-Tracker project
-(<https://linear.app/aid4u/project/zpo-tracker-07c6d93278dd/overview>,
-team `Aid4u`, key `AID`) is the single registry of work: issues, bugs,
-decisions to make, and version milestones. Do not create TODO lists,
-backlog files, or status tables anywhere in `docs/` — see `docs/proces.md`
-for the boundary and for the review rules that enforce it.
+(<https://linear.app/poppy-tea/project/zpo-tracker-07c6d93278dd/overview>,
+team `ZPO`, key `ZPO`) is the single registry of work: issues, bugs,
+decisions to make, and scope milestones. Version numbers live only in git
+tags. Drive Linear through the `linearis` CLI, not the Linear MCP. Linear
+is not a logbook: an issue answers "what must be done?" and has a closing
+condition; progress goes into comments, durable reasoning into `docs/`.
+Do not create TODO lists, backlog files, or status tables anywhere in
+`docs/` — see `docs/proces.md` for the issue hierarchy, the boundary, and
+review rules R1–R4.
 
 This file is intentionally an index, not a knowledge dump. Durable project
 knowledge lives in `docs/`, one topic per file:
 
 - `docs/proces.md` — where each kind of fact lives (Linear vs `docs/` vs
-  `AGENTS.md`), the conventions every new issue must satisfy (project +
-  assignee are mandatory), the no-state-in-docs rule, and review rules
-  R1–R3 that CodeRabbit reads via `.coderabbit.yaml`
+  `AGENTS.md` vs git tags), the three-level issue hierarchy (feature /
+  element / task) and who closes what, the conventions every new issue must
+  satisfy (team ZPO + project + assignee are mandatory), the
+  no-state-in-docs rule, and review rules R1–R4 that CodeRabbit reads via
+  `.coderabbit.yaml`
 - `docs/domain-model.md` — why this project exists, real column layout,
   and the specific findings from analyzing real source data (PNI ZPO
   reliability, conditional formatting caveats, template/blank rows, etc.)
@@ -44,7 +50,8 @@ knowledge lives in `docs/`, one topic per file:
   form), the "idiot-proof, not just non-technical" framing, validation
   approach, and what's still undecided about the suggestion engine
 - `docs/roadmap.md` — **not a schedule** (that's Linear milestones): the
-  gate that must be cleared before `0.1-alpha.4`, the lessons those gates
+  gate before `0.1-alpha.4` (passed) and its still-binding selection
+  filter, the lessons those gates
   grew out of, and the cross-version design rules that hold regardless of
   version; read before planning any multi-version work
 - `docs/normalization-v2.md` — proposed relational schema v2 and the two
@@ -89,8 +96,8 @@ pytest
 `uv sync --extra dev && uv run pytest` still works too (see
 `docs/environment.md` for why pip is now the documented default).
 
-972 tests are collected and 971 pass under the pip/system-Python setup
-above, with no skips (last run 2026-08-27, schema v4 + obsługa .xls). The one deselected test is
+1002 tests are collected and 1001 pass under the pip/system-Python setup
+above, with no skips (last run 2026-09-23). The one deselected test is
 marked `slow` — a scale check that imports tens of thousands of rows; run
 the fast set with `pytest -m "not slow"`. Coverage includes a real
 1294-row slice of source data, both import and export round-trip.

@@ -439,7 +439,7 @@ Warstwa logiki (bez GUI, w pełni testowalna bez display):
   Od `0.1-alpha.3.2` `wymaga_uzupelnienia` NIE sprawdza już `nr_kadrowy`
   (pracownicy jeszcze go nie mają — nie może blokować pierwszego
   uruchomienia; pole zostało w dialogu jako opcjonalne, przywrócenie
-  wymagalności to jedna linia, → AID-99).
+  wymagalności to jedna linia, → ZPO-18).
   **`login_rozszerzony`/`znajdz_konta_dla_loginu`** — konta Windows bywają
   współdzielone przez kilka osób na jednej stacji; login
   `DOMENA\login#Imię Nazwisko` daje im osobną tożsamość BEZ nowego
