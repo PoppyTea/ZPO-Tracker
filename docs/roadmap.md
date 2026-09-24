@@ -32,7 +32,7 @@ Funkcjonalności mogą być podstawowe, ale muszą być.
 (`.exe` budowany na miejscu). Filtr trzech pytań niżej obowiązuje dalej
 przy wyborze kolejnej pracy, bo pytania nie straciły sensu wraz z bramką.
 
-Filtr, przez który musi przejść każdy kandydat do `0.1-alpha.3.x`:
+Filtr, przez który musi przejść każdy kandydat do następnej pracy:
 
 1. Czy przybliża nas to do umożliwienia realnej pracy na programie?
 2. Czy pomaga powstrzymać wpływ skorumpowanych danych z wcześniejszych

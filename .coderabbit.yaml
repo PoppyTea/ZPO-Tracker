@@ -115,8 +115,10 @@ knowledge_base:
       - "**/AGENTS.md"
       - "CLAUDE.md"
       - "docs/proces.md"
+  # Świadomie wyłączone: repo jest publiczne, a CodeRabbit mógłby zacytować
+  # w komentarzu PR treść issue z wewnętrznymi nazwami hostów Poczty.
+  # Włączenie (`usage: enabled`) to decyzja Papavera, nie poprawka techniczna.
   linear:
-    enabled: true
+    usage: disabled
     team_keys:
       - "ZPO"
-      - "AID"
