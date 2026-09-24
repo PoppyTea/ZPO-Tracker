@@ -13,8 +13,6 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import openpyxl
-
 from zpo_tracker import arkusze, eksport, operacje, rejonarz, ustawienia
 from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
@@ -109,9 +107,13 @@ def _podsumowanie_wczytania(wczytane):
 
 
 def _wczytaj_surowe_wiersze(sciezka):
-    wb = openpyxl.load_workbook(sciezka, data_only=True)
-    ws = wb[wb.sheetnames[0]]
-    naglowki = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    # Przez `arkusze`, nie `openpyxl` wprost: miesiąc zapisany w starym
+    # Excelu (.xls) ma wejść tak samo jak .xlsx, łącznie z datami.
+    with arkusze.otworz(sciezka) as skoroszyt:
+        wiersze = list(skoroszyt.wiersze(skoroszyt.nazwy_arkuszy()[0]))
+    if not wiersze:
+        return []
+    naglowki = list(wiersze[0])
     # Numer wiersza doklejany od razu przy czytaniu - bez niego raport
     # odrzuconych mówi "71 wierszy wymagało uwagi" i nie da się z tym nic
     # zrobić. `_przemapuj` w orchestratorze filtruje po MAPA_NAGLOWKOW,
@@ -119,7 +121,7 @@ def _wczytaj_surowe_wiersze(sciezka):
     return [
         dict(zip(naglowki, wiersz),
              **{KLUCZ_NUMERU_WIERSZA: numer})
-        for numer, wiersz in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2)
+        for numer, wiersz in enumerate(wiersze[1:], start=2)
     ]
 
 

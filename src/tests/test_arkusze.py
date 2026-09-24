@@ -131,6 +131,34 @@ def test_pusty_arkusz_daje_pusty_iterator(plik_xls):
         assert list(sk.wiersze("Puste")) == []
 
 
+def test_data_w_xls_jest_data_jak_w_xlsx(tmp_path, plik_xlsx):
+    """W `.xls` data to liczba dni z formatem daty (np. 46237.0). Bez
+    przeliczenia miesiąc zapisany w starym Excelu dawał zamiast dat liczby,
+    a walidacja importu odrzucała każdy wiersz."""
+    import datetime as dt
+    wb = xlwt.Workbook()
+    ws = wb.add_sheet("Arkusz1")
+    ws.write(0, 0, "data")
+    ws.write(1, 0, dt.datetime(2026, 8, 3), xlwt.easyxf(num_format_str="YYYY-MM-DD"))
+    sciezka = tmp_path / "daty.xls"
+    wb.save(str(sciezka))
+    xlsx = plik_xlsx(arkusze_dane={"Arkusz1": [["data"], [dt.datetime(2026, 8, 3)]]})
+    with arkusze.otworz(sciezka) as sk_xls, arkusze.otworz(xlsx) as sk_xlsx:
+        assert list(sk_xls.wiersze("Arkusz1")) == list(sk_xlsx.wiersze("Arkusz1"))
+
+
+def test_pusta_komorka_to_none_w_obu_silnikach(plik_xls, plik_xlsx):
+    """`xlrd` oddaje pustą komórkę jako `''`, `openpyxl` jako `None`.
+    Konsument sprawdzający `is None` widziałby w `.xls` wartość tam,
+    gdzie jej nie ma."""
+    dane = {"Arkusz1": [["a", "b", "c"], [1, None, 3]]}
+    with arkusze.otworz(plik_xls(arkusze_dane={"Arkusz1": [["a", "b", "c"], [1, "", 3]]})) as sk:
+        z_xls = list(sk.wiersze("Arkusz1"))
+    with arkusze.otworz(plik_xlsx(arkusze_dane=dane)) as sk:
+        z_xlsx = list(sk.wiersze("Arkusz1"))
+    assert z_xls == z_xlsx == [("a", "b", "c"), (1, None, 3)]
+
+
 # --- pamięć: właściwe ryzyko przy 219 arkuszach -------------------------
 
 def test_arkusz_jest_zwalniany_po_przeczytaniu(plik_xls):
