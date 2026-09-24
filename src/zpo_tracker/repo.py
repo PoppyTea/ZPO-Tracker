@@ -43,6 +43,9 @@ def _resolve_schema_path(frozen=None, meipass=None):
 SCHEMA_PATH = _resolve_schema_path()
 
 # Musi być zgodna z `PRAGMA user_version` na końcu schema.sql - patrz tam.
+# Podbijamy WYŁĄCZNIE przy zmianie struktury (tabele, kolumny, więzy).
+# Naprawa danych wersji nie podbija - od tego jest `napraw_dane`, które
+# sprawdza stan, a nie numer.
 WERSJA_SCHEMATU = 4
 
 _licznik_savepointow = itertools.count()
