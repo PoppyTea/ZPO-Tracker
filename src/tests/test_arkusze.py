@@ -159,6 +159,34 @@ def test_pusta_komorka_to_none_w_obu_silnikach(plik_xls, plik_xlsx):
     assert z_xls == z_xlsx == [("a", "b", "c"), (1, None, 3)]
 
 
+def _komorka_xls(ctype, wartosc):
+    """Komórka `xlrd` bez pliku: xlwt nie umie zapisać komórki z błędem
+    ani samej godziny tak, jak robi to Excel."""
+    import xlrd
+    from xlrd.sheet import Cell
+    skoroszyt = arkusze._SkoroszytXls.__new__(arkusze._SkoroszytXls)
+    skoroszyt._wb = type("Wb", (), {"datemode": 0})()
+    return skoroszyt._komorka(Cell(ctype, wartosc))
+
+
+def test_komorka_z_bledem_excela_jest_tekstem_bledu_nie_liczba():
+    """W `.xls` błąd (#N/A, #DIV/0!) to KOD liczbowy (np. 42). Po
+    ujednoliceniu wyglądałby jak ilość i trafił do sum po cichu;
+    `openpyxl` oddaje w tym miejscu tekst błędu."""
+    import xlrd
+    assert _komorka_xls(xlrd.XL_CELL_ERROR, 0x2A) == "#N/A"
+    assert _komorka_xls(xlrd.XL_CELL_ERROR, 0x07) == "#DIV/0!"
+
+
+def test_sama_godzina_w_xls_jest_godzina_nie_data():
+    """Komórka z samą godziną to w `.xls` ułamek doby; bez rozróżnienia
+    wyszłaby data 1899-12-31. `openpyxl` oddaje `datetime.time`."""
+    import datetime as dt
+    import xlrd
+    assert _komorka_xls(xlrd.XL_CELL_DATE, 0.5) == dt.time(12, 0)
+    assert _komorka_xls(xlrd.XL_CELL_DATE, 46237.5) == dt.datetime(2026, 8, 3, 12, 0)
+
+
 # --- pamięć: właściwe ryzyko przy 219 arkuszach -------------------------
 
 def test_arkusz_jest_zwalniany_po_przeczytaniu(plik_xls):

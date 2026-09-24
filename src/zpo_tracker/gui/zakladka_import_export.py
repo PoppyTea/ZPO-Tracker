@@ -505,7 +505,10 @@ class ZakladkaImportExport(ttk.Frame):
         self.etykieta_export.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
     def importuj(self):
-        sciezka = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")])
+        # Oba formaty, jak przy imporcie rejonarza niżej: miesiąc bywa
+        # zapisany w starym Excelu, a `arkusze.otworz` czyta oba.
+        sciezka = filedialog.askopenfilename(
+            filetypes=[("Excel", "*.xlsx *.xls"), ("Wszystkie pliki", "*.*")])
         if not sciezka:
             return
         surowe = _wczytaj_surowe_wiersze(sciezka)

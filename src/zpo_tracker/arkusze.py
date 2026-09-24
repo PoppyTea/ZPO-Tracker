@@ -153,12 +153,21 @@ class _SkoroszytXls(_Skoroszyt):
 
     def _komorka(self, komorka):
         """Wartość komórki w postaci, jaką dałby `openpyxl`: data jako
-        `datetime`, pusta komórka jako `None`, liczba całkowita jako `int`."""
+        `datetime` (sama godzina jako `time`), pusta komórka jako `None`,
+        błąd Excela jako jego tekst, liczba całkowita jako `int`.
+
+        Błąd (`#N/A`, `#DIV/0!`) jest w `.xls` KODEM liczbowym. Bez
+        zamiany na tekst wyglądałby po ujednoliceniu jak zwykła ilość
+        i trafiłby do sum po cichu."""
         import xlrd
         if komorka.ctype == xlrd.XL_CELL_DATE:
-            return xlrd.xldate.xldate_as_datetime(komorka.value, self._wb.datemode)
+            wartosc = xlrd.xldate.xldate_as_datetime(komorka.value, self._wb.datemode)
+            # Ułamek doby bez części całkowitej to godzina, nie data z 1899.
+            return wartosc.time() if komorka.value < 1 else wartosc
         if komorka.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
             return None
+        if komorka.ctype == xlrd.XL_CELL_ERROR:
+            return xlrd.error_text_from_code.get(komorka.value, "#BŁĄD")
         return _ujednolic(komorka.value)
 
     def zwolnione(self):

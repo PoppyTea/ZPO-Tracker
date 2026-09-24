@@ -145,3 +145,48 @@ def test_porzadkowanie_xls_nie_zamienia_dat_na_liczby(tmp_path):
 
     daty = lambda p: [w[0] for w in _wynik(p)[1:]]
     assert daty(tmp_path / "wynik_xls.xlsx") == daty(tmp_path / "wynik_xlsx.xlsx")
+
+
+# --- okno wyboru pliku ----------------------------------------------------
+
+def _ma_display():
+    import subprocess
+    import sys
+    try:
+        wynik = subprocess.run(
+            [sys.executable, "-c",
+             "import tkinter as tk; r = tk.Tk(); tk.Entry(r).pack(); r.update(); r.destroy()"],
+            capture_output=True, timeout=10,
+        )
+        return wynik.returncode == 0
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _ma_display(), reason="wymaga środowiska graficznego (DISPLAY)")
+def test_okno_importu_pokazuje_pliki_xls(tmp_path, monkeypatch):
+    """Czytnik obsługuje .xls, ale bez filtra w oknie wyboru użytkownik nie
+    ma jak takiego pliku wskazać — import rejonarza obok ma oba formaty."""
+    import tkinter as tk
+
+    from zpo_tracker import repo
+    from zpo_tracker.gui import zakladka_import_export as zakladka_mod
+
+    podane = {}
+
+    def udawane_okno(**kwargs):
+        podane.update(kwargs)
+        return ""
+
+    monkeypatch.setattr(zakladka_mod.filedialog, "askopenfilename", udawane_okno)
+    root = tk.Tk()
+    conn = repo.polacz(":memory:")
+    repo.utworz_schemat(conn)
+    try:
+        zakladka_mod.ZakladkaImportExport(root, conn, tmp_path).importuj()
+    finally:
+        conn.close()
+        root.destroy()
+
+    wzorce = " ".join(w for _, w in podane["filetypes"])
+    assert "*.xls" in wzorce.split() and "*.xlsx" in wzorce.split()
