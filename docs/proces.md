@@ -2,58 +2,107 @@
 
 Referencja dla `CLAUDE.md`. Powstał 2026-08-23 razem z migracją zadań na
 Linear, żeby granica „co jest zadaniem, a co wiedzą" nie była rozstrzygana
-na wyczucie przy każdej sesji.
+na wyczucie przy każdej sesji. Przebudowany 2026-09-23, gdy Linear zaczął
+służyć za dziennik zamiast za rejestr zadań (hierarchia, R4).
 
 ## Linear jest jedynym rejestrem zadań
 
-Projekt **ZPO-Tracker** w workspace `aid4u` (team `Aid4u`, klucz `AID`):
-<https://linear.app/aid4u/project/zpo-tracker-07c6d93278dd/overview>
+Projekt **ZPO-Tracker**, zespół **ZPO** (klucz `ZPO`), workspace `poppy-tea`:
+<https://linear.app/poppy-tea/project/zpo-tracker-07c6d93278dd/overview>
 
 Zastępuje wszystkie wcześniejsze miejsca: `docs/backlog.md` (usunięty),
-checkboxy w `docs/roadmap.md` (usunięte), GitHub Issues (pięć otwartych
-zamkniętych z odesłaniem 2026-08-23). Powód jest prozaiczny: przy wielu
-rejestrach koszt zamknięcia **jednej** pozycji to edycja kilku plików, bo
-z góry nie wiadomo, w którym rejestrze dana pozycja żyje.
+checkboxy w `docs/roadmap.md` (usunięte), GitHub Issues (zamknięte
+z odesłaniem 2026-08-23). Powód jest prozaiczny: przy wielu rejestrach
+koszt zamknięcia **jednej** pozycji to edycja kilku plików, bo z góry nie
+wiadomo, w którym rejestrze dana pozycja żyje.
+
+Do 2026-09-23 issues żyły w zespole `Aid4u` (klucz `AID`); przeniesione
+dostały nowe numery `ZPO-xx`. Stare numery `AID-xx` zostają w historii
+commitów i nie są już rozpoznawane przez API — mapowania nie trzymamy,
+bo tytuł issue wystarcza do wyszukania.
+
+Agent obsługuje Linear przez CLI `linearis` (`linearis <domena> usage`),
+nie przez MCP. Działa na tokenie Papavera, więc każda akcja agenta
+wygląda w Linear jak jego własna.
 
 ### Każdy fakt ma jeden dom
 
 | Typ faktu | Dom | Dlaczego nie gdzie indziej |
 |---|---|---|
-| Zadanie, bug, dług techniczny | Linear (`AID-XXX`) | to jest dokładnie ten przypadek |
-| Decyzja do podjęcia | Linear, label `type/decision` | u nas decyzje realnie blokują konkretne wydania, więc muszą być widoczne w relacjach blokowania |
-| Kolejność wersji i ich zakres | Linear — milestones projektu | stan postępu, nie wiedza |
+| Zadanie, bug, dług techniczny | Linear (`ZPO-XXX`) | to jest dokładnie ten przypadek |
+| Decyzja do podjęcia | Linear, label `type/decision` | u nas decyzje realnie blokują konkretną pracę, więc muszą być widoczne w relacjach blokowania |
+| Zakres i kolejność prac | Linear — milestones projektu | stan postępu, nie wiedza |
+| Numer wersji, wydanie | tag w gicie + GitHub Release | wydanie to moment cięcia, nie praca do zaplanowania |
+| Postęp i ustalenia w trakcie pracy | komentarz w issue, którego dotyczą | patrz R4 |
 | Dlaczego akurat ta kolejność, bramki, reguły decyzyjne | `docs/roadmap.md` | wiedza trwała, nie odhacza się jej |
 | Model domenowy, schemat, środowisko, UX | pozostałe `docs/*.md` | jak wyżej |
 | Kontrakt kodu w danym podkatalogu | najbliższy `AGENTS.md` (DOX) | kontrakt lokalny, nie zdarzenie do zamknięcia |
 | Reguła recenzji kodu | ten plik, sekcja „Reguły recenzji" | kontrakt trwały, nie zdarzenie do zamknięcia |
 
-W tekście dokumentu wolno zostawić kotwicę `(→ AID-XXX)`. Tabela z kolumną
+W tekście dokumentu wolno zostawić kotwicę `(→ ZPO-XXX)`. Tabela z kolumną
 `Priorytet`/`Status` opisująca pojedyncze zadania — nie wolno, patrz R3.
+
+### Hierarchia
+
+Trzy poziomy issues pod milestone'em. Każdy odpowiada na inne pytanie,
+i to pytanie rozstrzyga, na którym poziomie coś ląduje:
+
+| Poziom | Pytanie | Jak się zamyka |
+|---|---|---|
+| Milestone | Co użytkownik dostaje, gdy ten zakres jest gotowy? | ręcznie; to sugestia, że warto wydać, nie obowiązek |
+| Funkcja | **Po co** to jest i po czym użytkownik pozna, że działa? | automatycznie, gdy zamkną się dzieci |
+| Element | **Jak** to działa — jaki mechanizm? | automatycznie; przez PR, jeśli nie ma dzieci |
+| Zadanie | **Co** konkretnie zrobić i jaki test to potwierdza? | tylko przez PR z zielonymi testami |
+
+- Głębokość to maksimum, nie wymóg. Zadanie wystarczająco małe wisi
+  bezpośrednio pod funkcją; funkcja z jednym dzieckiem to przerost formy —
+  wtedy zostaje samodzielnym issue.
+- Funkcja w opisie ma dwie sekcje: `## Po co` i `## Po czym poznać, że
+  działa`. Zadanie kończy się sekcją `## Warunek zamknięcia` nazywającą test.
+- **PR zamyka wyłącznie liście drzewa** (magiczne słowo `Fixes ZPO-XX`).
+  Opis PR wymienia testy, które potwierdzają zamknięcie, i krótko opisuje
+  te, których nazwa nie mówi wszystkiego albo które kryją niuans ważny dla
+  recenzenta. Rodziców zamyka Linear (ustawienie zespołu „auto-close parent
+  issues”).
+- **Praca poza kodem** — blokady organizacyjne (`type/org`: klucz API,
+  numery kadrowe, udział sieciowy) i decyzje (`type/decision`) — to
+  samodzielne issues bez rodzica, zamykane ręcznie komentarzem z wynikiem.
+  Ich wpływ na drzewo wyrażają relacje `blocks`, nie hierarchia.
+- **Bug z testów na żywo** (`src/live-testing`) trafia jako dziecko
+  funkcji, którą psuje; jeśli żadnej nie da się wskazać — do milestone'u
+  bez rodzica.
 
 ### Zakładanie issue — warunki konieczne
 
-Bez obu tych rzeczy issue jest praktycznie nie do odnalezienia, bo
-workspace `aid4u` obsługuje też inne, niepowiązane projekty:
+Bez tych trzech rzeczy issue jest praktycznie nie do odnalezienia, bo
+workspace obsługuje też inne, niepowiązane projekty:
 
-1. **Projekt = ZPO-Tracker.** Bez tego pozycja miesza się z innym projektem.
-2. **Assignee = Aleksander Fijołek.** Projekt ma jednego wykonawcę;
+1. **Zespół = ZPO.**
+2. **Projekt = ZPO-Tracker.** Bez tego pozycja miesza się z innym projektem.
+3. **Assignee = Aleksander Fijołek.** Projekt ma jednego wykonawcę;
    nieprzypisane issue wypada z jego widoków.
+
+Issues zaimportowane z GitHub Issues (synchronizacja jednokierunkowa
+GitHub → Linear) trzeba przy pierwszym kontakcie sprawdzić pod tym kątem:
+uzupełnić brakujący projekt i assignee i wpiąć je w drzewo. Kierunek jest
+jednokierunkowy celowo — repo jest publiczne, a issues w Linear mogą
+zawierać wewnętrzne nazwy hostów i opisy systemów Poczty.
 
 Poza tym:
 
-- **Milestone**, jeśli pozycja należy do konkretnej wersji. Brak milestone'u
-  znaczy „nieprzypisane do wydania", i to jest poprawny, świadomy stan —
+- **Milestone**, jeśli pozycja należy do konkretnego zakresu. Brak
+  milestone'u znaczy „nieprzypisane”, i to jest poprawny, świadomy stan —
   nie brak do uzupełnienia.
 - **Relacje `blocks` / `blocked by`** wszędzie, gdzie realnie istnieją. To
   nie kosmetyka: bez nich milestone wygląda na gotowy do wzięcia, choć
   czeka na rozpoznanie albo na decyzję. Osobno zakładamy też blokady
-  **organizacyjne** (klucz API, przydzielenie numerów kadrowych), żeby było
-  widać, że przestój nie jest techniczny.
+  **organizacyjne**, żeby było widać, że przestój nie jest techniczny.
 - **Relacja `related`** tam, gdzie rzeczy robi się razem, ale jedna nie
   wymaga drugiej.
-- **Labele**: `type/*` zawsze; `area/*` wg dotkniętego obszaru;
-  `needs-verification` dla rozpoznania, które trzeba wykonać w świecie,
-  nie w kodzie.
+- **Etykiety** (zespołowe, nie organizacji): `type/*` zawsze; `area/*` wg
+  dotkniętego obszaru programu; `src/*`, gdy zgłoszenie ma szczególne
+  źródło; `needs-verification` dla rozpoznania, które trzeba wykonać
+  w świecie, nie w kodzie.
 
 ## Zero stanu w `docs/`
 
@@ -78,8 +127,8 @@ Nie → `docs/`.
 
 ## Reguły recenzji
 
-Przeniesione 2026-08-23 z projektu `aid4u` (`strategy/rules/`), gdzie
-powstały i zostały wypróbowane. Numeracja lokalna — tamtejsza nie ma tu
+R1–R3 przeniesione 2026-08-23 z projektu `aid4u` (`strategy/rules/`),
+gdzie powstały i zostały wypróbowane; R4 jest lokalna. Numeracja lokalna — tamtejsza nie ma tu
 sensu, bo większość tamtych reguł dotyczy `httpx`, `tenacity` i pętli
 agentowej, których w tym projekcie nie ma.
 
@@ -141,7 +190,34 @@ rejestrem" wyżej.
 **Wzorzec wykrywany:** nowy plik `.md` z tabelą albo listą zawierającą
 kolumnę `Priorytet`/`Status`/`TODO` opisującą stan pojedynczych zadań lub
 defektów, a także listy `- [ ]` odbijające pracę do wykonania. Poza
-dozwolonymi wyjątkami: kotwica `(→ AID-XXX)` w tekście istniejącego
+dozwolonymi wyjątkami: kotwica `(→ ZPO-XXX)` w tekście istniejącego
 dokumentu, generyczne kryteria wyjścia z procedury.
 
 Zgłoszenie jest informacyjne — recenzja nie usuwa pliku sama.
+
+### R4 — Linear nie jest dziennikiem (`ERROR`)
+
+Ramię egzekucyjne sekcji „Hierarchia”. Powstała, bo bez niej Linear
+zamienił się w zapis wszystkiego, co zauważono po drodze: issues
+z tytułami-stwierdzeniami, bez warunku zamknięcia, których nikt nigdy
+nie odhaczy.
+
+**Issue odpowiada na pytanie „co trzeba zrobić?” i ma warunek zamknięcia.**
+Wpis, który odpowiada na „co się stało?”, „co się zmieniło?”, „co
+ustaliliśmy?” albo „co zauważyłem?”, nie jest nowym issue:
+
+- postęp i ustalenia dotyczące istniejącej pracy → komentarz w tym issue;
+- wiedza trwała (dlaczego tak, co rozważaliśmy i odrzuciliśmy) → `docs/`,
+  a issue najwyżej do niej linkuje; uzasadnienie zostawione w komentarzu
+  zamkniętego issue ginie razem z nim;
+- obserwacja, z której nic nie wynika do zrobienia, nie trafia nigdzie.
+
+**Test tytułu:** tytuł mówi, co ma powstać albo działać („Obsłużyć `.xls`
+z rejonarza”), a nie co stwierdzono („Eksport ma inny kształt, niż zakłada
+importer”). Bug może w tytule opisywać objaw, ale jego opis kończy się
+oczekiwanym zachowaniem.
+
+**Wzorzec wykrywany w recenzji:** nowe issue lub komentarz w PR, który
+zakłada w Linear pozycję bez warunku zamknięcia albo z tytułem-
+stwierdzeniem; zmiana tytułu istniejącego issue na relację z przebiegu
+prac.

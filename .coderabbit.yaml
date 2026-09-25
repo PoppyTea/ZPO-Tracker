@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 # Konfiguracja CodeRabbita dla zpo-tracker (2026-08-23).
 #
 # Do tej pory repo nie miało tego pliku w ogóle — CodeRabbit recenzował PR-y
@@ -5,9 +6,9 @@
 # reguły ani kontraktu tego projektu. Ten plik to naprawia.
 #
 # Uzupełniające źródła wiedzy o repo, których treści tutaj NIE duplikujemy:
-#   - docs/proces.md         — reguły recenzji R1-R3 i granice Linear <-> docs/
+#   - docs/proces.md         — reguły recenzji R1-R4 i granice Linear <-> docs/
 #   - **/AGENTS.md           — kontrakty DOX per podkatalog
-#   - Linear (team AID)      — jedyny rejestr zadań, projekt ZPO-Tracker
+#   - Linear (team ZPO)      — jedyny rejestr zadań, projekt ZPO-Tracker
 
 language: pl-PL
 
@@ -18,6 +19,12 @@ reviews:
 
   review_status: true
 
+  # Zatwierdzenie PR przez CodeRabbita, gdy jego uwagi są rozwiązane.
+  # Tego sygnału używa automat Lineara „PR ready for merge” → status
+  # Merge Ready: kolejka PR-ów, które czekają już tylko na przeczytanie
+  # i merge przez Papavera.
+  request_changes_workflow: true
+
   path_instructions:
     - path: "src/zpo_tracker/**/*.py"
       instructions: >
@@ -26,6 +33,16 @@ reviews:
         produkcyjny bez towarzyszącego testu zgłaszaj zawsze, nawet gdy zmiana
         wygląda na trywialną. Wyjątek: czyste definicje schematu/konfiguracji
         (DDL w schema.sql) nie wymagają testu.
+        Priorytet recenzji: poprawność i trwałość danych rozliczeniowych oraz
+        odporność na błąd nietechnicznego użytkownika. Nie proponuj abstrakcji
+        "na przyszłość" ani warstw serwisowych.
+
+    - path: "pyproject.toml"
+      instructions: >
+        Program działa w pełni offline na zablokowanych maszynach Windows bez
+        uprawnień administratora. Zależności produkcyjne są świadomie dwie
+        (openpyxl, pydantic) plus xlrd do odczytu .xls; każdą nową zależność
+        produkcyjną zgłaszaj jako wymagającą uzasadnienia.
 
     - path: "src/zpo_tracker/repo.py"
       instructions: >
@@ -82,16 +99,14 @@ reviews:
         w docs/proces.md. Zgłaszaj każdą nową listę `- [ ]` odbijającą pracę
         do wykonania oraz tabele z kolumną Priorytet/Status opisujące
         pojedyncze zadania: jedynym rejestrem zadań jest Linear (reguła R3,
-        severity ERROR). Kotwica `(→ AID-XXX)` w tekście jest dozwolona.
+        severity ERROR). Kotwica `(→ ZPO-XXX)` w tekście jest dozwolona.
 
+# Limit CodeRabbita: maks. 250 znaków. Tylko ton — reguły merytoryczne
+# idą do path_instructions albo do plików z knowledge_base.
 tone_instructions: >
-  Solo-projekt wewnętrzny, jeden maintainer, użytkownicy nietechniczni na
-  zablokowanych maszynach Windows bez uprawnień administratora. Priorytet:
-  poprawność i trwałość danych rozliczeniowych oraz odporność interfejsu na
-  błąd użytkownika. Nie proponuj abstrakcji "na przyszłość", warstw
-  serwisowych ani zależności zewnętrznych — projekt ma świadomie dwie
-  zależności produkcyjne (openpyxl, pydantic) i musi działać w pełni offline.
-  Realne bugi, ciche awarie i utrata danych zawsze ważne.
+  Rzeczowo i zwięźle, po polsku. Solo-projekt jednego maintainera: zgłaszaj
+  realne bugi, ciche awarie i ryzyko utraty danych; drobiazgi stylu pomijaj
+  albo zbieraj w jednym komentarzu.
 
 knowledge_base:
   code_guidelines:
@@ -100,7 +115,10 @@ knowledge_base:
       - "**/AGENTS.md"
       - "CLAUDE.md"
       - "docs/proces.md"
+  # Świadomie wyłączone: repo jest publiczne, a CodeRabbit mógłby zacytować
+  # w komentarzu PR treść issue z wewnętrznymi nazwami hostów Poczty.
+  # Włączenie (`usage: enabled`) to decyzja Papavera, nie poprawka techniczna.
   linear:
-    enabled: true
+    usage: disabled
     team_keys:
-      - "AID"
+      - "ZPO"

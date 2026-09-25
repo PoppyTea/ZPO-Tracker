@@ -9,7 +9,7 @@ Referencja dla `CLAUDE.md`.
   (stąd OneDrive/SharePoint działają, ale nic poza tym)
 - **Wyjątek: `github.com` jest częściowo dostępny** — warto to wykorzystać.
   Czy obejmuje to pobieranie artefaktów z Releases, jest niesprawdzone
-  i bramkuje strategię aktualizacji (→ AID-107)
+  i bramkuje strategię aktualizacji (→ ZPO-26)
 - VBA zablokowane (teoretycznie odblokowywalne przez IT, ale proces
   uzyskiwania pozwoleń w firmie jest na tyle kulawy, że wolimy tego unikać)
 - Power Apps: zablokowany dostęp do wymaganych adresów proxy
