@@ -511,7 +511,14 @@ class ZakladkaImportExport(ttk.Frame):
             filetypes=[("Excel", "*.xlsx *.xls"), ("Wszystkie pliki", "*.*")])
         if not sciezka:
             return
-        surowe = _wczytaj_surowe_wiersze(sciezka)
+        try:
+            surowe = _wczytaj_surowe_wiersze(sciezka)
+        except arkusze.NieznanyFormat as e:
+            # „Wszystkie pliki” pozwala wskazać coś, co arkuszem nie jest;
+            # wyjątek z callbacku Tk byłby w buildzie bez konsoli niewidoczny.
+            messagebox.showerror("Nie rozpoznano pliku", str(e), parent=self)
+            self.etykieta_import.configure(text="Nie wczytano - patrz komunikat.")
+            return
         zwalidowane, odrzucone = zwaliduj_wiersze(surowe)
         if not zwalidowane and not odrzucone:
             self.etykieta_import.configure(text="Brak wierszy do zaimportowania w tym pliku.")

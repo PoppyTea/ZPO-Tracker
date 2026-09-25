@@ -190,3 +190,35 @@ def test_okno_importu_pokazuje_pliki_xls(tmp_path, monkeypatch):
 
     wzorce = " ".join(w for _, w in podane["filetypes"])
     assert "*.xls" in wzorce.split() and "*.xlsx" in wzorce.split()
+
+
+@pytest.mark.skipif(not _ma_display(), reason="wymaga środowiska graficznego (DISPLAY)")
+def test_plik_ktory_nie_jest_arkuszem_daje_komunikat_nie_wyjatek(tmp_path, monkeypatch):
+    """„Wszystkie pliki” pozwala wskazać np. stronę logowania zapisaną przez
+    przeglądarkę. Nieobsłużony wyjątek z callbacku Tk jest w buildzie
+    `console=False` niewidoczny — użytkownik ma dostać komunikat, jak przy
+    imporcie rejonarza."""
+    import tkinter as tk
+
+    from zpo_tracker import repo
+    from zpo_tracker.gui import zakladka_import_export as zakladka_mod
+
+    nie_arkusz = tmp_path / "logowanie.xlsx"
+    nie_arkusz.write_text("<html>zaloguj się</html>", encoding="utf-8")
+    bledy = []
+    monkeypatch.setattr(zakladka_mod.filedialog, "askopenfilename", lambda **_: str(nie_arkusz))
+    monkeypatch.setattr(zakladka_mod.messagebox, "showerror",
+                        lambda tytul, tresc, **_: bledy.append((tytul, tresc)))
+    root = tk.Tk()
+    conn = repo.polacz(":memory:")
+    repo.utworz_schemat(conn)
+    try:
+        zakladka = zakladka_mod.ZakladkaImportExport(root, conn, tmp_path)
+        zakladka.importuj()
+        etykieta = zakladka.etykieta_import.cget("text")
+    finally:
+        conn.close()
+        root.destroy()
+
+    assert len(bledy) == 1 and "logowanie.xlsx" in bledy[0][1]
+    assert "Nie wczytano" in etykieta
