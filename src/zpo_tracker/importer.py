@@ -306,20 +306,21 @@ def znajdz_lub_utworz_punkt_niezaufany(conn, nadawca, adres, *, szukaj=None,
     nasza własna baza), a jej semantyka nie może dryfować razem z regułami
     zaufania importu.
 
-    Trzy gałęzie, w tej kolejności:
+    Dwie gałęzie, w tej kolejności:
 
     1. dokładne (nadawca, adres) po DOWOLNYM punkcie - także takim, który
        MA już PNI. To rozwiązuje pułapkę predykatu `AND pni_zpo IS NULL`
        z `get_or_create_punkt`: bez tego wiersz o adresie znanym nam już
        jako punkt ZPO tworzyłby drugi punkt tej samej fizycznej lokalizacji.
-    2. dokładnie JEDEN punkt pod tym adresem, choć nadawca się nie zgadza -
-       podpinamy się do niego, ale człowiek musi się dowiedzieć (najczęściej
-       to inna pisownia tej samej firmy).
-    3. wiele punktów pod adresem i żaden nie pasuje nadawcą - NOWY punkt bez
-       PNI + ostrzeżenie. Świadomie NIE wybieramy żadnego z istniejących:
-       reguła projektu mówi, że adres z wieloma nadawcami nigdy nie
-       rozstrzyga się sam (dedukcja.py), a duplikat punktu jest naprawialny
-       (Słowniki/scalanie), ciche podpięcie pod zły punkt - nie.
+    2. brak dokładnego dopasowania - NOWY punkt bez PNI; jeśli pod adresem
+       są już punkty innych nadawców, dodatkowo ostrzeżenie. Świadomie NIE
+       podpinamy do istniejącego punktu, nawet gdy jest tylko JEDEN: pod
+       jednym adresem realnie stoją różne firmy (centra handlowe, kilka
+       banków w budynku), a podpięcie przypisywało transakcje cudzej
+       firmie i zamieniało je w „duplikaty” (ZPO-60: 76 wierszy na realnym
+       sierpniu). Duplikat punktu - gdy to jednak ta sama firma w innej
+       pisowni - jest naprawialny w Słownikach, ciche podpięcie pod zły
+       punkt nie.
     """
     ostrzezenia = []
     dokladny = conn.execute(
@@ -339,18 +340,12 @@ def znajdz_lub_utworz_punkt_niezaufany(conn, nadawca, adres, *, szukaj=None,
            WHERE a.surowy = ?""",
         (adres,),
     ).fetchall()
-    if len(pod_adresem) == 1:
+    if pod_adresem:
+        inni = ", ".join(f"'{nazwa}'" for _, nazwa in pod_adresem)
         ostrzezenia.append(
-            f"Adres '{adres}' jest już zapisany dla nadawcy "
-            f"'{pod_adresem[0][1]}', a plik podaje '{nadawca}' - podpięto do "
-            f"istniejącego punktu, sprawdź, czy to ta sama firma."
-        )
-        return pod_adresem[0][0], ostrzezenia
-    if len(pod_adresem) > 1:
-        ostrzezenia.append(
-            f"Pod adresem '{adres}' istnieje już {len(pod_adresem)} punktów, "
-            f"żaden dla nadawcy '{nadawca}' - utworzono nowy punkt zamiast "
-            f"zgadywać, do którego podpiąć."
+            f"Pod adresem '{adres}' są już punkty nadawców {inni}, a plik "
+            f"podaje '{nadawca}' - utworzono dla niego osobny punkt. Jeśli to "
+            f"ta sama firma zapisana inaczej, scal nadawców w Słownikach."
         )
 
     # Nadawca z niezaufanego pliku NIE dostaje `liczy_zpo` - PNI z takiego

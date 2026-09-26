@@ -42,7 +42,7 @@ def _surowy(**nadpisz):
     return dane
 
 
-# --- znajdz_lub_utworz_punkt_niezaufany: trzy gałęzie ---
+# --- znajdz_lub_utworz_punkt_niezaufany: dwie gałęzie ---
 
 def test_dokladne_dopasowanie_nadawcy_i_adresu_podpina_istniejacy(conn):
     id_istniejacy, _ = get_or_create_punkt(conn, "Żabka", "Odkryta 24", None)
@@ -65,15 +65,39 @@ def test_dokladne_dopasowanie_dziala_takze_dla_punktu_Z_PNI(conn):
     assert conn.execute("SELECT COUNT(*) FROM punkty").fetchone()[0] == 1
 
 
-def test_jeden_punkt_pod_adresem_innego_nadawcy_podpina_z_ostrzezeniem(conn):
+def test_jeden_punkt_pod_adresem_innego_nadawcy_tworzy_nowy_z_ostrzezeniem(conn):
+    # ZPO-60: pod jednym adresem realnie stoją różne firmy (centra handlowe,
+    # kilka banków w jednym budynku). Podpięcie do jedynego istniejącego
+    # punktu przypisywało transakcje cudzej firmie. Duplikat punktu (gdy to
+    # jednak ta sama firma w innej pisowni) jest naprawialny w Słownikach,
+    # ciche złe podpięcie nie — ta sama reguła co w gałęzi 3.
     id_istniejacy, _ = get_or_create_punkt(conn, "Żabka", "Odkryta 24", "228648")
 
-    id_znaleziony, ostrzezenia = znajdz_lub_utworz_punkt_niezaufany(
-        conn, "Zabka", "Odkryta 24")  # inna pisownia nadawcy
+    id_nowy, ostrzezenia = znajdz_lub_utworz_punkt_niezaufany(
+        conn, "Rossmann", "Odkryta 24")
 
-    assert id_znaleziony == id_istniejacy
+    assert id_nowy != id_istniejacy
+    assert conn.execute("SELECT COUNT(*) FROM punkty").fetchone()[0] == 2
+    assert conn.execute(
+        "SELECT pni_zpo FROM punkty WHERE id = ?", (id_nowy,)).fetchone()[0] is None
     assert len(ostrzezenia) == 1
-    assert "Zabka" in ostrzezenia[0]
+    assert "Rossmann" in ostrzezenia[0] and "Żabka" in ostrzezenia[0]
+
+
+def test_dwie_firmy_pod_jednym_adresem_tego_samego_dnia_obie_wchodza_do_bazy(conn):
+    # Skutek ZPO-60 w imporcie: ten sam kurier, ten sam dzień, jeden adres,
+    # dwie firmy. Przy podpięciu do wspólnego punktu druga transakcja
+    # kolidowała z pierwszą na UNIQUE(data, kurier, punkt) i przepadała
+    # jako „duplikat” (na realnym sierpniu: 76 wierszy).
+    wiersze = [_surowy(), _surowy(**{" Pełna Nazwa Nadawcy": "Rossmann"})]
+    zwalidowane, odrzucone = zwaliduj_wiersze(wiersze)
+    assert not odrzucone
+
+    wynik = zaimportuj(conn, zwalidowane)
+
+    assert wynik["zaimportowano"] == 2
+    assert not [u for u in wynik["wymagajace_uwagi"] if "duplikat" in u["powod"].lower()]
+    assert conn.execute("SELECT COUNT(*) FROM transakcje").fetchone()[0] == 2
 
 
 def test_wiele_punktow_pod_adresem_bez_dopasowania_tworzy_nowy_z_ostrzezeniem(conn):
