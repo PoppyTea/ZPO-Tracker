@@ -80,3 +80,5 @@ src/tests/                  # testy pytest
 demo/                       # prototypy UX (throwaway, nie produkcja)
 data/                       # (gitignored poza README.md) realne eksporty do pracy lokalnej
 ```
+#### Stworzone z użyciem:
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/PoppyTea/ZPO-Tracker?utm_source=oss&utm_medium=github&utm_campaign=PoppyTea%2FZPO-Tracker&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
