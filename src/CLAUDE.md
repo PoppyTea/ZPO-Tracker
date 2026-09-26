@@ -1,7 +1,7 @@
 # src
 
-Pakiet `zpo_tracker` (`src/zpo_tracker/`, warstwa logiki + `gui/` w
-tkinterze) i jego testy (`src/tests/`).
+Pakiet `zpo_tracker` (`src/zpo_tracker/`, w tym `gui/`) i jego testy
+(`src/tests/`).
 
 ## Local Contracts
 
