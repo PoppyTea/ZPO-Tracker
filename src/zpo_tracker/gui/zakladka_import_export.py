@@ -13,8 +13,6 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-import openpyxl
-
 from zpo_tracker import arkusze, eksport, operacje, rejonarz, ustawienia
 from zpo_tracker.gui.roznice import segmenty_roznicy
 from zpo_tracker.import_orchestrator import (
@@ -109,9 +107,13 @@ def _podsumowanie_wczytania(wczytane):
 
 
 def _wczytaj_surowe_wiersze(sciezka):
-    wb = openpyxl.load_workbook(sciezka, data_only=True)
-    ws = wb[wb.sheetnames[0]]
-    naglowki = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    # Przez `arkusze`, nie `openpyxl` wprost: miesiąc zapisany w starym
+    # Excelu (.xls) ma wejść tak samo jak .xlsx, łącznie z datami.
+    with arkusze.otworz(sciezka) as skoroszyt:
+        wiersze = list(skoroszyt.wiersze(skoroszyt.nazwy_arkuszy()[0]))
+    if not wiersze:
+        return []
+    naglowki = list(wiersze[0])
     # Numer wiersza doklejany od razu przy czytaniu - bez niego raport
     # odrzuconych mówi "71 wierszy wymagało uwagi" i nie da się z tym nic
     # zrobić. `_przemapuj` w orchestratorze filtruje po MAPA_NAGLOWKOW,
@@ -119,7 +121,7 @@ def _wczytaj_surowe_wiersze(sciezka):
     return [
         dict(zip(naglowki, wiersz),
              **{KLUCZ_NUMERU_WIERSZA: numer})
-        for numer, wiersz in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2)
+        for numer, wiersz in enumerate(wiersze[1:], start=2)
     ]
 
 
@@ -503,10 +505,20 @@ class ZakladkaImportExport(ttk.Frame):
         self.etykieta_export.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
     def importuj(self):
-        sciezka = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")])
+        # Oba formaty, jak przy imporcie rejonarza niżej: miesiąc bywa
+        # zapisany w starym Excelu, a `arkusze.otworz` czyta oba.
+        sciezka = filedialog.askopenfilename(
+            filetypes=[("Excel", "*.xlsx *.xls"), ("Wszystkie pliki", "*.*")])
         if not sciezka:
             return
-        surowe = _wczytaj_surowe_wiersze(sciezka)
+        try:
+            surowe = _wczytaj_surowe_wiersze(sciezka)
+        except arkusze.NieznanyFormat as e:
+            # „Wszystkie pliki” pozwala wskazać coś, co arkuszem nie jest;
+            # wyjątek z callbacku Tk byłby w buildzie bez konsoli niewidoczny.
+            messagebox.showerror("Nie rozpoznano pliku", str(e), parent=self)
+            self.etykieta_import.configure(text="Nie wczytano - patrz komunikat.")
+            return
         zwalidowane, odrzucone = zwaliduj_wiersze(surowe)
         if not zwalidowane and not odrzucone:
             self.etykieta_import.configure(text="Brak wierszy do zaimportowania w tym pliku.")

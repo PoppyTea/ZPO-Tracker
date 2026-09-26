@@ -36,6 +36,8 @@ from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, PatternFill
 
+from zpo_tracker import arkusze
+
 # Próg "blisko/daleko" w wierszach - patrz docstring modułu.
 PROG_BLISKOSCI = 10
 
@@ -106,11 +108,14 @@ def porzadkuj(zrodlo, wynik, prog=PROG_BLISKOSCI, arkusz=None) -> Raport:
     właśnie błędzie dałem się złapać przy pierwszym przebiegu i wynik
     wyglądał na rozjechany, choć dane były poprawne.
     """
-    wb = openpyxl.load_workbook(zrodlo, data_only=True)
-    ws = wb[arkusz] if arkusz else wb[wb.sheetnames[0]]
-    naglowki = [c.value for c in next(ws.iter_rows(min_row=1, max_row=1))]
+    # Przez `arkusze`, nie `openpyxl` wprost: zaległy miesiąc bywa zapisany
+    # w starym Excelu (.xls), a jego daty mają trafić do wyniku jako daty.
+    with arkusze.otworz(zrodlo) as skoroszyt:
+        tytul = arkusz or skoroszyt.nazwy_arkuszy()[0]
+        wszystkie = list(skoroszyt.wiersze(tytul))
+    naglowki = list(wszystkie[0]) if wszystkie else []
     indeks = {n: i for i, n in enumerate(naglowki) if n}
-    oryginalne = [list(r) for r in ws.iter_rows(min_row=2, values_only=True)]
+    oryginalne = [list(r) for r in wszystkie[1:]]
     sumy_przed = _sumy(oryginalne, naglowki)
 
     dane = [list(r) for r in oryginalne]      # kopia do modyfikacji
@@ -153,7 +158,7 @@ def porzadkuj(zrodlo, wynik, prog=PROG_BLISKOSCI, arkusz=None) -> Raport:
     raport.sumy = {n: (sumy_przed[n], sumy_po.get(n, 0)) for n in sumy_przed}
     raport.sumy_zgodne = all(a == b for a, b in raport.sumy.values())
 
-    _zapisz(wynik, ws.title, naglowki, koncowe,
+    _zapisz(wynik, tytul, naglowki, koncowe,
             [uwagi.get(i, "") for i in range(len(dane)) if i not in do_usuniecia])
     return raport
 

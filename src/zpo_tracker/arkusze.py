@@ -14,9 +14,15 @@ deklaracją użytkownika, magiczne bajty są faktem.
 
 **Oba silniki oddają te same wartości.** `xlrd` zwraca każdą liczbę jako
 `float`, więc numer domu `8` przychodzi jako `8.0` i po sklejeniu klucza
-daje `"8.0"` - czyli inny adres niż `"8"`. Ujednolicenie siedzi tutaj,
-żeby żaden konsument nie musiał o tym pamiętać; pamiętanie o takiej
-rzeczy w pięciu miejscach kończy się zapomnieniem w szóstym.
+daje `"8.0"` - czyli inny adres niż `"8"`. Tak samo z datą (w `.xls` to
+liczba dni, np. `46237.0`, rozpoznawana tylko po formacie komórki) i z
+pustą komórką (`xlrd` daje `''`, `openpyxl` - `None`). Ujednolicenie
+siedzi tutaj, żeby żaden konsument nie musiał o tym pamiętać; pamiętanie
+o takiej rzeczy w pięciu miejscach kończy się zapomnieniem w szóstym.
+
+Stąd reguła dla całego repo: **każdy nowy odczyt skoroszytu idzie przez
+`otworz`**, nie przez `openpyxl` czy `xlrd` wprost - inaczej `.xls`
+przestaje działać albo działa inaczej niż `.xlsx`.
 """
 from pathlib import Path
 
@@ -41,10 +47,26 @@ def otworz(sciezka):
     with open(sciezka, "rb") as f:
         naglowek = f.read(8)
 
-    if naglowek.startswith(_OLE2):
-        return _SkoroszytXls(sciezka)
-    if naglowek.startswith(_ZIP):
-        return _SkoroszytXlsx(sciezka)
+    klasa = (_SkoroszytXls if naglowek.startswith(_OLE2)
+             else _SkoroszytXlsx if naglowek.startswith(_ZIP) else None)
+    if klasa is not None:
+        try:
+            return klasa(sciezka)
+        except OSError:
+            # Brak dostępu (plik otwarty w Excelu na Windowsie) to nie
+            # „uszkodzony plik” — ten komunikat wprowadzałby w błąd.
+            raise
+        except Exception as blad:
+            # Magiczne bajty się zgadzają, a środek nie: zwykły ZIP (ten sam
+            # nagłówek co .xlsx), urwane pobieranie. Każdy silnik rzuca wtedy
+            # własny wyjątek (KeyError, BadZipFile, CompDocError, XLRDError),
+            # którego konsumenci nie znają — tłumaczymy go TUTAJ na jeden,
+            # żeby żadne okno nie musiało łapać ogólnych wyjątków.
+            raise NieznanyFormat(
+                f"Plik {sciezka.name} wygląda na arkusz Excela, ale nie da się go "
+                f"odczytać - może być uszkodzony albo niepełny. Otwórz go w "
+                f"Excelu i zapisz ponownie."
+            ) from blad
     raise NieznanyFormat(
         f"Plik {sciezka.name} nie jest arkuszem Excela (ani .xls, ani .xlsx). "
         f"Sprawdź, czy to na pewno eksport, a nie np. strona logowania "
@@ -136,7 +158,7 @@ class _SkoroszytXls(_Skoroszyt):
         arkusz = self._wb.sheet_by_name(nazwa)
         try:
             for i in range(arkusz.nrows):
-                yield tuple(_ujednolic(w) for w in arkusz.row_values(i))
+                yield tuple(self._komorka(k) for k in arkusz.row(i))
         finally:
             # W `finally`, bo konsument bywa leniwy i może przerwać
             # iterację w połowie (np. `break` po znalezieniu nagłówka) -
@@ -144,6 +166,25 @@ class _SkoroszytXls(_Skoroszyt):
             self._wb.unload_sheet(nazwa)
             if nazwa not in self._zwolnione:
                 self._zwolnione.append(nazwa)
+
+    def _komorka(self, komorka):
+        """Wartość komórki w postaci, jaką dałby `openpyxl`: data jako
+        `datetime` (sama godzina jako `time`), pusta komórka jako `None`,
+        błąd Excela jako jego tekst, liczba całkowita jako `int`.
+
+        Błąd (`#N/A`, `#DIV/0!`) jest w `.xls` KODEM liczbowym. Bez
+        zamiany na tekst wyglądałby po ujednoliceniu jak zwykła ilość
+        i trafiłby do sum po cichu."""
+        import xlrd
+        if komorka.ctype == xlrd.XL_CELL_DATE:
+            wartosc = xlrd.xldate.xldate_as_datetime(komorka.value, self._wb.datemode)
+            # Ułamek doby bez części całkowitej to godzina, nie data z 1899.
+            return wartosc.time() if komorka.value < 1 else wartosc
+        if komorka.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+            return None
+        if komorka.ctype == xlrd.XL_CELL_ERROR:
+            return xlrd.error_text_from_code.get(komorka.value, "#BŁĄD")
+        return _ujednolic(komorka.value)
 
     def zwolnione(self):
         return list(self._zwolnione)
