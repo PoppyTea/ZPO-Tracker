@@ -188,6 +188,10 @@ def zaimportuj(conn, zwalidowane, mapowanie_scalen=None, *, zaufany=False,
     `sesja_uuid`/`zrodlo` - dotąd wiersze z importu były "drugiej kategorii"
     względem formularza (bez tożsamości niezależnej od klucza naturalnego,
     bez atrybucji).
+
+    `zrodlo` jest WYPROWADZANE z `zaufany` i nie może stać się osobnym
+    parametrem: inaczej dałoby się zapisać `'import_zaufany'` dla pliku,
+    któremu nie ufamy.
     """
     mapowanie_scalen = mapowanie_scalen or {}
     teraz = teraz or datetime.now().isoformat(timespec="seconds")

@@ -8,7 +8,15 @@ from zpo_tracker.models import Blankiet, WierszBlankietu
 
 
 def wiersz_pusty(surowy):
-    """Pusty wiersz-placeholder (np. niewypełniony dodatkowy wiersz)."""
+    """
+    Pusty wiersz-placeholder (np. niewypełniony dodatkowy wiersz).
+
+    WSPÓLNY predykat: `zbuduj_blankiet` i selektywne czyszczenie siatki po
+    zapisie (`zakladka_wprowadzanie`) muszą filtrować właśnie nim. Wyniki
+    `repo.zapisz_blankiet` są indeksowo równoległe do wierszy niepustych,
+    więc dwa różne predykaty rozjechałyby indeksy i wyczyściły nie te
+    wiersze.
+    """
     return not (surowy.get("nadawca") or "").strip() and not (surowy.get("adres") or "").strip()
 
 
