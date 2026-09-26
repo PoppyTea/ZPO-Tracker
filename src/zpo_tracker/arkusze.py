@@ -47,10 +47,26 @@ def otworz(sciezka):
     with open(sciezka, "rb") as f:
         naglowek = f.read(8)
 
-    if naglowek.startswith(_OLE2):
-        return _SkoroszytXls(sciezka)
-    if naglowek.startswith(_ZIP):
-        return _SkoroszytXlsx(sciezka)
+    klasa = (_SkoroszytXls if naglowek.startswith(_OLE2)
+             else _SkoroszytXlsx if naglowek.startswith(_ZIP) else None)
+    if klasa is not None:
+        try:
+            return klasa(sciezka)
+        except OSError:
+            # Brak dostępu (plik otwarty w Excelu na Windowsie) to nie
+            # „uszkodzony plik” — ten komunikat wprowadzałby w błąd.
+            raise
+        except Exception as blad:
+            # Magiczne bajty się zgadzają, a środek nie: zwykły ZIP (ten sam
+            # nagłówek co .xlsx), urwane pobieranie. Każdy silnik rzuca wtedy
+            # własny wyjątek (KeyError, BadZipFile, CompDocError, XLRDError),
+            # którego konsumenci nie znają — tłumaczymy go TUTAJ na jeden,
+            # żeby żadne okno nie musiało łapać ogólnych wyjątków.
+            raise NieznanyFormat(
+                f"Plik {sciezka.name} wygląda na arkusz Excela, ale nie da się go "
+                f"odczytać - może być uszkodzony albo niepełny. Otwórz go w "
+                f"Excelu i zapisz ponownie."
+            ) from blad
     raise NieznanyFormat(
         f"Plik {sciezka.name} nie jest arkuszem Excela (ani .xls, ani .xlsx). "
         f"Sprawdź, czy to na pewno eksport, a nie np. strona logowania "

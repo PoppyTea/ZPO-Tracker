@@ -106,6 +106,27 @@ def test_plik_ktory_nie_jest_arkuszem_daje_czytelny_blad(tmp_path):
     assert "notatka.xlsx" in str(e.value)
 
 
+def test_zwykly_zip_daje_czytelny_blad_nie_keyerror(tmp_path):
+    """ZIP ma te same magiczne bajty co .xlsx. Bez przełożenia openpyxl
+    rzuca KeyError o [Content_Types].xml — wyjątek, którego żaden
+    konsument nie łapie i który nic użytkownikowi nie mówi."""
+    import zipfile
+    sciezka = tmp_path / "paczka.xlsx"
+    with zipfile.ZipFile(sciezka, "w") as z:
+        z.writestr("notatka.txt", "to nie jest arkusz")
+    with pytest.raises(arkusze.NieznanyFormat, match="paczka.xlsx"):
+        arkusze.otworz(sciezka)
+
+
+def test_uszkodzony_xls_daje_czytelny_blad(tmp_path):
+    """Nagłówek OLE2 się zgadza, reszta to śmieci (np. urwane pobieranie):
+    xlrd rzuca własny CompDocError zamiast NieznanyFormat."""
+    sciezka = tmp_path / "urwany.xls"
+    sciezka.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"smieci" * 100)
+    with pytest.raises(arkusze.NieznanyFormat, match="urwany.xls"):
+        arkusze.otworz(sciezka)
+
+
 # --- ujednolicenie wartości --------------------------------------------
 
 def test_liczba_calkowita_jest_intem_w_obu_silnikach(plik_xls, plik_xlsx):
