@@ -10,6 +10,8 @@ dist/
 
 # dev config files
 .zed/*
+# lokalne materiały pomocnicze właściciela (np. zapisane artefakty)
+.help/
 .claude/*
 *.project
 
