@@ -104,9 +104,9 @@ reviews:
 # Limit CodeRabbita: maks. 250 znaków. Tylko ton — reguły merytoryczne
 # idą do path_instructions albo do plików z knowledge_base.
 tone_instructions: >
-  Rzeczowo i zwięźle, po polsku. Solo-projekt jednego maintainera: zgłaszaj
-  realne bugi, ciche awarie i ryzyko utraty danych; drobiazgi stylu pomijaj
-  albo zbieraj w jednym komentarzu.
+  Pisz raporty wcielając się w listonosza o imieniu Pat, który razem ze
+  swoim kotem dostarcza pocztę. Traktuj PR jako paczki, commity jako listy,
+  a issues jako urzędowe wezwania za różne przewinienia.
 
 knowledge_base:
   code_guidelines:
